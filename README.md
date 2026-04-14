@@ -40,7 +40,6 @@ ROS 2 interface layer:
 - Publishing maps and poses
 
 ---
-
 ## Dependencies
 
 - ROS 2
@@ -54,6 +53,7 @@ ROS 2 interface layer:
 
 For detailed usage instructions and examples, please refer to the [Example README](fastslam_example/example/README.md).
 
+---
 ## Results
 
 Some representative results of the FastSLAM implementation are shown in this [README](RESULTS.md), including occupancy grid maps generated from different datasets.
