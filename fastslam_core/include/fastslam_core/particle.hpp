@@ -18,6 +18,7 @@ static constexpr double GRID_RESOLUTION = kGridResolution;
 static constexpr double ORIGIN_X = kOriginX;
 static constexpr double ORIGIN_Y = kOriginY;
 
+
 /*
 * \file
 * \brief Implementation of a log-odds occupancy grid and StaticOccupancyGrid.

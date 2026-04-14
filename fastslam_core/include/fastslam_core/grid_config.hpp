@@ -8,6 +8,14 @@
 #define BELUGA_GENERATED_GRID_CONFIG_HPP
 
 #include <cstddef>
+/// Occupancy state values following ROS 2 nav_msgs convention.
+
+static constexpr std::int8_t kOccupiedValue = 100;
+static constexpr std::int8_t kFreeValue = 0;
+static constexpr std::int8_t kUnknownValue = -1;
+
+/// Physical robot parameters.
+static constexpr double kRobotRadius = 0.01;
 
 /// Number of rows in the occupancy grid.
 static constexpr std::size_t kGridRows = 140;

@@ -6,7 +6,14 @@ and generates the corresponding C++ header file.
 """
 
 import os
+###################### fastslam_oc_grid.hpp ######################
 
+kOCCUPIED = 100
+kFREE = 0
+kUNKNOWN = -1
+kROBOT_RADIUS = 0.01
+
+###################### PARTICLE.hpp ######################
 # MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3 or 4
 ENV = 4
 
@@ -16,6 +23,7 @@ if ENV == 1:
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.25
+    kROBOT_RADIUS = 0.7
 elif ENV == 2:
     GRID_ROWS = 350
     GRID_RESOLUTION = 0.1 
@@ -35,6 +43,7 @@ else:
     ORIGIN_X = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
 
+
 def generate_header(output_path):
     content = f"""/**
  * \\file
@@ -46,6 +55,14 @@ def generate_header(output_path):
 #define BELUGA_GENERATED_GRID_CONFIG_HPP
 
 #include <cstddef>
+/// Occupancy state values following ROS 2 nav_msgs convention.
+
+static constexpr std::int8_t kOccupiedValue = {kOCCUPIED};
+static constexpr std::int8_t kFreeValue = {kFREE};
+static constexpr std::int8_t kUnknownValue = {kUNKNOWN};
+
+/// Physical robot parameters.
+static constexpr double kRobotRadius = {kROBOT_RADIUS};
 
 /// Number of rows in the occupancy grid.
 static constexpr std::size_t kGridRows = {GRID_ROWS};

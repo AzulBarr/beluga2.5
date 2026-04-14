@@ -28,10 +28,12 @@
 #include <beluga/primitives.hpp>
 #include <beluga/views/elements.hpp>
 
-#define OCUPADO 100
-#define LIBRE 0
-#define DESCONOCIDO -1
-#define ROBOT_RADIUS 0.01
+#include "fastslam_core/grid_config.hpp"
+
+const int OCCUPPIED = kOccupiedValue;
+const int FREE = kFreeValue;
+const int UNKNOWN = kUnknownValue;
+const double ROBOT_RADIUS = kRobotRadius;
 
 #define TIMER_START(name) auto name##_start = std::chrono::high_resolution_clock::now();
 #define TIMER_END(name) auto name##_end = std::chrono::high_resolution_clock::now(); \
@@ -297,10 +299,10 @@ public:
 
         for (size_t i = 0; i < lo_data.size(); ++i) {
             if (std::abs(lo_data[i]) < 0.01f) {
-                oc_data[i] = DESCONOCIDO; 
+                oc_data[i] = UNKNOWN; 
             } else {
                 float p = 1.0f / (1.0f + std::exp(-lo_data[i]));
-                oc_data[i] = (p > OCCUPIED_THRESH) ? OCUPADO : (p < FREE_THRESH ? LIBRE : DESCONOCIDO);
+                oc_data[i] = (p > OCCUPIED_THRESH) ? OCCUPPIED : (p < FREE_THRESH ? FREE : UNKNOWN);
             }
         }
         return oc_grid;

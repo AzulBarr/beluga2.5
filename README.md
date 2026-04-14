@@ -54,8 +54,18 @@ ROS 2 interface layer:
 
 For detailed usage instructions and examples, please refer to the [Example README](fastslam_example/example/README.md).
 
----
+## Results
 
+Some representative results of the FastSLAM implementation are shown in this [README](RESULTS.md), including occupancy grid maps generated from different datasets.
+
+---
+## Bibliography
+
+The theoretical foundations of this project are primarily based on the book *Probabilistic Robotics* by :contentReference[oaicite:0]{index=0}, :contentReference[oaicite:1]{index=1}, and :contentReference[oaicite:2]{index=2}.
+
+All models, assumptions, and algorithmic approaches (including FastSLAM, motion models, and sensor models) follow the formulations presented in this reference.
+
+---
 ## Acknowledgments
 
 This project is inspired by and builds upon the ideas and design of the Beluga 2.0 library:
