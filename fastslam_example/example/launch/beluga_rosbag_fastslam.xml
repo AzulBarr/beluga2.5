@@ -9,6 +9,9 @@
   <include file="$(find-pkg-share fastslam_node)/launch/fastslam_oc_grid.launch.py">
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
     <arg name="launch_prefix" value="$(var slam_prefix)"/>
+    <arg name="odom_frame" value="odom"/>
+    <arg name="base_frame" value="base"/>
+    <arg name="scan_topic" value="/scan"/>
   </include>
 
   <!-- 2. RViz2 -->

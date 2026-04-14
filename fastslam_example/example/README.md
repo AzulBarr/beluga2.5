@@ -1,18 +1,39 @@
-# How to use
-1. **Run the node using a ROS bag**.
+# Usage
+## Run the node using any ROS bag
+1. **Build the packages and open RViz**.
 
-    For ROS 2 distributions, in two separate terminals run:
+    For ROS 2 distributions, in three separate terminals run:
     ```bash
-    cd /ros2_ws
+    cd ~/ros2_ws
     source /opt/ros/jazzy/setup.bash
-    colcon build --packages-select fastslam_core fastslam_node
+    colcon build --packages-select fastslam_core fastslam_node fastslam_example
+    source install/setup.bash
+    rviz2
+    ```
+2. **Launch the fastslam node**.
+
+    ```bash
+    cd ~/ros2_ws
+    source /opt/ros/jazzy/setup.bash
     source install/setup.bash
     ros2 launch fastslam_node fastslam_oc_grid.launch.py
     ```
 
+3. **Play the ros bag**.
     ```bash
-    cd /ros2_ws
+    cd ~/ros2_ws/bag_files
     source /opt/ros/jazzy/setup.bash
-    source install/setup.bash
-    rviz2
+    ros2 bag play ros2_bag --clock
     ```
+
+## Run an example using a Beluga ROS bag.
+    ```bash
+    cd ~/ros2_ws
+    source /opt/ros/jazzy/setup.bash
+    colcon build --packages-select fastslam_core fastslam_node fastslam_example
+    source install/setup.bash
+    ros2 launch fastslam_example beluga_rosbag_fastslam.xml
+    ```
+
+## Configuration
+Modify the config.py file located in [fastslam_core/config/grid_config.py](../../fastslam_core/config/grid_config.py) to decide the size and resolution of the map.

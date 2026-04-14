@@ -10,11 +10,13 @@
 #include <beluga/sensor/data/occupancy_grid.hpp>
 #include <beluga/primitives.hpp>
 
-static constexpr std::size_t GRID_ROWS = 300;
-static constexpr std::size_t GRID_COLS = GRID_ROWS;
-static constexpr double GRID_RESOLUTION = 0.10;
-static constexpr double ORIGIN_X = - static_cast<double>(GRID_COLS) * GRID_RESOLUTION * 0.375;
-static constexpr double ORIGIN_Y = - static_cast<double>(GRID_COLS) * GRID_RESOLUTION * 0.75;
+#include "fastslam_core/grid_config.hpp"
+
+static constexpr std::size_t GRID_ROWS = kGridRows;
+static constexpr std::size_t GRID_COLS = kGridCols;
+static constexpr double GRID_RESOLUTION = kGridResolution;
+static constexpr double ORIGIN_X = kOriginX;
+static constexpr double ORIGIN_Y = kOriginY;
 
 /*
 * \file
