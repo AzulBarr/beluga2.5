@@ -63,7 +63,7 @@ Some representative results of the FastSLAM implementation are shown in this [RE
 
 The theoretical foundations of this project are primarily based on the book **Probabilistic Robotics** by Sebastian Thrun, Wolfram Burgard, and Dieter Fox.
 
-All models, assumptions, and algorithmic approaches (including FastSLAM, motion models, and sensor models) follow the formulations presented in this reference.
+All models, assumptions, and algorithmic approaches (including FastSLAM, motion models, and sensor models) follow the formulations presented in this book.
 
 ---
 ## Acknowledgments
