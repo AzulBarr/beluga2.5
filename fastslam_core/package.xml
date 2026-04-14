@@ -2,13 +2,12 @@
 <package format="3">
   <name>fastslam_core</name>
   <version>0.1.0</version>
-  <description>Core FastSLAM 2.0 logic (no ROS dependencies)</description>
+  <description>Core FastSLAM logic</description>
   <maintainer email="azul@todo.todo">azul</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- Dependencias C++ estándar -->
   <depend>eigen3</depend>
   <depend>sophus</depend>
   <test_depend>ament_cmake_gtest</test_depend>
