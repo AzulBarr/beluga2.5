@@ -1,0 +1,26 @@
+<launch>
+  <!-- Argumentos configurables desde terminal -->
+  <arg name="use_sim_time" default="true" />
+  <arg name="bag_path" default="/home/azul/ros2_ws/src/fastslam_oc_grid/fastslam_example/bags/beluga_rosbag" />
+  <arg name="slam_prefix" default="" /> <!-- Aquí entrará el profiler -->
+  <arg name="rviz_config_file" default="$(find-pkg-share fastslam_example)/RVIZFiles/config2MIT.rviz"/>
+
+  <!-- 1. Incluimos el launch de tu nodo principal -->
+  <include file="$(find-pkg-share fastslam_node)/launch/fastslam_oc_grid.launch.py">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="launch_prefix" value="$(var slam_prefix)"/>
+  </include>
+
+  <!-- 2. RViz2 -->
+  <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(var rviz_config_file)">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <!-- 3. Reproducir la Bag si se pasó la ruta -->
+  <group if="$(eval '\'$(var bag_path)\' != \'\'')">
+    <executable 
+      cmd="ros2 bag play $(var bag_path) --clock" 
+      output="screen"
+      on_exit="shutdown" />
+  </group>
+</launch>

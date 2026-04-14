@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fastslam_example</name>
+  <version>0.0.1</version>
+  <description>Ejemplos y herramientas de profiling para FastSLAM</description>
+  <maintainer email="azul@todo.com">azul</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Dependencias de ejecución para que el launch encuentre los otros paquetes -->
+  <exec_depend>fastslam_node</exec_depend>
+  <exec_depend>fastslam_core</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

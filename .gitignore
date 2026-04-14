@@ -1,0 +1,6 @@
+*.bag
+*.db3
+perf.data
+.vscode/
+install/
+log/

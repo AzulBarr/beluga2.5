@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
+def main():
+    # 1. Rutas de archivos
+    perf_data = "perf.data"
+    flamegraph_dir = "/opt/FlameGraph" # Donde clonamos el repo
+    
+    if not os.path.exists(perf_data):
+        print(f"Error: No se encuentra el archivo '{perf_data}'.")
+        print("Asegurate de haber corrido primero el comando de profiling.")
+        sys.exit(1)
+
+    if not os.path.exists(flamegraph_dir):
+        print(f"Error: No se encuentran las herramientas en {flamegraph_dir}")
+        print("Instalalas con: git clone https://github.com/brendangregg/FlameGraph.git ~")
+        sys.exit(1)
+
+    print("--- Generando FlameGraph (esto puede tardar) ---")
+
+    try:
+        # 2. perf script > out.perf
+        print("[1/3] Extrayendo datos de perf...")
+        with open("out.perf", "w") as out_perf:
+            subprocess.run(["perf", "script", "-i", perf_data], stdout=out_perf, check=True)
+
+        # 3. stackcollapse-perf.pl out.perf > out.folded
+        print("[2/3] Colapsando stacks...")
+        with open("out.folded", "w") as out_folded:
+            subprocess.run([os.path.join(flamegraph_dir, "stackcollapse-perf.pl"), "out.perf"], 
+                           stdout=out_folded, check=True)
+
+        # 4. flamegraph.pl out.folded > flamegraph.svg
+        print("[3/3] Generando imagen SVG...")
+        with open("flamegraph.svg", "w") as out_svg:
+            subprocess.run([os.path.join(flamegraph_dir, "flamegraph.pl"), "out.folded"], 
+                           stdout=out_svg, check=True)
+
+        # Limpiar archivos temporales
+        os.remove("out.perf")
+        os.remove("out.folded")
+
+        print(f"\n--- [ÉXITO] FlameGraph generado: {os.getcwd()}/flamegraph.svg ---")
+        print("Abrilo con tu navegador (Firefox/Chrome) para verlo.")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error durante el proceso: {e}")
+    except Exception as e:
+        print(f"Error inesperado: {e}")
+
+if __name__ == '__main__':
+    main()
