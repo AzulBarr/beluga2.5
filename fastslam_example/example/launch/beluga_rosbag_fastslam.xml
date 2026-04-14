@@ -12,6 +12,7 @@
     <arg name="odom_frame" value="odom"/>
     <arg name="base_frame" value="base"/>
     <arg name="scan_topic" value="/scan"/>
+    <arg name="num_particles" value="800"/>
   </include>
 
   <!-- 2. RViz2 -->

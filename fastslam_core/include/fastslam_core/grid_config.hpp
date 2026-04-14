@@ -10,13 +10,13 @@
 #include <cstddef>
 
 /// Number of rows in the occupancy grid.
-static constexpr std::size_t kGridRows = 700;
+static constexpr std::size_t kGridRows = 140;
 
 /// Number of columns in the occupancy grid.
-static constexpr std::size_t kGridCols = 700;
+static constexpr std::size_t kGridCols = 140;
 
 /// Grid resolution in meters per cell.
-static constexpr double kGridResolution = 0.01;
+static constexpr double kGridResolution = 0.05;
 
 /// X-coordinate of the grid origin in the map frame.
 static constexpr double kOriginX = -3.5;

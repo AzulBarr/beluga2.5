@@ -6,10 +6,10 @@ from launch.actions import DeclareLaunchArgument
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    declare_fastslam_prefix_cmd = DeclareLaunchArgument(
-        'fastslam_prefix',
-        default_value='',
-        description='Set of commands to precede the node (e.g. "valgrind" or "gdb")'
+    declare_num_particles = DeclareLaunchArgument(
+        'num_particles',
+        default_value='500',
+        description='Number of particles for FastSLAM'
     )
 
     declare_odom_frame_cmd = DeclareLaunchArgument(
@@ -41,7 +41,7 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "use_sim_time": True,
-            "num_particles": 500,
+            "num_particles": LaunchConfiguration('num_particles'),
             "odom_frame": LaunchConfiguration('odom_frame'), 
             "base_frame": LaunchConfiguration('base_frame'), 
             "publish_trajectory": False,
@@ -56,5 +56,6 @@ def generate_launch_description():
     declare_odom_frame_cmd,
     declare_base_frame_cmd,
     declare_scan_topic_cmd,
+    declare_num_particles,
     fastslam_node,
     ])

@@ -8,7 +8,7 @@ and generates the corresponding C++ header file.
 import os
 
 # MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3
-ENV = 3
+ENV = 4
 
 if ENV == 1:
     GRID_ROWS = 300
@@ -22,13 +22,18 @@ elif ENV == 2:
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_COLS) * GRID_RESOLUTION * 0.375
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
-else:
+elif ENV == 3:
     GRID_ROWS = 700
     GRID_RESOLUTION = 0.01 
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
-
+else: 
+    GRID_ROWS = 140
+    GRID_RESOLUTION = 0.05
+    GRID_COLS = GRID_ROWS
+    ORIGIN_X = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
+    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
 
 def generate_header(output_path):
     content = f"""/**
