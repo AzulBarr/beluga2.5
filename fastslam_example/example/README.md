@@ -1,8 +1,8 @@
 # Usage
 ## Run the node using any ROS bag
+    For ROS 2 distributions, in three separate terminals run:
 1. **Build the packages and open RViz**.
 
-    For ROS 2 distributions, in three separate terminals run:
     ```bash
     cd ~/ros2_ws
     source /opt/ros/jazzy/setup.bash
@@ -10,6 +10,7 @@
     source install/setup.bash
     rviz2
     ```
+
 2. **Launch the fastslam node**.
 
     ```bash
@@ -20,6 +21,19 @@
     ```
 
 3. **Play the ros bag**.
+
+    ```bash
+    cd ~/ros2_ws/bag_files
+    source /opt/ros/jazzy/setup.bash
+    ros2 bag play ros2_bag --clock
+    ```
+
+### Add this Arguments for the Beluga ROS bag:
+
+    ```bash
+    ros2 launch fastslam_node fastslam_oc_grid.launch.py num_particles:=800 base_frame:=base odom_frame:=odom scan_topic:=/scan
+    ```
+
     ```bash
     cd ~/ros2_ws/bag_files
     source /opt/ros/jazzy/setup.bash
@@ -27,6 +41,7 @@
     ```
 
 ## Run an example using a Beluga ROS bag.
+
     ```bash
     cd ~/ros2_ws
     source /opt/ros/jazzy/setup.bash

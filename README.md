@@ -50,6 +50,11 @@ ROS 2 interface layer:
 - Beluga library
 
 ---
+## Usage Instructions
+
+For detailed usage instructions and examples, please refer to the [Example README](fastslam_example/example/README.md).
+
+---
 
 ## Acknowledgments
 

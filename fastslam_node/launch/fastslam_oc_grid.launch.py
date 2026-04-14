@@ -14,12 +14,14 @@ def generate_launch_description():
 
     declare_odom_frame_cmd = DeclareLaunchArgument(
         'odom_frame',
-        default_value='odom_combined'
+        default_value='odom_combined',
+        description='Odometry frame for FastSLAM (e.g., odom, odom_combined)'
     )
 
     declare_base_frame_cmd =DeclareLaunchArgument(
         'base_frame',
-        default_value='base_footprint'
+        default_value='base_footprint',
+        description='Base frame for FastSLAM (e.g., base_footprint, base_link)'
     )
 
     declare_slam_prefix_cmd = DeclareLaunchArgument(
