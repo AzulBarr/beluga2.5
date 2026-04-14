@@ -7,7 +7,7 @@ and generates the corresponding C++ header file.
 
 import os
 
-# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3
+# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3 or 4
 ENV = 4
 
 if ENV == 1:

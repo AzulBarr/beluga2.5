@@ -16,6 +16,6 @@
 <div style="display: flex; justify-content: center; gap: 20px;">
   <div>
     <img src="docs/images/map_intel_500.png" width="300"/>
-    <p align="center">Intel Lab</p>
+    <p align="center">Intel Lab with 500 particles</p>
   </div>
 </div>
