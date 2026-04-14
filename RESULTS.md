@@ -16,6 +16,10 @@
 <div style="display: flex; justify-content: center; gap: 20px;">
   <div>
     <img src="docs/images/map_intel_500.png" width="300"/>
-    <p align="center">Intel Lab with 500 particles</p>
+    <p align="center">Intel Lab with 500 particles and cell size of 10 cm</p>
+  </div>
+  <div>
+    <img src="docs/images/map_beluga_800.png" width="300"/>
+    <p align="center">Beluga ROS bag with 800 particles and cell size of 5 cm</p>
   </div>
 </div>
