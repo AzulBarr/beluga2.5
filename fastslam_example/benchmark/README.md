@@ -27,8 +27,7 @@ A flamegraph is a convenient tool for understanding how CPU time is being used.
 - https://www.brendangregg.com/perf.html
 - https://github.com/Ekumen-OS/beluga/tree/main/beluga_benchmark
 
-[FastSLAM Flamegraph](docs/images/flamegraph.svg)
+## Profiling (Flamegraph)
 
-<p align="center">
-  <img src="docs/images/flamegraph.svg" width="400" alt="Diagrama de arquitectura">
-</p>
+[FastSLAM Flamegraph](../../docs/images/flamegraph.svg)
+
