@@ -244,7 +244,7 @@ void FastSLAMNode::save_map() {
     }
 
     cv::imwrite("final_map.png", map_img);
-    RCLCPP_WARN(this->get_logger(), "Map saved successfully as PNG.");
+    RCLCPP_INFO(this->get_logger(), "Map saved successfully as PNG.");
 }
 
 void FastSLAMNode::save_trajectory() {

@@ -87,7 +87,7 @@ for N in "$@"; do
     cd "$FOLDER"
 
     # Prefijo de tiempo
-    TIME_PREFIX="/usr/bin/time -v -o time_stats.txt --append"
+    TIME_PREFIX="/usr/bin/time -v -o time_stats.txt"
 
     # LANZAMIENTO
     script -qefc "$TIME_PREFIX ros2 launch $PACKAGE_NAME $LAUNCH_FILE \
