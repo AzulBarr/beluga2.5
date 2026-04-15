@@ -47,6 +47,7 @@ def generate_launch_description():
             "odom_frame": LaunchConfiguration('odom_frame'), 
             "base_frame": LaunchConfiguration('base_frame'), 
             "publish_trajectory": False,
+            "save_map": True,
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
         arguments=["--ros-args", "--log-level", "WARN"],

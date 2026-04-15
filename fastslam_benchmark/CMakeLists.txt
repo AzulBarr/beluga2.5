@@ -4,19 +4,25 @@ project(fastslam_benchmark)
 find_package(ament_cmake REQUIRED)
 
 install(DIRECTORY 
-  benchmark
+  benchmarking
+  profiling
   RVIZFiles
   DESTINATION share/${PROJECT_NAME}
 )
 
 install(PROGRAMS
-  benchmark/profile_fastslam_with_bagfile.py
+  profiling/profile_fastslam_with_bagfile.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME profile_fastslam_with_bagfile
 )
 
 install(PROGRAMS
-  benchmark/flamegraph
+  profiling/flamegraph
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(PROGRAMS
+  benchmarking/parameterized_run.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 

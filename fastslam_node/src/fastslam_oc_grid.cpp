@@ -1,5 +1,3 @@
-// librería Core
-#include <chrono> //Para medir tiempos
 #include "fastslam_node/fastslam_oc_grid.hpp"
 using namespace rclcpp;
 
@@ -8,6 +6,7 @@ FastSLAMNode::FastSLAMNode() : Node("fastslam_node") {
     this->declare_parameter("odom_frame", "odom");
     this->declare_parameter("base_frame", "base_link");
     this->declare_parameter("publish_trajectory", false);
+    this->declare_parameter("save_map", true);
     
     setup_slam();
 
@@ -36,6 +35,7 @@ void FastSLAMNode::setup_slam() {
     params.num_particles = this->get_parameter("num_particles").as_int();
     
     publish_trajectory = this->get_parameter("publish_trajectory").as_bool();
+    save_grid = this->get_parameter("save_map").as_bool();
     odom_f = this->get_parameter("odom_frame").as_string();
     base_f = this->get_parameter("base_frame").as_string();
 
@@ -219,22 +219,32 @@ void FastSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Sophus
 }
 
 void FastSLAMNode::save_map() {
+    if (!save_grid) return;
     auto lo_grids = slam_->particles() | beluga::views::elements<2>;
     auto& best_lo_grid = lo_grids[best_idx_];
 
-    std::ofstream file("final_map.txt");
+    const int width = best_lo_grid.width();
+    const int height = best_lo_grid.height();
 
-    auto lo_to_prob = [](double lo) {
-        return 1.0 / (1.0 + std::exp(-lo));
-    };
+    cv::Mat map_img(height, width, CV_8UC1);
 
-    for (long unsigned int r = 0; r < GRID_ROWS; ++r) {
-        for (long unsigned int c = 0; c < GRID_COLS; ++c) {
-            file << lo_to_prob(best_lo_grid.at(r * GRID_COLS + c)) << " ";
+    for (int r = 0; r < height; ++r) {
+        for (int c = 0; c < width; ++c) {
+            float lo = best_lo_grid.at(r * width + c);
+            
+            uint8_t pixel_val;
+            if (std::abs(lo) < 0.01f) {
+                pixel_val = 127; 
+            } else {
+                float p = 1.0f / (1.0f + std::exp(-lo));
+                pixel_val = static_cast<uint8_t>((1.0f - p) * 255.0f);
+            }
+            map_img.at<uint8_t>(r, c) = pixel_val;
         }
-        file << "\n";
     }
-    file.close();
+
+    cv::imwrite("final_map.png", map_img);
+    RCLCPP_WARN(this->get_logger(), "Map saved successfully as PNG.");
 }
 
 void FastSLAMNode::save_trajectory() {

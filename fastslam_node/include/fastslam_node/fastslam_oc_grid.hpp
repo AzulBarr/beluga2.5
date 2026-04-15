@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <chrono>
 
 #include <tf2_ros/buffer.h>
 #include <tf2/utils.h>
@@ -114,6 +115,7 @@ private:
     std::string odom_f;
     std::string base_f;
     bool publish_trajectory;
+    bool save_grid;
 };
 
 #endif // __FASTSLAM_NODE_HPP__
