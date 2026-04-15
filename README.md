@@ -51,7 +51,7 @@ ROS 2 interface layer:
 ---
 ## Usage Instructions
 
-For detailed usage instructions and examples, please refer to the [Example README](fastslam_example/example/README.md).
+For detailed usage instructions and examples, please refer to the [Example README](fastslam_example/README.md).
 
 ---
 ## Results

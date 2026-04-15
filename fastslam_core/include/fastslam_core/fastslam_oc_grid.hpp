@@ -180,10 +180,8 @@ public:
 
             /// Determine the ray origin in grid coordinates from the current particle pose.
             int gx0, gy0, dummy_idx;
-            if (!world_to_index(pose.translation().x(), pose.translation().y(), gx0, gy0, dummy_idx, lo_grid)) {
-                continue; // Skip particles currently outside the map bounds.
-            }
-
+            if (!world_to_index(pose.translation().x(), pose.translation().y(), gx0, gy0, dummy_idx, lo_grid)) continue; // Skip particles currently outside the map bounds.
+            
             /// Clear the area occupied by the robot to remove potential sensor artifacts.
             clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
 
@@ -197,7 +195,7 @@ public:
                 /// Update cells along the beam path as free space using Bresenham's algorithm.
                 auto points_in_line = bresenham(gx0, gy0, gx1, gy1);
                 for (const auto& cell : points_in_line) {
-                    // Avoid clearing the cell where the robot is currently located.
+                    /// Avoid clearing the cell where the robot is currently located.
                     if (cell.first == gx0 && cell.second == gy0) continue;
                     
                     const int idx = cell.second * lo_grid.width() + cell.first;
