@@ -8,6 +8,7 @@ This script will run the benchmark with the specified number of particles and re
 - Memory usage metrics.
 - Full console output of the SLAM execution.
 - The final map generated.
+- A rosbag with the reference and estimated trajectories.
 
 To run, use:
 
@@ -29,3 +30,4 @@ Use the following command:
 ros2 run fastslam_benchmark time_results.py <PATH_TO_OUTPUT_DIR_OF_RUN>
 ```
 >**Note:** If **<PATH_TO_OUTPUT_DIR_OF_RUN>** is a folder containing the outputs of varius benchmarking runs, and only that, the command allows to compare their times in a plot.
+

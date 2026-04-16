@@ -39,7 +39,7 @@ cd ~/ros2_ws
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select fastslam_core fastslam_node fastslam_example fastslam_benchmark 
 source install/setup.bash
-ros2 launch fastslam_example beluga_rosbag_fastslam.xml num_particles:=<N>
+ros2 launch fastslam_example beluga_rosbag_fastslam.xml
 ```
 >**Note:** Set **env=4** in the configuration file
 

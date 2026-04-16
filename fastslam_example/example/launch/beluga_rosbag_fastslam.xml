@@ -4,6 +4,7 @@
   <arg name="slam_prefix" default="" />
   <arg name="rviz_config_file" default="$(find-pkg-share fastslam_example)/RVIZFiles/config2MIT.rviz"/>
   <arg name="num_particles" default="800"/>
+  <arg name="record_bag" default="true"/>
 
   <include file="$(find-pkg-share fastslam_node)/launch/fastslam_oc_grid.launch.py">
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
@@ -18,10 +19,20 @@
     <param name="use_sim_time" value="$(var use_sim_time)"/>
   </node>
 
+  <group if="$(var record_bag)">
+    <executable 
+      cmd="ros2 bag record 
+        /odometry/ground_truth 
+        /best_pose 
+        -o bag_output" 
+      output="screen"/>
+  </group>
+
   <group if="$(eval '\'$(var bag_path)\' != \'\'')">
     <executable 
       cmd="ros2 bag play $(var bag_path) --clock" 
       output="screen"
       on_exit="shutdown" />
   </group>
+
 </launch>

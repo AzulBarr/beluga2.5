@@ -12,13 +12,14 @@ Usage: $(basename $0) [...] <PARTICLES_0> ... <PARTICLES_N>\n
     [--launch-file]     Launch file relative path, defaults to beluga_rosbag_fastslam.xml.\n
     [-b|--rosbag]       Use a different rosbag path, the names of the frames and topics should match with the launch file.\n
     [-r|--playback-rate] Rosbag playback frequency, defaults to 1.0.\n
+    [--record-bag]     If set, the benchmark will record a rosbag of the execution in the output folder.\n
     [-h|--help]         Show this help message.
 EOM
 
 set +o errexit
 VALID_ARGS=$( \
     OPTERR=1 getopt -o b:r:ph --long \
-    package:,executable:,launch-file:,rosbag:,playback-rate:,profile,help \
+    package:,executable:,launch-file:,rosbag:,playback-rate:,record-bag:,profile,help \
     -- "$@")
 RET_CODE=$?
 set -o errexit
@@ -34,6 +35,7 @@ LAUNCH_FILE="beluga_rosbag_fastslam.xml"
 EXECUTABLE_NAME="fastslam_node"
 PLAYBACK_RATE="1.0"
 ROSBAG_PATH=""
+RECORD_BAG=true
 
 eval set -- "$VALID_ARGS"
 while : ;do
@@ -43,6 +45,7 @@ while : ;do
     --launch-file)    LAUNCH_FILE=$2; shift 2 ;;
     -b | --rosbag)    ROSBAG_PATH=$2; shift 2 ;;
     -r | --playback-rate) PLAYBACK_RATE=$2; shift 2 ;;
+    --record-bag)     RECORD_BAG=true; shift 1 ;;
     -h | --help)      echo -e "$HELP"; exit 0 ;;
     --)               shift; break ;;
     esac
@@ -90,6 +93,7 @@ for N in "$@"; do
     script -qefc "$TIME_PREFIX ros2 launch $PACKAGE_NAME $LAUNCH_FILE \
         num_particles:=$N \
         bag_rate:=$PLAYBACK_RATE \
+        record_bag:=$RECORD_BAG \
         $( [[ -n "$ROSBAG_PATH" ]] && echo "bag_path:=$ROSBAG_PATH" )" \
         "$LOG_FILE" &
 
