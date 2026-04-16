@@ -23,6 +23,7 @@ install(PROGRAMS
 
 install(PROGRAMS
   benchmarking/parameterized_run.sh
+  benchmarking/time_results.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

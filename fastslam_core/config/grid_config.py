@@ -6,6 +6,10 @@ and generates the corresponding C++ header file.
 """
 
 import os
+
+# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3 or 4
+ENV = 1
+
 ###################### fastslam_oc_grid.hpp ######################
 
 kOCCUPIED = 100
@@ -14,8 +18,6 @@ kUNKNOWN = -1
 kROBOT_RADIUS = 0.01
 
 ###################### PARTICLE.hpp ######################
-# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3 or 4
-ENV = 4
 
 if ENV == 1:
     GRID_ROWS = 300

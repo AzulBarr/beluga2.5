@@ -15,21 +15,21 @@ static constexpr std::int8_t kFreeValue = 0;
 static constexpr std::int8_t kUnknownValue = -1;
 
 /// Physical robot parameters.
-static constexpr double kRobotRadius = 0.01;
+static constexpr double kRobotRadius = 0.7;
 
 /// Number of rows in the occupancy grid.
-static constexpr std::size_t kGridRows = 140;
+static constexpr std::size_t kGridRows = 300;
 
 /// Number of columns in the occupancy grid.
-static constexpr std::size_t kGridCols = 140;
+static constexpr std::size_t kGridCols = 300;
 
 /// Grid resolution in meters per cell.
-static constexpr double kGridResolution = 0.05;
+static constexpr double kGridResolution = 0.1;
 
 /// X-coordinate of the grid origin in the map frame.
-static constexpr double kOriginX = -3.5;
+static constexpr double kOriginX = -22.5;
 
 /// Y-coordinate of the grid origin in the map frame.
-static constexpr double kOriginY = -5.25;
+static constexpr double kOriginY = -7.5;
 
 #endif  // BELUGA_GENERATED_GRID_CONFIG_HPP

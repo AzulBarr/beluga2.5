@@ -29,5 +29,5 @@ A flamegraph is a convenient tool for understanding how CPU time is being used.
 
 ## Profiling (Flamegraph)
 
-[FastSLAM Flamegraph](../docs/images/flamegraph.svg)
+[FastSLAM Flamegraph](../../docs/images/flamegraph.svg)
 

@@ -1,0 +1,126 @@
+rosbag2_bagfile_information:
+  compression_format: ''
+  compression_mode: ''
+  custom_data: null
+  duration:
+    nanoseconds: 224522481733
+  files:
+  - duration:
+      nanoseconds: 224522481733
+    message_count: 72810
+    path: carpeta_ros2.db3
+    starting_time:
+      nanoseconds_since_epoch: 1295878707865143955
+  message_count: 72810
+  relative_file_paths:
+  - carpeta_ros2.db3
+  ros_distro: rosbags
+  starting_time:
+    nanoseconds_since_epoch: 1295878707865143955
+  storage_identifier: sqlite3
+  topics_with_message_count:
+  - message_count: 12687
+    topic_metadata:
+      name: /tf
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: tf2_msgs/msg/TFMessage
+      type_description_hash: 
+        RIHS01_e369d0f05a23ae52508854b66f6aa0437f3449d652e8cbf22d5abe85d020f087
+  - message_count: 4489
+    topic_metadata:
+      name: /tilt_scan
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/LaserScan
+      type_description_hash: 
+        RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+  - message_count: 21032
+    topic_metadata:
+      name: /base_odometry/odom
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: nav_msgs/msg/Odometry
+      type_description_hash: 
+        RIHS01_3cc97dc7fb7502f8714462c526d369e35b603cfc34d946e3f2eda2766dfec6e0
+  - message_count: 6333
+    topic_metadata:
+      name: /robot_pose_ekf/odom_combined
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: geometry_msgs/msg/PoseWithCovarianceStamped
+      type_description_hash: 
+        RIHS01_26432f9803e43727d3c8f668d1fdb3c630f548af631e2f4e31382371bfea3b6e
+  - message_count: 4489
+    topic_metadata:
+      name: /base_scan
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/LaserScan
+      type_description_hash: 
+        RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+  - message_count: 1
+    topic_metadata:
+      name: /torso_lift_imu/is_calibrated
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: std_msgs/msg/Bool
+      type_description_hash: 
+        RIHS01_feb91e995ff9ebd09c0cb3d2aed18b11077585839fb5db80193b62d74528f6c9
+  - message_count: 22451
+    topic_metadata:
+      name: /torso_lift_imu/data
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/Imu
+      type_description_hash: 
+        RIHS01_7d9a00ff131080897a5ec7e26e315954b8eae3353c3f995c55faf71574000b5b
+  - message_count: 220
+    topic_metadata:
+      name: /wide_stereo/right/image_rect_throttle
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/Image
+      type_description_hash: 
+        RIHS01_d31d41a9a4c4bc8eae9be757b0beed306564f7526c88ea6a4588fb9582527d47
+  - message_count: 220
+    topic_metadata:
+      name: /wide_stereo/left/image_rect_throttle
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/Image
+      type_description_hash: 
+        RIHS01_d31d41a9a4c4bc8eae9be757b0beed306564f7526c88ea6a4588fb9582527d47
+  - message_count: 220
+    topic_metadata:
+      name: /wide_stereo/left/camera_info_throttle
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/CameraInfo
+      type_description_hash: 
+        RIHS01_b303399feda782bcc44e57b8eec9baaa9e0e5a7cd4a89fee8cffe588d6dc93ed
+  - message_count: 220
+    topic_metadata:
+      name: /wide_stereo/right/camera_info_throttle
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: sensor_msgs/msg/CameraInfo
+      type_description_hash: 
+        RIHS01_b303399feda782bcc44e57b8eec9baaa9e0e5a7cd4a89fee8cffe588d6dc93ed
+  - message_count: 224
+    topic_metadata:
+      name: /base_odometry/odometer
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: pr2_mechanism_controllers/msg/Odometer
+      type_description_hash: 
+        RIHS01_559a39d55fbe024ba0bdaaef9c419bea3cde74fc82047cf6cb52455fb802dcda
+  - message_count: 224
+    topic_metadata:
+      name: /base_odometry/state
+      offered_qos_profiles: []
+      serialization_format: cdr
+      type: pr2_mechanism_controllers/msg/BaseOdometryState
+      type_description_hash: 
+        RIHS01_0a6acf518fdaccd718e47965d09dbec20e937efa46b494d7734380a78d6aebd3
+  version: 9

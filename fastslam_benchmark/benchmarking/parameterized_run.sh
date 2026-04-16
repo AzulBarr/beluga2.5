@@ -8,11 +8,10 @@ Usage: $(basename $0) [...] <PARTICLES_0> ... <PARTICLES_N>\n
 \n
     PARTICLES_N         For each positional argument the benchmark will be run using that amount of particles.\n
     [--package]         Package that OWNS the launch file, defaults to fastslam_example.\n
-    [--executable]      Executable name for profiling, defaults to fastslam_node.\n
+    [--executable]      Executable to use, defaults to fastslam_node.\n
     [--launch-file]     Launch file relative path, defaults to beluga_rosbag_fastslam.xml.\n
-    [-b|--rosbag]       Use a different rosbag path.\n
+    [-b|--rosbag]       Use a different rosbag path, the names of the frames and topics should match with the launch file.\n
     [-r|--playback-rate] Rosbag playback frequency, defaults to 1.0.\n
-    [-p|--profile]      Create a perf cpu profile of the benchmark.\n
     [-h|--help]         Show this help message.
 EOM
 
@@ -35,7 +34,6 @@ LAUNCH_FILE="beluga_rosbag_fastslam.xml"
 EXECUTABLE_NAME="fastslam_node"
 PLAYBACK_RATE="1.0"
 ROSBAG_PATH=""
-PROFILE=false
 
 eval set -- "$VALID_ARGS"
 while : ;do
@@ -45,7 +43,6 @@ while : ;do
     --launch-file)    LAUNCH_FILE=$2; shift 2 ;;
     -b | --rosbag)    ROSBAG_PATH=$2; shift 2 ;;
     -r | --playback-rate) PLAYBACK_RATE=$2; shift 2 ;;
-    -p | --profile)   PROFILE=true; shift ;;
     -h | --help)      echo -e "$HELP"; exit 0 ;;
     --)               shift; break ;;
     esac
@@ -97,19 +94,7 @@ for N in "$@"; do
         $( [[ -n "$ROSBAG_PATH" ]] && echo "bag_path:=$ROSBAG_PATH" )" \
         "$LOG_FILE" &
 
-    # Profiling con Perf (opcional)
-    if [ "$PROFILE" = "true" ]; then
-        while ! pgrep -f "$EXECUTABLE_NAME" > /dev/null; do sleep 0.1; done
-        NODE_PID=$(pgrep -f "$EXECUTABLE_NAME" | head -n 1)
-        sudo perf record -F 99 -g -p "$NODE_PID" -o perf.data &
-        PERF_PID=$!
-    fi
-
     wait %1
-    
-    if [ "$PROFILE" = "true" ]; then
-        sudo kill -SIGINT "$PERF_PID" > /dev/null 2>&1
-    fi
 
     echo "Finished $N particles. Results in $FOLDER/"
     cd ..
