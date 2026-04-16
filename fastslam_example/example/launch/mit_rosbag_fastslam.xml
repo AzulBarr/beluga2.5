@@ -3,6 +3,7 @@
   <arg name="bag_path" default="/home/azul/ros2_ws/src/fastslam_oc_grid/fastslam_example/bags/ros2_bag_MIT1" />
   <arg name="slam_prefix" default="" />
   <arg name="rviz_config_file" default="$(find-pkg-share fastslam_example)/RVIZFiles/config2MIT.rviz"/>
+  <arg name="num_particles" default="500"/>
 
   <include file="$(find-pkg-share fastslam_node)/launch/fastslam_oc_grid.launch.py">
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
@@ -10,7 +11,7 @@
     <arg name="odom_frame" value="odom_combined"/>
     <arg name="base_frame" value="base_footprint"/>
     <arg name="scan_topic" value="/base_scan"/>
-    <arg name="num_particles" value="500"/>
+    <arg name="num_particles" value="$(var num_particles)"/>
   </include>
 
   <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(var rviz_config_file)">

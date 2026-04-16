@@ -24,14 +24,8 @@ ros2 run fastslam_benchmark parameterized_run.sh --help
 ```
 ---
 ## Visualizing results
-### Visualizing results of one run 
 Use the following command:
 ```bash
 ros2 run fastslam_benchmark time_results.py <PATH_TO_OUTPUT_DIR_OF_RUN>
 ```
-
-### Comparing parameterized runs
-If **<PATH>** is a folder containing the outputs of varius benchmarking runs, and only that, the following command allows to compare their times in a single.
-```bash
-ros2 run fastslam_benchmark time_results.py <PATH>
-```
+>**Note:** If **<PATH_TO_OUTPUT_DIR_OF_RUN>** is a folder containing the outputs of varius benchmarking runs, and only that, the command allows to compare their times in a plot.

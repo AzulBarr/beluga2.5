@@ -88,8 +88,7 @@ for N in "$@"; do
 
     # LANZAMIENTO
     script -qefc "$TIME_PREFIX ros2 launch $PACKAGE_NAME $LAUNCH_FILE \
-        min_particles:=$N \
-        max_particles:=$N \
+        num_particles:=$N \
         bag_rate:=$PLAYBACK_RATE \
         $( [[ -n "$ROSBAG_PATH" ]] && echo "bag_path:=$ROSBAG_PATH" )" \
         "$LOG_FILE" &
