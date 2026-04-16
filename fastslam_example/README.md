@@ -43,4 +43,4 @@ ros2 launch fastslam_example beluga_rosbag_fastslam.xml
 ```
 
 ## Configuration
-Modify the config.py file located in [fastslam_core/config/grid_config.py](../../fastslam_core/config/grid_config.py) to decide the size and resolution of the map.
+Modify the config.py file located in [fastslam_core/config/grid_config.py](../fastslam_core/config/grid_config.py) to decide the size and resolution of the map.
