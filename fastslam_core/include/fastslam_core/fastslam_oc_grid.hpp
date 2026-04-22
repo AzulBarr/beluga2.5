@@ -160,6 +160,17 @@ public:
             double p_z = weight_fn(pose);
             weight *= p_z;
         }
+
+        double sum_w = 0.0;
+        for (auto&& p : particles_) {
+            sum_w += static_cast<double>(std::get<1>(p));
+        }
+
+        for (auto&& p : particles_) {
+            auto& weight = std::get<1>(p);
+           
+            weight = weight/sum_w;
+        }
     }
 
     /// Update the occupancy grid map of each particle based on the transformed measurement.
@@ -221,8 +232,23 @@ public:
      */
     void resample() {
         const std::size_t n_particles = particles_.size();
-        if (n_particles == 0) {
+        
+        double n_eff = 0.0;
+        double sum_sq = 0.0;
+
+        for (auto&& p : particles_) {
+            auto& weight = std::get<1>(p);
+            sum_sq += weight * weight;
+        }
+
+        n_eff = 1.0 / sum_sq;
+        
+        if (n_particles == 0 || n_eff > (n_particles / 2.0)) {
             return;
+            // for (auto&& w : beluga::views::weights(particles_)) {
+            //     w = beluga::Weight(1.0);
+            // }
+            std::cout << "Effective Sample Size: " << n_eff << " / " << n_particles << std::endl;
         }
 
         /// Internal weight type to double for compatibility with std::discrete_distribution.
@@ -244,12 +270,12 @@ public:
             auto it = particles_.begin();
             std::advance(it, weight_distribution(rng_));
             const auto& selected = *it;
-            resampled_particles.push_back(selected);  // copia profunda (incluye grid)
+            resampled_particles.push_back(selected);
         }
 
         particles_.assign(resampled_particles.begin(), resampled_particles.end());
 
-        // Reset importance weights to a uniform distribution.
+        /// Reset importance weights to a uniform distribution.
         for (auto&& w : beluga::views::weights(particles_)) {
             w = beluga::Weight(1.0);
         }
