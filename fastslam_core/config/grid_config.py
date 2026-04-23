@@ -8,7 +8,7 @@ and generates the corresponding C++ header file.
 import os
 
 # MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3 or 4
-ENV = 2
+ENV = 3
 
 ###################### fastslam_oc_grid.hpp ######################
 
@@ -33,17 +33,11 @@ elif ENV == 2:
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.375
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
 elif ENV == 3:
-    GRID_ROWS = 700
-    GRID_RESOLUTION = 0.01 
+    GRID_ROWS = 111
+    GRID_RESOLUTION = 0.05 
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
-elif ENV == 4: 
-    GRID_ROWS = 140
-    GRID_RESOLUTION = 0.05
-    GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
+    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.875
 else: 
     GRID_ROWS = 500
     GRID_RESOLUTION = 0.1

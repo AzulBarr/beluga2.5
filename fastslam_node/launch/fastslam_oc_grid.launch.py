@@ -36,6 +36,12 @@ def generate_launch_description():
         description='Laser scan topic'
     )
 
+    declare_range_max = DeclareLaunchArgument(
+        'range_max',
+        default_value='25.0',
+        description='Maximum range for laser scan'
+    )
+
     fastslam_node = Node(
         package="fastslam_node",  
         executable="fastslam_node", 
@@ -48,6 +54,7 @@ def generate_launch_description():
             "base_frame": LaunchConfiguration('base_frame'), 
             "publish_trajectory": False,
             "save_map": True,
+            "range_max": LaunchConfiguration('range_max'),
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
         arguments=["--ros-args", "--log-level", "WARN"],
@@ -60,5 +67,6 @@ def generate_launch_description():
     declare_base_frame_cmd,
     declare_scan_topic_cmd,
     declare_num_particles,
+    declare_range_max,
     fastslam_node,
     ])

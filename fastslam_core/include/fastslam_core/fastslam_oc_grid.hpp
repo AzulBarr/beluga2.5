@@ -319,7 +319,7 @@ public:
         auto& oc_data = oc_grid.data();
         const auto& lo_data = log_odds_grid.data();
         constexpr float OCCUPIED_THRESH = 0.65f;
-        constexpr float FREE_THRESH     = 0.35f;
+        constexpr float FREE_THRESH     = 0.35f; //0.196
 
         for (size_t i = 0; i < lo_data.size(); ++i) {
             if (std::abs(lo_data[i]) < 0.01f) {

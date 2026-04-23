@@ -7,6 +7,7 @@ FastSLAMNode::FastSLAMNode() : Node("fastslam_node") {
     this->declare_parameter("base_frame", "base_link");
     this->declare_parameter("publish_trajectory", false);
     this->declare_parameter("save_map", true);
+    this->declare_parameter("range_max", 25.0);
     
     setup_slam();
 
@@ -38,6 +39,7 @@ void FastSLAMNode::setup_slam() {
     save_grid = this->get_parameter("save_map").as_bool();
     odom_f = this->get_parameter("odom_frame").as_string();
     base_f = this->get_parameter("base_frame").as_string();
+    range_max = this->get_parameter("range_max").as_double();
 
     /// FastSLAM instance
     slam_ = std::make_unique<FastSLAM> (motion_model, measurement_model, params);
@@ -133,7 +135,7 @@ std::vector<std::pair<double, double>> FastSLAMNode::laser_to_cartesian(const se
     for (size_t i = 0; i < msg->ranges.size(); ++i) {
         float r = msg->ranges[i];
 
-        if (std::isfinite(r) && r < 25.0 && r > 0.1) {//msg->range_max && r > msg->range_min) {
+        if (std::isfinite(r) && r < range_max && r > 0.1) {//msg->range_max && r > msg->range_min) {
             float angle = msg->angle_min + i * msg->angle_increment;
 
             Eigen::Vector2d p_laser(

@@ -116,6 +116,7 @@ private:
     std::string base_f;
     bool publish_trajectory;
     bool save_grid;
+    double range_max;
 };
 
 #endif // __FASTSLAM_NODE_HPP__
