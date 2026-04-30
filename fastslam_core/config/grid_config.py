@@ -7,8 +7,8 @@ and generates the corresponding C++ header file.
 
 import os
 
-# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag: 3 or 4
-ENV = 3
+# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag P.O.: 3, Beluga Rosbag HQ S.: 4
+ENV = 5
 
 ###################### fastslam_oc_grid.hpp ######################
 
@@ -38,13 +38,18 @@ elif ENV == 3:
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.875
-else: 
+elif ENV == 4:
     GRID_ROWS = 500
-    GRID_RESOLUTION = 0.1
+    GRID_RESOLUTION = 0.075
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
-
+else:
+    GRID_ROWS = 500
+    GRID_RESOLUTION = 0.05
+    GRID_COLS = GRID_ROWS
+    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
+    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.25
 
 def generate_header(output_path):
     content = f"""/**
