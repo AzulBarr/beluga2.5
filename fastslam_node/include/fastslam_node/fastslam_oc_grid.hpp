@@ -47,8 +47,8 @@ public:
     /// Constructor.
     FastSLAMNode();
     ~FastSLAMNode() {
-        save_map();
-        save_trajectory();
+        //save_map();
+        //save_trajectory();
     }
 
 private:
@@ -75,7 +75,7 @@ private:
      */
     void broadcast_map_to_odom(const rclcpp::Time& stamp, const state_type& current_odom);
     
-    void save_map();
+    //void save_map();
     void save_trajectory();
 
     /**

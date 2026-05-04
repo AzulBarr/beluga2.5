@@ -12,6 +12,7 @@
 
 #include <range/v3/view/take.hpp>
 #include <range/v3/range/conversion.hpp> 
+#include <range/v3/view/take_exactly.hpp>
 
 #include "particle.hpp"
 
@@ -23,10 +24,9 @@
 #include <beluga/algorithm/spatial_hash.hpp>
 
 /// Beluga Views & Actions
-#include <beluga/views/sample.hpp>
 #include <beluga/actions/assign.hpp>
 #include <beluga/primitives.hpp>
-#include <beluga/views/elements.hpp>
+#include <beluga/views.hpp>
 
 #include "fastslam_core/grid_config.hpp"
 
@@ -51,14 +51,37 @@ using state_type = Sophus::SE2d;
 using FastSLAMParticle = std::tuple<
     state_type,
     beluga::Weight,
-    GridTypeLO,
-    GridTypeOC
+    GridTypeLO
 >;
-
+//GridTypeOC
 /// Parameters to construct a FastSLAM instance.
 struct FastSLAMParams {
-  /// Number of particles in the filter.
-  std::size_t num_particles = 500UL;
+    /// Number of particles in the filter.
+    std::size_t num_particles = 500UL;
+
+    /// Minimum number of particles for adaptive resampling.
+    std::size_t min_particles = 500UL;
+
+    /// Maximum number of particles for adaptive resampling.
+    std::size_t max_particles = 2000UL;
+
+    /// \brief Maximum particle filter population error between the true distribution and the
+    /// estimated distribution. It is used in KLD resampling \cite fox2001adaptivekldsampling
+    /// to limit the allowed number of particles to the minimum necessary.
+    double kld_epsilon = 0.05;
+
+    /// \brief Upper standard normal quantile for \f$P\f$, where \f$P\f$ is the probability that the error in
+    /// the estimated distribution will be less than `kld_epsilon` in KLD resampling \cite fox2001adaptivekldsampling .
+    double kld_z = 3.0;
+
+    /// \brief Spatial resolution along the x-axis to create buckets for KLD resampling.
+    double spatial_resolution_x = 0.5;
+
+    /// \brief Spatial resolution along the y-axis to create buckets for KLD resampling.
+    double spatial_resolution_y = 0.5;
+
+    /// \brief Spatial resolution around the z-axis to create buckets for KLD resampling.
+    double spatial_resolution_theta = 10 * Sophus::Constants<double>::pi() / 180;
 };
 
 /**
@@ -96,12 +119,17 @@ public:
         const FastSLAMParams& params = FastSLAMParams{})
         : motion_model_(std::move(motion_model)),
           measurement_model_(std::move(measurement_model)),
+          spatial_hasher_{params.spatial_resolution_x, 
+                      params.spatial_resolution_y, 
+                      params.spatial_resolution_theta},
           params_(params) {
-      particles_.resize(params_.num_particles);
+      particles_.resize(params_.min_particles);
       for (auto&& p : particles_) {
         std::get<0>(p) = state_type{};
         std::get<1>(p) = beluga::Weight(1.0);
       }
+      best_oc_grid_ = GridTypeOC();
+      best_pose_ = state_type{};
     }
 
     /// Returns a reference to the current set of particles.
@@ -133,10 +161,9 @@ public:
      * - Updates the measurement model with a new occupancy grid map, from the best particle.
      * - Calculates the likelihood of each particle's state given a state weighting function conditioned on 2D lidar hits (measurement model).
      * 
-     * \param measurement Measurement data.
-     * \param best_idx Index of the particle whose map is currently considered the most accurate.
+     * \param measurement Measurement data. 
      */
-    void measurement_model_map(const measurement_type& z, size_t best_idx) {
+    void measurement_model_map(const measurement_type& z) {
         /// Subsample the scan to improve performance
         measurement_type z_sparse;
         constexpr size_t kStep = 1;
@@ -148,9 +175,9 @@ public:
         /// Synchronize the sensor model with the reference map from the best particle
         /// to ensure likelihood calculations are based on the latest environment estimate.
         auto lo_grids = particles_ | beluga::views::elements<2>;
-        const auto& best_log_odds = lo_grids[best_idx];
-        auto best_oc_grid = sync_log_odds_to_occupancy(best_log_odds);
-        measurement_model_.update_map(best_oc_grid);
+        auto poses = particles_ | beluga::views::elements<0>;
+        
+        measurement_model_.update_map(best_oc_grid_);
 
         /// Update individual particle weights by evaluating the measurement model likelihood function.
         for (auto&& p : particles_) {
@@ -166,11 +193,25 @@ public:
             sum_w += static_cast<double>(std::get<1>(p));
         }
 
-        for (auto&& p : particles_) {
-            auto& weight = std::get<1>(p);
-           
-            weight = weight/sum_w;
+        if (sum_w > 1e-9) {
+            for (auto&& p : particles_) {
+                auto& weight = std::get<1>(p);
+            
+                weight = weight/sum_w;
+            }
         }
+        else {
+            for (auto&& w : beluga::views::weights(particles_)) {
+                w = beluga::Weight(1.0 / particles_.size());
+            }
+        }
+        auto weights = particles_ | beluga::views::elements<1>;
+        auto max_weight_it = std::max_element(weights.begin(), weights.end());
+        size_t best_idx = std::distance(weights.begin(), max_weight_it);
+
+        best_pose_ = poses[best_idx];
+        const auto& best_log_odds = lo_grids[best_idx];
+        sync_log_odds_to_occupancy(best_log_odds, best_oc_grid_);
     }
 
     /// Update the occupancy grid map of each particle based on the transformed measurement.
@@ -187,7 +228,7 @@ public:
         for (auto&& p : particles_) {
             auto& pose = std::get<0>(p);
             auto& lo_grid = std::get<2>(p);
-            auto& oc_grid = std::get<3>(p);
+            //auto& oc_grid = std::get<3>(p);
 
             /// Determine the ray origin in grid coordinates from the current particle pose.
             int gx0, gy0, dummy_idx;
@@ -219,7 +260,7 @@ public:
             }
 
             /// Synchronize the occupancy grid representation.
-            oc_grid = sync_log_odds_to_occupancy(lo_grid);
+            //oc_grid = sync_log_odds_to_occupancy(lo_grid);
         }
     }
 
@@ -233,52 +274,104 @@ public:
     void resample() {
         const std::size_t n_particles = particles_.size();
         
-        double n_eff = 0.0;
-        double sum_sq = 0.0;
+        // double n_eff = 0.0;
+        // double sum_sq = 0.0;
 
-        for (auto&& p : particles_) {
-            auto& weight = std::get<1>(p);
-            sum_sq += weight * weight;
-        }
+        // for (auto&& p : particles_) {
+        //     auto& weight = std::get<1>(p);
+        //     sum_sq += weight * weight;
+        // }
 
-        n_eff = 1.0 / sum_sq;
+        // n_eff = 1.0 / sum_sq;
         
-        if (n_particles == 0 || n_eff > (n_particles / 2.0)) {
-            return;
-            // for (auto&& w : beluga::views::weights(particles_)) {
-            //     w = beluga::Weight(1.0);
-            // }
-            std::cout << "Effective Sample Size: " << n_eff << " / " << n_particles << std::endl;
-        }
+        // if (n_particles == 0 || n_eff > (n_particles / 2.0)) {
+        //     return;
+        //     // for (auto&& w : beluga::views::weights(particles_)) {
+        //     //     w = beluga::Weight(1.0);
+        //     // }
+        //     std::cout << "Effective Sample Size: " << n_eff << " / " << n_particles << std::endl;
+        // }
 
         /// Internal weight type to double for compatibility with std::discrete_distribution.
-        std::vector<double> weights;
-        weights.reserve(n_particles);
+        // std::vector<double> weights;
+        // weights.reserve(n_particles);
 
-        for (auto&& w : beluga::views::weights(particles_)) {
-            weights.push_back(static_cast<double>(w));
+        // for (auto&& w : beluga::views::weights(particles_)) {
+        //     weights.push_back(static_cast<double>(w));
+        // }
+        // std::cout << "NUEVO CICLO DE RESAMPLE " << std::endl;
+        // for (auto&& p : particles_) {
+        //     auto& pose = std::get<0>(p);
+        //     auto& weight = std::get<1>(p);
+        //     auto& lo_grid = std::get<2>(p);
+        //     std::cout << "Pose: " << pose.translation().transpose() << ", Weight: " << weight << std::endl;
+        // }
+
+        /***********************************************************************************************************************************/
+
+        const auto weights = beluga::views::weights(particles_) |
+                         ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
+                         ranges::to<std::vector<double>>();
+        //ranges::views::take_exactly(params_.min_particles);
+        auto resampling_view = beluga::views::sample(particles_, weights) |
+                    beluga::views::take_while_kld(
+                        [this](const auto& p) {
+                            // Adapt the hasher to work with the full particle tuple by hashing only the pose
+                            return spatial_hasher_(std::get<0>(p));
+                        },
+                        params_.min_particles,
+                        params_.max_particles,
+                        params_.kld_epsilon,
+                        params_.kld_z);
+
+        //particles_.assign(resampling_view.begin(), resampling_view.end());     
+
+        std::vector<FastSLAMParticle> buffer;
+        buffer.reserve(params_.max_particles);
+        
+        for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
+            buffer.push_back(*it); // Aquí se hace la copia profunda del vector LogOdds
         }
 
-        /// Discrete distribution to sample particle indices proportional to their weights.
-        std::discrete_distribution<size_t> weight_distribution(weights.begin(), weights.end());
+        // 4. Ahora es seguro asignar al contenedor original
+        particles_.assign(buffer.begin(), buffer.end());
 
-        /// Generate the resampled set of particles.
-        std::vector<decltype(particles_)::value_type> resampled_particles;
-        resampled_particles.reserve(n_particles);
-
-        for (size_t i = 0; i < n_particles; ++i) {
-            auto it = particles_.begin();
-            std::advance(it, weight_distribution(rng_));
-            const auto& selected = *it;
-            resampled_particles.push_back(selected);
-        }
-
-        particles_.assign(resampled_particles.begin(), resampled_particles.end());
-
-        /// Reset importance weights to a uniform distribution.
+        // 5. Reset de pesos
         for (auto&& w : beluga::views::weights(particles_)) {
             w = beluga::Weight(1.0);
         }
+        // reset de pesos?
+        /***********************************************************************************************************************************/
+        // for (auto&& p : particles_) {
+        //     auto& pose = std::get<0>(p);
+        //     auto& weight = std::get<1>(p);
+        //     auto& lo_grid = std::get<2>(p);
+        //     std::cout << "Pose nueva: " << pose.translation().transpose() << ", Weight nuevo: " << weight << std::endl;          
+        // }
+    
+         // Modificar el log-odds grid del primer particle
+         // Debería imprimir 0.0, confirmando que los particles son independientes
+                        
+        // /// Discrete distribution to sample particle indices proportional to their weights.
+        // std::discrete_distribution<size_t> weight_distribution(weights.begin(), weights.end());
+
+        // /// Generate the resampled set of particles.
+        // std::vector<decltype(particles_)::value_type> resampled_particles;
+        // resampled_particles.reserve(n_particles);
+
+        // for (size_t i = 0; i < n_particles; ++i) {
+        //     auto it = particles_.begin();
+        //     std::advance(it, weight_distribution(rng_));
+        //     const auto& selected = *it;
+        //     resampled_particles.push_back(selected);
+        // }
+
+        // particles_.assign(resampled_particles.begin(), resampled_particles.end());
+
+        // /// Reset importance weights to a uniform distribution.
+        // for (auto&& w : beluga::views::weights(particles_)) {
+        //     w = beluga::Weight(1.0);
+        // }
     }
 
     /// Bresenham's 2D line drawing algorithm.
@@ -314,9 +407,8 @@ public:
     }
 
     /// Synchronizes the occupancy grid representation with the log-odds grid by applying a thresholding function.
-    GridTypeOC sync_log_odds_to_occupancy(const GridTypeLO& log_odds_grid) {
-        GridTypeOC oc_grid;
-        auto& oc_data = oc_grid.data();
+    void sync_log_odds_to_occupancy(const GridTypeLO& log_odds_grid, GridTypeOC& out_oc) {
+        auto& oc_data = out_oc.data();
         const auto& lo_data = log_odds_grid.data();
         constexpr float OCCUPIED_THRESH = 0.65f;
         constexpr float FREE_THRESH     = 0.35f; //0.196
@@ -329,7 +421,6 @@ public:
                 oc_data[i] = (p > OCCUPIED_THRESH) ? OCCUPPIED : (p < FREE_THRESH ? FREE : UNKNOWN);
             }
         }
-        return oc_grid;
     }
 
     /// Clears the robot's footprint area in the log-odds grid to mitigate self-mapping noise.
@@ -353,6 +444,14 @@ public:
         }
     }
 
+    GridTypeOC best_occupancy_grid() const {
+        return best_oc_grid_;
+    }
+
+    state_type best_pose() const {
+        return best_pose_;
+    }
+
 private:
     beluga::TupleVector<FastSLAMParticle> particles_;
 
@@ -365,6 +464,11 @@ private:
     const float l_free_ = -0.2f;
 
     std::mt19937 rng_;
-};
+
+    beluga::spatial_hash<state_type> spatial_hasher_;
+
+    GridTypeOC best_oc_grid_;
+    state_type best_pose_;
+};  
 
 #endif

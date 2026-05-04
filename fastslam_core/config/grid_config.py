@@ -8,7 +8,7 @@ and generates the corresponding C++ header file.
 import os
 
 # MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag P.O.: 3, Beluga Rosbag HQ S.: 4
-ENV = 5
+ENV = 4
 
 ###################### fastslam_oc_grid.hpp ######################
 

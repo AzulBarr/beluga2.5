@@ -3,11 +3,18 @@ using namespace rclcpp;
 
 FastSLAMNode::FastSLAMNode() : Node("fastslam_node") {
     this->declare_parameter("num_particles", 500);
+    this->declare_parameter("min_particles", 500);
+    this->declare_parameter("max_particles", 2000);
     this->declare_parameter("odom_frame", "odom");
     this->declare_parameter("base_frame", "base_link");
     this->declare_parameter("publish_trajectory", false);
     this->declare_parameter("save_map", true);
     this->declare_parameter("range_max", 25.0);
+    this->declare_parameter("kld_epsilon", 0.05);
+    this->declare_parameter("kld_z", 3.0);
+    this->declare_parameter("spatial_resolution_x", 0.05);
+    this->declare_parameter("spatial_resolution_y", 0.05);
+    this->declare_parameter("spatial_resolution_theta", 10 * Sophus::Constants<double>::pi() / 180);
     
     setup_slam();
 
@@ -26,20 +33,26 @@ FastSLAMNode::FastSLAMNode() : Node("fastslam_node") {
 }
 
 void FastSLAMNode::setup_slam() {
-    beluga::DifferentialDriveModelParam motion_params{0.1, 0.1, 0.1, 0.1};
+    beluga::DifferentialDriveModelParam motion_params{0.1, 0.05, 0.1, 0.05, 0.1};
     beluga::DifferentialDriveModel<state_type> motion_model{motion_params};
 
-    beluga::LikelihoodFieldProbModelParam sensor_params{100.0, 2.0, 0.5, 0.5, 0.2};
+    beluga::LikelihoodFieldProbModelParam sensor_params{100.0, 2.0, 0.5, 0.5, 0.2, true};
     beluga::LikelihoodFieldProbModel<GridTypeOC> measurement_model(sensor_params, GridTypeOC());
 
-    FastSLAMParams params;
+    auto params = FastSLAMParams{};
     params.num_particles = this->get_parameter("num_particles").as_int();
-    
+    params.min_particles = static_cast<std::size_t>(get_parameter("min_particles").as_int());
+    params.max_particles = static_cast<std::size_t>(get_parameter("max_particles").as_int());
     publish_trajectory = this->get_parameter("publish_trajectory").as_bool();
     save_grid = this->get_parameter("save_map").as_bool();
     odom_f = this->get_parameter("odom_frame").as_string();
     base_f = this->get_parameter("base_frame").as_string();
     range_max = this->get_parameter("range_max").as_double();
+    params.kld_epsilon = get_parameter("kld_epsilon").as_double();
+    params.kld_z = get_parameter("kld_z").as_double();
+    params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double();
+    params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
+    params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
 
     /// FastSLAM instance
     slam_ = std::make_unique<FastSLAM> (motion_model, measurement_model, params);
@@ -63,12 +76,13 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         auto z = laser_to_cartesian(msg); // Measurement
     
         /// FAST SLAM
+        const auto update_start_time = std::chrono::high_resolution_clock::now();
         auto t0 = std::chrono::high_resolution_clock::now();
         slam_->sample_motion_model(u);
         RCLCPP_INFO(this->get_logger(), "Sample completed");
         auto t1 = std::chrono::high_resolution_clock::now();
 
-        slam_->measurement_model_map(z, best_idx_);
+        slam_->measurement_model_map(z);
         RCLCPP_INFO(this->get_logger(), "Weights calculated");
         auto t2 = std::chrono::high_resolution_clock::now();
 
@@ -76,9 +90,9 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         RCLCPP_INFO(this->get_logger(), "Occupancy grid updated");
         auto t3 = std::chrono::high_resolution_clock::now();
 
-        auto weights = beluga::views::weights(slam_->particles());
-        auto max_weight_it = std::max_element(weights.begin(), weights.end());
-        best_idx_ = std::distance(weights.begin(), max_weight_it);
+        // auto weights = beluga::views::weights(slam_->particles());
+        // auto max_weight_it = std::max_element(weights.begin(), weights.end());
+        // best_idx_ = std::distance(weights.begin(), max_weight_it);
 
         publish_map();
         RCLCPP_INFO(this->get_logger(), "Map published");
@@ -95,6 +109,8 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         slam_->resample();
         RCLCPP_INFO(this->get_logger(), "Resample completed");
         auto t7 = std::chrono::high_resolution_clock::now();
+        const auto update_stop_time = std::chrono::high_resolution_clock::now();
+        const auto update_duration = update_stop_time - update_start_time;
 
         auto d_sample = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
         auto d_weight = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
@@ -107,6 +123,11 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         RCLCPP_INFO(this->get_logger(),
             "Times [ms] | sample: %ld | weight: %ld | map: %ld | pub_map: %ld | particles: %ld | tf: %ld | resample: %ld",
             d_sample, d_weight, d_map, d_pub_map, d_particles, d_tf, d_resample);
+
+        RCLCPP_WARN(
+            get_logger(), "Particle filter update iteration stats: %ld particles - %.3fms",
+            slam_->particles().size(),
+            std::chrono::duration<double, std::milli>(update_duration).count());
 
     } catch (tf2::TransformException &ex) {
         RCLCPP_WARN(this->get_logger(), "TF Error: %s", ex.what());
@@ -157,9 +178,10 @@ Sophus::SE2d FastSLAMNode::tf_to_se2(const geometry_msgs::msg::Transform& t) {
 }
 
 void FastSLAMNode::publish_map() {
-    auto oc_grids = slam_->particles() | beluga::views::elements<3>;
-    auto& best_oc_grid = oc_grids[best_idx_];
-    
+    // auto oc_grids = slam_->particles() | beluga::views::elements<3>;
+    // auto& best_oc_grid = oc_grids[best_idx_];
+    auto best_oc_grid = slam_->best_occupancy_grid();
+
     nav_msgs::msg::OccupancyGrid msg;
     msg.header.stamp = this->now();
     msg.header.frame_id = "map";
@@ -185,8 +207,8 @@ void FastSLAMNode::publish_map() {
     msg2.header.stamp = this->now();
     msg2.header.frame_id = "map";
 
-    auto poses = beluga::views::states(slam_->particles());
-    const auto& best_pose = poses[best_idx_];
+    //auto poses = beluga::views::states(slam_->particles());
+    const auto& best_pose = slam_->best_pose();
 
     msg2.pose.position.x = best_pose.translation().x();
     msg2.pose.position.y = best_pose.translation().y();
@@ -229,8 +251,8 @@ void FastSLAMNode::publish_particles(const rclcpp::Time& stamp) {
 }
 
 void FastSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Sophus::SE2d& current_odom) {
-    auto poses = beluga::views::states(slam_->particles());
-    auto best_pose = poses[best_idx_];
+    //auto poses = beluga::views::states(slam_->particles());
+    auto best_pose = slam_->best_pose();
     auto map_to_odom = best_pose * current_odom.inverse();
     std::string odom_f = this->get_parameter("odom_frame").as_string();
 
@@ -246,34 +268,34 @@ void FastSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Sophus
     tf_broadcaster_->sendTransform(t);
 }
 
-void FastSLAMNode::save_map() {
-    if (!save_grid) return;
-    auto lo_grids = slam_->particles() | beluga::views::elements<2>;
-    auto& best_lo_grid = lo_grids[best_idx_];
+// void FastSLAMNode::save_map() {
+//     if (!save_grid) return;
+//     auto lo_grids = slam_->particles() | beluga::views::elements<2>;
+//     auto& best_lo_grid = lo_grids[best_idx_];
 
-    const int width = best_lo_grid.width();
-    const int height = best_lo_grid.height();
+//     const int width = best_lo_grid.width();
+//     const int height = best_lo_grid.height();
 
-    cv::Mat map_img(height, width, CV_8UC1);
+//     cv::Mat map_img(height, width, CV_8UC1);
 
-    for (int r = 0; r < height; ++r) {
-        for (int c = 0; c < width; ++c) {
-            float lo = best_lo_grid.at(r * width + c);
+//     for (int r = 0; r < height; ++r) {
+//         for (int c = 0; c < width; ++c) {
+//             float lo = best_lo_grid.at(r * width + c);
             
-            uint8_t pixel_val;
-            if (std::abs(lo) < 0.01f) {
-                pixel_val = 127; 
-            } else {
-                float p = 1.0f / (1.0f + std::exp(-lo));
-                pixel_val = static_cast<uint8_t>((1.0f - p) * 255.0f);
-            }
-            map_img.at<uint8_t>(r, c) = pixel_val;
-        }
-    }
+//             uint8_t pixel_val;
+//             if (std::abs(lo) < 0.01f) {
+//                 pixel_val = 127; 
+//             } else {
+//                 float p = 1.0f / (1.0f + std::exp(-lo));
+//                 pixel_val = static_cast<uint8_t>((1.0f - p) * 255.0f);
+//             }
+//             map_img.at<uint8_t>(r, c) = pixel_val;
+//         }
+//     }
 
-    cv::imwrite("final_map.png", map_img);
-    RCLCPP_INFO(this->get_logger(), "Map saved successfully as PNG.");
-}
+//     cv::imwrite("final_map.png", map_img);
+//     RCLCPP_INFO(this->get_logger(), "Map saved successfully as PNG.");
+// } PONER QUE SEA CON BEST_OC_GRID Y ARREGLAR PORQUE SE GUARDABA DADO VUELTA
 
 void FastSLAMNode::save_trajectory() {
     if (!publish_trajectory) return;
