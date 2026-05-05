@@ -61,6 +61,9 @@ private:
     
     /// Extracts and publishes the occupancy grid of the most likely particle.
     void publish_map();
+
+    /// Extracts and publishes the pose of the most likely particle.
+    void publish_best_pose();
     
     /**
      * \brief Publishes the current particle cloud for visualization.
@@ -110,7 +113,6 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr trajectory_pub_;
     nav_msgs::msg::Path trajectory_msg_;
     double min_distance_ = 0.2; 
-    Eigen::Vector2d last_saved_pos_;
 
     std::string odom_f;
     std::string base_f;

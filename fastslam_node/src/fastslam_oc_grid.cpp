@@ -29,7 +29,7 @@ FastSLAMNode::FastSLAMNode() : Node("fastslam_node") {
     trajectory_pub_ = this->create_publisher<nav_msgs::msg::Path>("/trajectory", 10);
     trajectory_msg_.header.frame_id = "map";
     
-    RCLCPP_INFO(this->get_logger(), "FastSLAM Node inicialized and waiting for data...");
+    RCLCPP_INFO(this->get_logger(), "FastSLAM Node initialized and waiting for data...");
 }
 
 void FastSLAMNode::setup_slam() {
@@ -85,14 +85,12 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         slam_->measurement_model_map(z);
         RCLCPP_INFO(this->get_logger(), "Weights calculated");
         auto t2 = std::chrono::high_resolution_clock::now();
+        publish_best_pose();
+        RCLCPP_INFO(this->get_logger(), "Best pose published");
 
         slam_->update_occupancy_grid(z);
         RCLCPP_INFO(this->get_logger(), "Occupancy grid updated");
         auto t3 = std::chrono::high_resolution_clock::now();
-
-        // auto weights = beluga::views::weights(slam_->particles());
-        // auto max_weight_it = std::max_element(weights.begin(), weights.end());
-        // best_idx_ = std::distance(weights.begin(), max_weight_it);
 
         publish_map();
         RCLCPP_INFO(this->get_logger(), "Map published");
@@ -136,14 +134,6 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
 
 std::vector<std::pair<double, double>> FastSLAMNode::laser_to_cartesian(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
     std::vector<std::pair<double, double>> points;
-    // for (size_t i = 0; i < msg->ranges.size(); ++i) {
-    //     float r = msg->ranges[i];
-    //     if (std::isfinite(r) && r < 25.0 && r > 0.1) {//msg->range_max && r > msg->range_min) {
-    //         float angle = msg->angle_min + i * msg->angle_increment;
-    //         points.push_back({r * std::cos(angle), r * std::sin(angle)});
-    //     }
-    // }
-
     auto tf_laser = tf_buffer_->lookupTransform(
         base_f,                      // target (base_link)
         msg->header.frame_id,        // source (laser)
@@ -156,7 +146,7 @@ std::vector<std::pair<double, double>> FastSLAMNode::laser_to_cartesian(const se
     for (size_t i = 0; i < msg->ranges.size(); ++i) {
         float r = msg->ranges[i];
 
-        if (std::isfinite(r) && r < range_max && r > 0.1) {//msg->range_max && r > msg->range_min) {
+        if (std::isfinite(r) && r < range_max && r > 0.1) {
             float angle = msg->angle_min + i * msg->angle_increment;
 
             Eigen::Vector2d p_laser(
@@ -178,8 +168,6 @@ Sophus::SE2d FastSLAMNode::tf_to_se2(const geometry_msgs::msg::Transform& t) {
 }
 
 void FastSLAMNode::publish_map() {
-    // auto oc_grids = slam_->particles() | beluga::views::elements<3>;
-    // auto& best_oc_grid = oc_grids[best_idx_];
     auto best_oc_grid = slam_->best_occupancy_grid();
 
     nav_msgs::msg::OccupancyGrid msg;
@@ -200,14 +188,14 @@ void FastSLAMNode::publish_map() {
     msg.data.assign(best_oc_grid.data().begin(), best_oc_grid.data().end());
     
     map_pub_->publish(msg);
+}
 
-    /// Best pose estimation and publication
+void FastSLAMNode::publish_best_pose() {
     geometry_msgs::msg::PoseStamped msg2;
 
     msg2.header.stamp = this->now();
     msg2.header.frame_id = "map";
 
-    //auto poses = beluga::views::states(slam_->particles());
     const auto& best_pose = slam_->best_pose();
 
     msg2.pose.position.x = best_pose.translation().x();
@@ -222,12 +210,11 @@ void FastSLAMNode::publish_map() {
 
     /// Publish the trajectory
     if (publish_trajectory){
-        auto t = best_pose.translation();
-        if (true) {
+        if (true) { // TODO: add distance check to avoid publishing too many points
             trajectory_msg_.header.stamp = this->now();
             trajectory_msg_.poses.push_back(msg2);
-            trajectory_pub_->publish(trajectory_msg_);                
-            last_saved_pos_ = t;
+            trajectory_pub_->publish(trajectory_msg_);      
+
         }
     }
 }
@@ -251,10 +238,8 @@ void FastSLAMNode::publish_particles(const rclcpp::Time& stamp) {
 }
 
 void FastSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Sophus::SE2d& current_odom) {
-    //auto poses = beluga::views::states(slam_->particles());
     auto best_pose = slam_->best_pose();
     auto map_to_odom = best_pose * current_odom.inverse();
-    std::string odom_f = this->get_parameter("odom_frame").as_string();
 
     geometry_msgs::msg::TransformStamped t;
     t.header.stamp = stamp;
@@ -313,7 +298,6 @@ void FastSLAMNode::save_trajectory() {
              << x << " " << y << " " << z << " "
              << qx << " " << qy << " " << qz << " " << qw
              << "\n";    
-            
     }
     file.close();
 }

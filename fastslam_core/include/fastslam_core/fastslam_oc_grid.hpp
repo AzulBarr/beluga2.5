@@ -35,10 +35,6 @@ const int FREE = kFreeValue;
 const int UNKNOWN = kUnknownValue;
 const double ROBOT_RADIUS = kRobotRadius;
 
-#define TIMER_START(name) auto name##_start = std::chrono::high_resolution_clock::now();
-#define TIMER_END(name) auto name##_end = std::chrono::high_resolution_clock::now(); \
-    auto name##_ms = std::chrono::duration_cast<std::chrono::milliseconds>(name##_end - name##_start).count();
-
 /**
  * \file
  * \brief FastSLAM implementation using occupancy grid and lidar 2D.
@@ -179,11 +175,11 @@ public:
         
         measurement_model_.update_map(best_oc_grid_);
 
+        auto weight_fn = measurement_model_(measurement_type(z_sparse));
         /// Update individual particle weights by evaluating the measurement model likelihood function.
         for (auto&& p : particles_) {
             const auto& pose = std::get<0>(p);
             auto& weight = std::get<1>(p);
-            auto weight_fn = measurement_model_(measurement_type(z_sparse));
             double p_z = weight_fn(pose);
             weight *= p_z;
         }
@@ -272,47 +268,9 @@ public:
      * - Resets all weights to a uniform value (1.0).
      */
     void resample() {
-        const std::size_t n_particles = particles_.size();
-        
-        // double n_eff = 0.0;
-        // double sum_sq = 0.0;
-
-        // for (auto&& p : particles_) {
-        //     auto& weight = std::get<1>(p);
-        //     sum_sq += weight * weight;
-        // }
-
-        // n_eff = 1.0 / sum_sq;
-        
-        // if (n_particles == 0 || n_eff > (n_particles / 2.0)) {
-        //     return;
-        //     // for (auto&& w : beluga::views::weights(particles_)) {
-        //     //     w = beluga::Weight(1.0);
-        //     // }
-        //     std::cout << "Effective Sample Size: " << n_eff << " / " << n_particles << std::endl;
-        // }
-
-        /// Internal weight type to double for compatibility with std::discrete_distribution.
-        // std::vector<double> weights;
-        // weights.reserve(n_particles);
-
-        // for (auto&& w : beluga::views::weights(particles_)) {
-        //     weights.push_back(static_cast<double>(w));
-        // }
-        // std::cout << "NUEVO CICLO DE RESAMPLE " << std::endl;
-        // for (auto&& p : particles_) {
-        //     auto& pose = std::get<0>(p);
-        //     auto& weight = std::get<1>(p);
-        //     auto& lo_grid = std::get<2>(p);
-        //     std::cout << "Pose: " << pose.translation().transpose() << ", Weight: " << weight << std::endl;
-        // }
-
-        /***********************************************************************************************************************************/
-
         const auto weights = beluga::views::weights(particles_) |
                          ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
                          ranges::to<std::vector<double>>();
-        //ranges::views::take_exactly(params_.min_particles);
         auto resampling_view = beluga::views::sample(particles_, weights) |
                     beluga::views::take_while_kld(
                         [this](const auto& p) {
@@ -324,54 +282,18 @@ public:
                         params_.kld_epsilon,
                         params_.kld_z);
 
-        //particles_.assign(resampling_view.begin(), resampling_view.end());     
-
         std::vector<FastSLAMParticle> buffer;
         buffer.reserve(params_.max_particles);
         
         for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
-            buffer.push_back(*it); // Aquí se hace la copia profunda del vector LogOdds
+            buffer.push_back(*it); 
         }
 
-        // 4. Ahora es seguro asignar al contenedor original
         particles_.assign(buffer.begin(), buffer.end());
 
-        // 5. Reset de pesos
         for (auto&& w : beluga::views::weights(particles_)) {
             w = beluga::Weight(1.0);
         }
-        // reset de pesos?
-        /***********************************************************************************************************************************/
-        // for (auto&& p : particles_) {
-        //     auto& pose = std::get<0>(p);
-        //     auto& weight = std::get<1>(p);
-        //     auto& lo_grid = std::get<2>(p);
-        //     std::cout << "Pose nueva: " << pose.translation().transpose() << ", Weight nuevo: " << weight << std::endl;          
-        // }
-    
-         // Modificar el log-odds grid del primer particle
-         // Debería imprimir 0.0, confirmando que los particles son independientes
-                        
-        // /// Discrete distribution to sample particle indices proportional to their weights.
-        // std::discrete_distribution<size_t> weight_distribution(weights.begin(), weights.end());
-
-        // /// Generate the resampled set of particles.
-        // std::vector<decltype(particles_)::value_type> resampled_particles;
-        // resampled_particles.reserve(n_particles);
-
-        // for (size_t i = 0; i < n_particles; ++i) {
-        //     auto it = particles_.begin();
-        //     std::advance(it, weight_distribution(rng_));
-        //     const auto& selected = *it;
-        //     resampled_particles.push_back(selected);
-        // }
-
-        // particles_.assign(resampled_particles.begin(), resampled_particles.end());
-
-        // /// Reset importance weights to a uniform distribution.
-        // for (auto&& w : beluga::views::weights(particles_)) {
-        //     w = beluga::Weight(1.0);
-        // }
     }
 
     /// Bresenham's 2D line drawing algorithm.
@@ -434,11 +356,11 @@ public:
                 int x = rx + dx;
                 int y = ry + dy;
 
-                if (x < 0 || x >= (int)GRID_ROWS ||
-                    y < 0 || y >= (int)GRID_COLS)
+                if (x < 0 || x >= (int)log_odds_grid.height() ||
+                    y < 0 || y >= (int)log_odds_grid.width())
                     continue;
 
-                int idx = y * GRID_ROWS + x;
+                int idx = y * log_odds_grid.width() + x;
                 log_odds_grid.at(idx) = -5.0f;
             }
         }

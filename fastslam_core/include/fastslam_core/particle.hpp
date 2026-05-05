@@ -70,7 +70,7 @@ public:
    * \param index The flat index in row-major order.
    * \return Reference to the log-odds value of the cell.
    */
-  [[nodiscard]] float& at(int index){ return data_[index]; }
+  float& at(int index){ return data_[index]; }
 
   /**
    * \brief Accesses a cell value by linear index (read-only).
@@ -89,13 +89,13 @@ public:
   [[nodiscard]] const double origin_y() const { return origin_pose_.translation().y(); }
 
   /// Get the width of the log-odds grid.
-  [[nodiscard]] const int width() const { return width_; }
+  [[nodiscard]] int width() const { return width_; }
 
   /// Get the height of the log-odds grid.
-  [[nodiscard]] const int height() const { return height_; }
+  [[nodiscard]] int height() const { return height_; }
 
   /// Get the resolution of the log-odds grid discretization, in meters.
-  [[nodiscard]] const double resolution() const { return resolution_; }
+  [[nodiscard]] double resolution() const { return resolution_; }
 
   /// Get a reference to the underlying data storage
   [[nodiscard]] const std::vector<float>& data() const { return data_; }
