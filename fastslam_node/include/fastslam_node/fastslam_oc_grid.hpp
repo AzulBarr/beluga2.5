@@ -63,7 +63,7 @@ private:
     void publish_map();
 
     /// Extracts and publishes the pose of the most likely particle.
-    void publish_best_pose();
+    void publish_best_pose(const rclcpp::Time& stamp);
     
     /**
      * \brief Publishes the current particle cloud for visualization.

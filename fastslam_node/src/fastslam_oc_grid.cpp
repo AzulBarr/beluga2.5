@@ -85,7 +85,7 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         slam_->measurement_model_map(z);
         RCLCPP_INFO(this->get_logger(), "Weights calculated");
         auto t2 = std::chrono::high_resolution_clock::now();
-        publish_best_pose();
+        publish_best_pose(msg->header.stamp);
         RCLCPP_INFO(this->get_logger(), "Best pose published");
 
         slam_->update_occupancy_grid(z);
@@ -190,10 +190,10 @@ void FastSLAMNode::publish_map() {
     map_pub_->publish(msg);
 }
 
-void FastSLAMNode::publish_best_pose() {
+void FastSLAMNode::publish_best_pose(const rclcpp::Time& stamp) {
     geometry_msgs::msg::PoseStamped msg2;
 
-    msg2.header.stamp = this->now();
+    msg2.header.stamp = stamp; //this->now();
     msg2.header.frame_id = "map";
 
     const auto& best_pose = slam_->best_pose();
