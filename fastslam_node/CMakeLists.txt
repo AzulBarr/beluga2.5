@@ -20,6 +20,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(TBB REQUIRED)
 
 find_package(fastslam_core REQUIRED)
 
@@ -37,6 +38,7 @@ add_executable( ################################################################
 target_link_libraries(fastslam_node ############################################
     fastslam_core::fastslam_core
     ${OpenCV_LIBRARIES}  # Aprovechamos para enlazar OpenCV correctamente aquí
+    TBB::tbb
 )
 
 target_include_directories(fastslam_node PUBLIC

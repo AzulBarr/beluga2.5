@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <fstream>
 
 #include <tf2_ros/buffer.h>
 #include <tf2/utils.h>
