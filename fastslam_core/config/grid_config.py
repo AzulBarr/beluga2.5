@@ -8,7 +8,7 @@ and generates the corresponding C++ header file.
 import os
 
 # MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag P.O.: 3, Beluga Rosbag HQ S.: 4
-ENV = 4
+ENV = 1
 
 ###################### fastslam_oc_grid.hpp ######################
 
@@ -20,12 +20,17 @@ kROBOT_RADIUS = 0.01
 ###################### PARTICLE.hpp ######################
 
 if ENV == 1:
-    GRID_ROWS = 300
-    GRID_RESOLUTION = 0.1 
-    GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.75
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.25
-    kROBOT_RADIUS = 0.7
+    # GRID_ROWS = 300
+    # GRID_RESOLUTION = 0.1
+    # GRID_COLS = 400
+    # ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
+    # ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.15
+    # kROBOT_RADIUS = 0.7
+    GRID_COLS = 400
+    GRID_ROWS = 250
+    GRID_RESOLUTION = 0.1
+    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
+    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.15
 elif ENV == 2:
     GRID_ROWS = 350
     GRID_RESOLUTION = 0.1 

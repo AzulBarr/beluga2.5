@@ -96,6 +96,12 @@ private:
      */
     [[nodiscard]] state_type tf_to_se2(const geometry_msgs::msg::Transform& t);
 
+    /**
+     * \brief Computes the covariance of the best particle's pose estimate and returns it as a 3x3 matrix.
+     * The covariance is derived from the distribution of particles around the best estimate, providing insight into the uncertainty of the pose estimation.
+     */
+    Sophus::Matrix3<double> compute_se2_covariance();
+
     std::unique_ptr<FastSLAM> slam_; // Pointer to the FastSLAM core implementation.
     
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -120,6 +126,8 @@ private:
     bool publish_trajectory;
     bool save_grid;
     double range_max;
+
+    int it = 0; // Iteration counter for debugging/logging purposes.
 };
 
 #endif // __FASTSLAM_NODE_HPP__

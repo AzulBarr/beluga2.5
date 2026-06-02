@@ -53,7 +53,6 @@ void FastSLAMNode::setup_slam() {
     params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double();
     params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
     params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
-
     /// FastSLAM instance
     slam_ = std::make_unique<FastSLAM> (motion_model, measurement_model, params);
 
@@ -78,7 +77,7 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         /// FAST SLAM
         const auto update_start_time = std::chrono::high_resolution_clock::now();
         auto t0 = std::chrono::high_resolution_clock::now();
-        slam_->sample_motion_model(u);
+        slam_->sample_motion_model(u); //z
         RCLCPP_INFO(this->get_logger(), "Sample completed");
         auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -217,6 +216,13 @@ void FastSLAMNode::publish_best_pose(const rclcpp::Time& stamp) {
 
         }
     }
+
+    if (false){ //it % 10 == 0) { // Print covariance every 30 iterations
+        auto cov = compute_se2_covariance();
+        RCLCPP_WARN(this->get_logger(), "pose variance:\n[%.4f, %.4f, %.4f]",
+            cov(0, 0), cov(1, 1), cov(2, 2));
+    }
+    it++;
 }
 
 void FastSLAMNode::publish_particles(const rclcpp::Time& stamp) {
@@ -302,4 +308,33 @@ void FastSLAMNode::save_trajectory() {
     file.close();
 }
 
+Sophus::Matrix3<double> FastSLAMNode::compute_se2_covariance() {
+    auto poses = beluga::views::states(slam_->particles());
+    auto weights = beluga::views::weights(slam_->particles());
+
+    const Sophus::Vector4<double> mean_vector = beluga::mean(poses, weights, [](const auto& value) {
+      return Eigen::Map<const Sophus::Vector4<double>>{value.data()};
+    });
+
+    auto mean = Sophus::SE2<double>{Eigen::Map<const Sophus::SE2<double>>{mean_vector.data()}};
+    auto covariance = Sophus::Matrix3<double>::Zero().eval();
+
+    // Compute the covariance of the translation part.
+    covariance.template topLeftCorner<2, 2>() = beluga::covariance(
+        poses, weights, mean.translation(), [](const auto& value) { return value.translation(); });
+    
+    // Compute the orientation variance and re-normalize the rotation component (after using the non-normal result).
+    if (mean.so2().unit_complex().norm() < std::numeric_limits<double>::epsilon()) {
+      // Handle the case where both averages are too close to zero.
+      // Return infinite variance.
+      covariance.coeffRef(2, 2) = std::numeric_limits<double>::infinity();
+    } else {
+      // See circular standard deviation in
+      // https://en.wikipedia.org/wiki/Directional_statistics#Dispersion.
+      // 2*Var 
+      covariance.coeffRef(2, 2) = -2.0 * std::log(mean.so2().unit_complex().norm());
+    }
+
+    return covariance;
+  } 
 

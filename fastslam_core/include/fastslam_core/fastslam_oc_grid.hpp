@@ -27,6 +27,7 @@
 #include <beluga/actions/assign.hpp>
 #include <beluga/primitives.hpp>
 #include <beluga/views.hpp>
+#include <beluga/algorithm/estimation.hpp>
 
 #include "fastslam_core/grid_config.hpp"
 
@@ -126,6 +127,7 @@ public:
       }
       best_oc_grid_ = GridTypeOC();
       best_pose_ = state_type{};
+
     }
 
     /// Returns a reference to the current set of particles.
@@ -148,6 +150,7 @@ public:
             auto& pose = std::get<0>(p);
             pose = sampler(pose, gen);
         }
+
     }
 
     /// Updates particle weights based on the measurement model and the received measurement.
@@ -160,13 +163,13 @@ public:
      * \param measurement Measurement data. 
      */
     void measurement_model_map(const measurement_type& z) {
-        /// Subsample the scan to improve performance
-        measurement_type z_sparse;
-        constexpr size_t kStep = 1;
-        z_sparse.reserve(z.size() / kStep + 1);
-        for (size_t i = 0; i < z.size(); i += kStep) {
-            z_sparse.push_back(z[i]);
-        }
+        /// Subsample the scan to improve performance         SI LO QUIERO DEJAR LO PUEDO PONER EN FASTSLAM_NODE
+        // measurement_type z_sparse;
+        // constexpr size_t kStep = 1;
+        // z_sparse.reserve(z.size() / kStep + 1);
+        // for (size_t i = 0; i < z.size(); i += kStep) {
+        //     z_sparse.push_back(z[i]);
+        // }
         
         /// Synchronize the sensor model with the reference map from the best particle
         /// to ensure likelihood calculations are based on the latest environment estimate.
@@ -174,8 +177,7 @@ public:
         auto poses = particles_ | beluga::views::elements<0>;
         
         measurement_model_.update_map(best_oc_grid_);
-
-        auto weight_fn = measurement_model_(measurement_type(z_sparse));
+        auto weight_fn = measurement_model_(measurement_type(z));
         /// Update individual particle weights by evaluating the measurement model likelihood function.
         for (auto&& p : particles_) {
             const auto& pose = std::get<0>(p);
@@ -356,8 +358,8 @@ public:
                 int x = rx + dx;
                 int y = ry + dy;
 
-                if (x < 0 || x >= (int)log_odds_grid.height() ||
-                    y < 0 || y >= (int)log_odds_grid.width())
+                if (x < 0 || x >= (int)log_odds_grid.width() ||
+                    y < 0 || y >= (int)log_odds_grid.height())
                     continue;
 
                 int idx = y * log_odds_grid.width() + x;
@@ -385,12 +387,11 @@ private:
     const float l_occ_ = 1.2f;
     const float l_free_ = -0.2f;
 
-    std::mt19937 rng_;
-
     beluga::spatial_hash<state_type> spatial_hasher_;
 
     GridTypeOC best_oc_grid_;
     state_type best_pose_;
+
 };  
 
 #endif
