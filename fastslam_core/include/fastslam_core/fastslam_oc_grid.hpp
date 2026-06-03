@@ -141,14 +141,51 @@ public:
      * pose by sampling from the resulting distribution.
      *
      * \param control_action Control action.
+     * \param measurement Measurement data.
      */
-    void sample_motion_model(const control_type& u) {
+    void sample_motion_model(const control_type& u, const measurement_type& z) {
         auto sampler = motion_model_(u);
         static thread_local std::mt19937 gen{std::random_device{}()};
 
         for (auto&& p : particles_) {
             auto& pose = std::get<0>(p);
             pose = sampler(pose, gen);
+        }
+
+        /// Scan Matiching
+        measurement_model_.update_map(best_oc_grid_);
+        auto score_fn = measurement_model_(measurement_type(z));
+
+        auto dxys = {-0.1, -0.05, 0.0, 0.05, 0.1};
+        auto dthetas = {-5 * Sophus::Constants<double>::pi() / 180, -2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180, 5 * Sophus::Constants<double>::pi() / 180};
+
+        for (auto&& p : particles_) {
+            auto& pose_pred = std::get<0>(p);
+            auto& weight = std::get<1>(p);
+            auto best_pose = pose_pred;
+            double best_score = score_fn(pose_pred);
+
+            for (double dx : dxys) {
+                for (double dy : dxys) {
+                    for (double dtheta : dthetas) {
+                        auto candidate_pose = state_type{
+                            Sophus::SO2d{pose_pred.so2().log() + dtheta}, 
+                            Eigen::Vector2d{pose_pred.translation().x() + dx, pose_pred.translation().y() + dy}
+                        };
+
+                        double score = score_fn(candidate_pose);
+
+                        if (score > best_score) {
+                            best_score = score;
+                            best_pose = candidate_pose;
+                        }
+                    }
+                }
+            }
+
+            pose_pred = best_pose;
+            weight = beluga::Weight(best_score);         /// Update individual particle weights by evaluating the measurement model likelihood function.
+            // puedo agregar aca lo de los pesos ya que los tengo calculados
         }
 
     }
@@ -176,16 +213,6 @@ public:
         auto lo_grids = particles_ | beluga::views::elements<2>;
         auto poses = particles_ | beluga::views::elements<0>;
         
-        measurement_model_.update_map(best_oc_grid_);
-        auto weight_fn = measurement_model_(measurement_type(z));
-        /// Update individual particle weights by evaluating the measurement model likelihood function.
-        for (auto&& p : particles_) {
-            const auto& pose = std::get<0>(p);
-            auto& weight = std::get<1>(p);
-            double p_z = weight_fn(pose);
-            weight *= p_z;
-        }
-
         double sum_w = 0.0;
         for (auto&& p : particles_) {
             sum_w += static_cast<double>(std::get<1>(p));

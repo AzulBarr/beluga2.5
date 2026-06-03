@@ -77,7 +77,7 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         /// FAST SLAM
         const auto update_start_time = std::chrono::high_resolution_clock::now();
         auto t0 = std::chrono::high_resolution_clock::now();
-        slam_->sample_motion_model(u); //z
+        slam_->sample_motion_model(u, z); //z
         RCLCPP_INFO(this->get_logger(), "Sample completed");
         auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -117,7 +117,7 @@ void FastSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr m
         auto d_tf = std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count();
         auto d_resample = std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count();
 
-        RCLCPP_INFO(this->get_logger(),
+        RCLCPP_WARN(this->get_logger(),
             "Times [ms] | sample: %ld | weight: %ld | map: %ld | pub_map: %ld | particles: %ld | tf: %ld | resample: %ld",
             d_sample, d_weight, d_map, d_pub_map, d_particles, d_tf, d_resample);
 
