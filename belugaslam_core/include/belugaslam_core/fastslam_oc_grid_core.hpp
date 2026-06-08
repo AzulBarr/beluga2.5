@@ -180,8 +180,11 @@ public:
         measurement_model_.update_map(best_oc_grid_);
         auto score_fn = measurement_model_(measurement_type(z_sparse));
 
-        auto dxys = {-0.1, -0.05, 0.0, 0.05, 0.1};
-        auto dthetas = {-5 * Sophus::Constants<double>::pi() / 180, -2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180, 5 * Sophus::Constants<double>::pi() / 180};
+        auto dxys1 = {-0.1, 0.0, 0.1};
+        auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0, 5 * Sophus::Constants<double>::pi() / 180};
+
+        auto dxys2 = {-0.05, 0.0, 0.05};
+        auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180};
 
         for (auto&& p : particles_) {
             auto& pose_pred = std::get<0>(p);
@@ -189,11 +192,9 @@ public:
             auto best_pose = pose_pred;
             double best_score = score_fn(pose_pred);
 
-            std::cout << "new particle" << std::endl;
-
-            for (double dx : dxys) {
-                for (double dy : dxys) {
-                    for (double dtheta : dthetas) {
+            for (double dx : dxys1) {
+                for (double dy : dxys1) {
+                    for (double dtheta : dthetas1) {
                         auto candidate_pose = state_type{
                             Sophus::SO2d{pose_pred.so2().log() + dtheta}, 
                             Eigen::Vector2d{pose_pred.translation().x() + dx, pose_pred.translation().y() + dy}
@@ -204,11 +205,29 @@ public:
                         if (score > best_score) {
                             best_score = score;
                             best_pose = candidate_pose;
-                            std::cout << "Best movement update: dx=" << dx << ", dy=" << dy << ", dtheta=" << dtheta << std::endl;
                         }
                     }
                 }
             }
+
+            for (double dx : dxys2) {
+                for (double dy : dxys2) {
+                    for (double dtheta : dthetas2) {
+                        auto candidate_pose = state_type{
+                            Sophus::SO2d{pose_pred.so2().log() + dtheta}, 
+                            Eigen::Vector2d{pose_pred.translation().x() + dx, pose_pred.translation().y() + dy}
+                        };
+
+                        double score = score_fn(candidate_pose);
+
+                        if (score > best_score) {
+                            best_score = score;
+                            best_pose = candidate_pose;
+                        }
+                    }
+                }
+            }
+
             pose_pred = best_pose;
             weight = beluga::Weight(best_score);         /// Update individual particle weights by evaluating the measurement model likelihood function.
         }
