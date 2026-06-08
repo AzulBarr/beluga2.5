@@ -6,21 +6,15 @@ from launch.actions import DeclareLaunchArgument
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    declare_num_particles = DeclareLaunchArgument(
-        'num_particles',
-        default_value='500',
-        description='Number of particles for FastSLAM'
-    )
-
     declare_min_particles = DeclareLaunchArgument(
         'min_particles',
-        default_value='500',
+        default_value='10',
         description='Minimum number of particles for FastSLAM'
     )
 
     declare_max_particles = DeclareLaunchArgument(
         'max_particles',
-        default_value='2000',
+        default_value='50',
         description='Maximum number of particles for FastSLAM'
     )
 
@@ -97,7 +91,6 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "use_sim_time": True,
-            "num_particles": LaunchConfiguration('num_particles'),
             "min_particles": LaunchConfiguration('min_particles'),
             "max_particles": LaunchConfiguration('max_particles'),
             "odom_frame": LaunchConfiguration('odom_frame'), 
@@ -122,7 +115,6 @@ def generate_launch_description():
     declare_odom_frame_cmd,
     declare_base_frame_cmd,
     declare_scan_topic_cmd,
-    declare_num_particles,
     declare_min_particles,
     declare_max_particles,
     declare_range_max,

@@ -3,7 +3,8 @@
   <arg name="bag_path" default="/home/azul/ros2_ws/src/fastslam_oc_grid/belugaslam_example/bags/ros2_bag_MIT1" />
   <arg name="slam_prefix" default="" />
   <arg name="rviz_config_file" default="$(find-pkg-share belugaslam_example)/RVIZFiles/config2MIT.rviz"/>
-  <arg name="num_particles" default="500"/>
+  <arg name="min_particles" default="10"/>
+  <arg name="max_particles" default="50"/>
   <arg name="record_bag" default="false"/>
 
   <include file="$(find-pkg-share belugaslam_node)/launch/fastslam_oc_grid.launch.py">
@@ -12,7 +13,8 @@
     <arg name="odom_frame" value="odom_combined"/>
     <arg name="base_frame" value="base_footprint"/>
     <arg name="scan_topic" value="/base_scan"/>
-    <arg name="num_particles" value="$(var num_particles)"/>
+    <arg name="min_particles" value="$(var min_particles)"/>
+    <arg name="max_particles" value="$(var max_particles)"/>
   </include>
 
   <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(var rviz_config_file)">

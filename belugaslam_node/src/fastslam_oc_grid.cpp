@@ -2,9 +2,8 @@
 using namespace rclcpp;
 
 BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
-    this->declare_parameter("num_particles", 500);
-    this->declare_parameter("min_particles", 500);
-    this->declare_parameter("max_particles", 2000);
+    this->declare_parameter("min_particles", 10);
+    this->declare_parameter("max_particles", 50);
     this->declare_parameter("odom_frame", "odom");
     this->declare_parameter("base_frame", "base_link");
     this->declare_parameter("publish_trajectory", false);
@@ -41,7 +40,6 @@ void BelugaSLAMNode::setup_slam() {
     beluga::LikelihoodFieldProbModel<GridTypeOC> measurement_model(sensor_params, GridTypeOC());
 
     auto params = FastSLAMParams{};
-    params.num_particles = this->get_parameter("num_particles").as_int();
     params.min_particles = static_cast<std::size_t>(get_parameter("min_particles").as_int());
     params.max_particles = static_cast<std::size_t>(get_parameter("max_particles").as_int());
     publish_trajectory = this->get_parameter("publish_trajectory").as_bool();
@@ -59,7 +57,7 @@ void BelugaSLAMNode::setup_slam() {
     if (seed == 0) slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params);
     else slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params, seed);
 
-    RCLCPP_INFO(this->get_logger(), "SLAM setup completed with %zu particles", params.num_particles); 
+    RCLCPP_INFO(this->get_logger(), "SLAM setup completed with %zu - %zu particles", params.min_particles, params.max_particles); 
 }
 
 void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {    

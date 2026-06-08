@@ -8,11 +8,13 @@ A flamegraph is a convenient tool for understanding how CPU time is being used.
     ```bash
     source /opt/ros/jazzy/setup.bash
     cd ~/ros2_ws
-    colcon build --packages-select belugaslam_core belugaslam_node
+    colcon build --packages-select belugaslam_core belugaslam_node belugaslam_benchmark belugaslam_example
     source install/local_setup.bash
     ros2 run belugaslam_benchmark profile_belugaslam_with_bagfile
     ```
     `perf` will generate a `perf.data` file in the folder it was run.
+
+    TODO: agregar indicación de cambiar el config file
 
 2. To generate a flamegraph from the recorded data, run:
     ```bash

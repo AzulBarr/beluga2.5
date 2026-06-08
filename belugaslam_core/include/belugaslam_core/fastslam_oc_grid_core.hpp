@@ -53,14 +53,11 @@ using FastSLAMParticle = std::tuple<
 //GridTypeOC
 /// Parameters to construct a BelugaSLAM instance.
 struct FastSLAMParams {
-    /// Number of particles in the filter.
-    std::size_t num_particles = 500UL;
-
     /// Minimum number of particles for adaptive resampling.
-    std::size_t min_particles = 500UL;
+    std::size_t min_particles = 10UL;
 
     /// Maximum number of particles for adaptive resampling.
-    std::size_t max_particles = 2000UL;
+    std::size_t max_particles = 50UL;
 
     /// \brief Maximum particle filter population error between the true distribution and the
     /// estimated distribution. It is used in KLD resampling \cite fox2001adaptivekldsampling
@@ -166,13 +163,13 @@ public:
      * \param measurement Measurement data. 
      */
     void measurement_model_map(const measurement_type& z) {
-        /// Subsample the scan to improve performance         TODO: decidir si dejarlo o sacarlo
-        // measurement_type z_sparse;
-        // constexpr size_t kStep = 1;
-        // z_sparse.reserve(z.size() / kStep + 1);
-        // for (size_t i = 0; i < z.size(); i += kStep) {
-        //     z_sparse.push_back(z[i]);
-        // }
+        /// Subsample the scan to improve performance         
+        measurement_type z_sparse;
+        constexpr size_t kStep = 2;
+        z_sparse.reserve(z.size() / kStep + 1);
+        for (size_t i = 0; i < z.size(); i += kStep) {
+            z_sparse.push_back(z[i]);
+        }
         
         /// Synchronize the sensor model with the reference map from the best particle
         /// to ensure likelihood calculations are based on the latest environment estimate.
@@ -181,7 +178,7 @@ public:
         
         /// Scan Matiching
         measurement_model_.update_map(best_oc_grid_);
-        auto score_fn = measurement_model_(measurement_type(z));
+        auto score_fn = measurement_model_(measurement_type(z_sparse));
 
         auto dxys = {-0.1, -0.05, 0.0, 0.05, 0.1};
         auto dthetas = {-5 * Sophus::Constants<double>::pi() / 180, -2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180, 5 * Sophus::Constants<double>::pi() / 180};
@@ -191,6 +188,8 @@ public:
             auto& weight = std::get<1>(p);
             auto best_pose = pose_pred;
             double best_score = score_fn(pose_pred);
+
+            std::cout << "new particle" << std::endl;
 
             for (double dx : dxys) {
                 for (double dy : dxys) {
@@ -205,6 +204,7 @@ public:
                         if (score > best_score) {
                             best_score = score;
                             best_pose = candidate_pose;
+                            std::cout << "Best movement update: dx=" << dx << ", dy=" << dy << ", dtheta=" << dtheta << std::endl;
                         }
                     }
                 }
