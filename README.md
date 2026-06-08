@@ -1,8 +1,8 @@
-# Beluga 2.5
+# Beluga-SLAM
 
 ## Overview
 
-**Beluga 2.5** is a FastSLAM-based implementation for 2D simultaneous localization and mapping (SLAM) using occupancy grids and 2D LiDAR data.
+**Beluga-SLAM** is a FastSLAM-based implementation for 2D simultaneous localization and mapping (SLAM) using occupancy grids and 2D LiDAR data.
 
 The project builds on the design principles of particle filters and probabilistic robotics.
 
@@ -10,13 +10,13 @@ The project builds on the design principles of particle filters and probabilisti
 
 ## Features
 
-- **FastSLAM algorithm** with per-particle maps  
+- ** algorithm** with per-particle maps  
 - **Log-odds grid representation** for efficient occupancy updates  
 - **Likelihood field measurement model** for robust sensor integration  
 - **Differential drive motion model**  
 - Modular design with clear separation between:
-  - Core SLAM logic (`fastslam_core`)
-  - ROS 2 node interface (`fastslam_node`)
+  - Core SLAM logic (`belugaslam_core`)
+  - ROS 2 node interface (`belugaslam_node`)
 
 ---
 
@@ -24,7 +24,7 @@ The project builds on the design principles of particle filters and probabilisti
 
 The project is structured in two main components:
 
-### `fastslam_core`
+### `belugaslam_core`
 
 Core SLAM implementation independent of ROS:
 - Particle representation
@@ -32,7 +32,7 @@ Core SLAM implementation independent of ROS:
 - Occupancy grid mapping
 - Resampling
 
-### `fastslam_node`
+### `belugaslam_node`
 
 ROS 2 interface layer:
 - Parameter handling
@@ -51,7 +51,7 @@ ROS 2 interface layer:
 ---
 ## Usage Instructions
 
-For detailed usage instructions and examples, please refer to the [Example README](fastslam_example/README.md).
+For detailed usage instructions and examples, please refer to the [Example README](belugaslam_example/README.md).
 
 ---
 ## Results

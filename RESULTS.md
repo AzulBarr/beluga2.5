@@ -18,7 +18,7 @@
   </tr>
 </table>
 
-## Other results from this FastSLAM node
+## Other results from this BelugaSLAM node
 
 <table align="center">
   <tr>

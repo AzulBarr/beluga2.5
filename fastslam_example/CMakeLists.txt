@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(fastslam_example)
+project(belugaslam_example)
 
 find_package(ament_cmake REQUIRED)
 
