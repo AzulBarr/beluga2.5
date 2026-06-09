@@ -214,8 +214,8 @@ public:
                 for (double dy : dxys2) {
                     for (double dtheta : dthetas2) {
                         auto candidate_pose = state_type{
-                            Sophus::SO2d{pose_pred.so2().log() + dtheta}, 
-                            Eigen::Vector2d{pose_pred.translation().x() + dx, pose_pred.translation().y() + dy}
+                            Sophus::SO2d{best_pose.so2().log() + dtheta}, 
+                            Eigen::Vector2d{best_pose.translation().x() + dx, best_pose.translation().y() + dy}
                         };
 
                         double score = score_fn(candidate_pose);
