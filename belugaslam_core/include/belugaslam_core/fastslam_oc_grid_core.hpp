@@ -50,7 +50,7 @@ using FastSLAMParticle = std::tuple<
     beluga::Weight,
     GridTypeLO
 >;
-//GridTypeOC
+
 /// Parameters to construct a BelugaSLAM instance.
 struct FastSLAMParams {
     /// Minimum number of particles for adaptive resampling.
@@ -176,7 +176,7 @@ public:
         auto lo_grids = particles_ | beluga::views::elements<2>;
         auto poses = particles_ | beluga::views::elements<0>;
         
-        /// Scan Matiching
+        /// Scan Matching
         measurement_model_.update_map(best_oc_grid_);
         auto score_fn = measurement_model_(measurement_type(z_sparse));
 
@@ -302,9 +302,6 @@ public:
                     lo_grid.at(hit_idx) = std::min(lo_grid.at(hit_idx) + l_occ_, 5.0f);
                 }
             }
-
-            /// Synchronize the occupancy grid representation.
-            //oc_grid = sync_log_odds_to_occupancy(lo_grid);
         }
     }
 
