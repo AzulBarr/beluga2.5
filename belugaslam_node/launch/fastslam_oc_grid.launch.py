@@ -20,13 +20,13 @@ def generate_launch_description():
 
     declare_odom_frame_cmd = DeclareLaunchArgument(
         'odom_frame',
-        default_value='odom_combined',
+        default_value='odom',
         description='Odometry frame for FastSLAM (e.g., odom, odom_combined)'
     )
 
     declare_base_frame_cmd =DeclareLaunchArgument(
         'base_frame',
-        default_value='base_footprint',
+        default_value='base_link',
         description='Base frame for FastSLAM (e.g., base_footprint, base_link)'
     )
 
@@ -96,7 +96,7 @@ def generate_launch_description():
             "odom_frame": LaunchConfiguration('odom_frame'), 
             "base_frame": LaunchConfiguration('base_frame'), 
             "publish_trajectory": False,
-            "save_map": True,
+            "save_map": False,
             "range_max": LaunchConfiguration('range_max'),
             "kld_epsilon": LaunchConfiguration('kld_epsilon'),
             "kld_z": LaunchConfiguration('kld_z'),

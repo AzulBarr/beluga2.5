@@ -32,7 +32,7 @@ include_directories(
 add_executable( ################################################################
   belugaslam_node 
   src/belugaslam_node.cpp
-  src/fastslam_oc_grid.cpp 
+  src/fastslam_oc_grid_node.cpp 
 )
 
 target_link_libraries(belugaslam_node ############################################
