@@ -87,7 +87,7 @@ def generate_launch_description():
     belugaslam_node = Node(
         package="belugaslam_node",  
         executable="belugaslam_node", 
-        name="fastslam_oc_grid",
+        name="belugaslam",
         output="screen",
         parameters=[{
             "use_sim_time": True,

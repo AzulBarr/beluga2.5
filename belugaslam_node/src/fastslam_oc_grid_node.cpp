@@ -23,9 +23,11 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
     scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>("/scan", rclcpp::SensorDataQoS(), std::bind(&BelugaSLAMNode::laser_callback, this, std::placeholders::_1));
+
     map_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/map", rclcpp::QoS(1).transient_local());
     particle_cloud_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/particle_cloud", 10);
-    pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/best_pose", 10);
+    entropy_pub_ = this->create_publisher<std_msgs::msg::Float64>("/localization_entropy", 10);
+    pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/best_pose", 10);
     trajectory_pub_ = this->create_publisher<nav_msgs::msg::Path>("/trajectory", 10);
     trajectory_msg_.header.frame_id = "map";
     
@@ -70,7 +72,14 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
             first_odom_received_ = true;
             return;
         }
-        
+        distance = (current_odom.translation() - last_odom_.translation()).norm();
+        angle_diff = (last_odom_.so2().inverse() * current_odom.so2()).log();
+        angle_diff = std::abs(angle_diff);
+
+        if (distance < 0.1 && angle_diff < 0.1) {
+            publish_best_pose(msg->header.stamp);
+            return;
+        }
         auto u = std::make_tuple(current_odom, last_odom_); // Control
         last_odom_ = current_odom;
         auto z = laser_to_cartesian(msg); // Measurement
@@ -85,6 +94,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         slam_->measurement_model_map(z);
         RCLCPP_INFO(this->get_logger(), "Weights calculated");
         auto t2 = std::chrono::high_resolution_clock::now();
+        compute_se2_covariance();
         publish_best_pose(msg->header.stamp);
         RCLCPP_INFO(this->get_logger(), "Best pose published");
 
@@ -191,39 +201,57 @@ void BelugaSLAMNode::publish_map() {
 }
 
 void BelugaSLAMNode::publish_best_pose(const rclcpp::Time& stamp) {
-    geometry_msgs::msg::PoseStamped msg2;
 
-    msg2.header.stamp = stamp; //this->now();
-    msg2.header.frame_id = "map";
+    geometry_msgs::msg::PoseWithCovarianceStamped msg;
+
+    msg.header.stamp = stamp;
+    msg.header.frame_id = "map";
 
     const auto& best_pose = slam_->best_pose();
 
-    msg2.pose.position.x = best_pose.translation().x();
-    msg2.pose.position.y = best_pose.translation().y();
-    msg2.pose.position.z = 0.0;
+    // Pose
+    msg.pose.pose.position.x = best_pose.translation().x();
+    msg.pose.pose.position.y = best_pose.translation().y();
+    msg.pose.pose.position.z = 0.0;
 
-    tf2::Quaternion q2;
-    q2.setRPY(0, 0, best_pose.so2().log());
-    msg2.pose.orientation = tf2::toMsg(q2);
+    tf2::Quaternion q;
+    q.setRPY(0.0, 0.0, best_pose.so2().log());
+    msg.pose.pose.orientation = tf2::toMsg(q);
 
-    pose_pub_->publish(msg2);
+    // Covarianza
+    auto cov = covariance_;
 
-    /// Publish the trajectory
-    if (publish_trajectory){
-        if (true) { // TODO: add distance check to avoid publishing too many points
-            trajectory_msg_.header.stamp = this->now();
-            trajectory_msg_.poses.push_back(msg2);
-            trajectory_pub_->publish(trajectory_msg_);      
+    msg.pose.covariance.fill(0.0);
 
-        }
+    msg.pose.covariance[0]  = cov(0,0);  // x-x
+    msg.pose.covariance[1]  = cov(0,1);  // x-y
+    msg.pose.covariance[6]  = cov(1,0);  // y-x
+    msg.pose.covariance[7]  = cov(1,1);  // y-y
+
+    msg.pose.covariance[5]  = cov(0,2);  // x-yaw
+    msg.pose.covariance[30] = cov(2,0);  // yaw-x
+
+    msg.pose.covariance[11] = cov(1,2);  // y-yaw
+    msg.pose.covariance[31] = cov(2,1);  // yaw-y
+
+    msg.pose.covariance[35] = cov(2,2);  // yaw-yaw
+
+    pose_pub_->publish(msg);
+
+    // Trayectoria
+    if (publish_trajectory) {
+        geometry_msgs::msg::PoseStamped pose_msg;
+
+        pose_msg.header = msg.header;
+        pose_msg.pose = msg.pose.pose;
+
+        trajectory_msg_.header.stamp = stamp;
+        trajectory_msg_.header.frame_id = "map";
+
+        trajectory_msg_.poses.push_back(pose_msg);
+
+        trajectory_pub_->publish(trajectory_msg_);
     }
-
-    if (false){ //it % 10 == 0) { // Print covariance every 30 iterations
-        auto cov = compute_se2_covariance();
-        RCLCPP_WARN(this->get_logger(), "pose variance:\n[%.4f, %.4f, %.4f]",
-            cov(0, 0), cov(1, 1), cov(2, 2));
-    }
-    it++;
 }
 
 void BelugaSLAMNode::publish_particles(const rclcpp::Time& stamp) {
@@ -260,7 +288,7 @@ void BelugaSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Soph
     tf_broadcaster_->sendTransform(t);
 }
 
-// void BelugaSLAMNode::save_map() {
+// void BelugaSLAMNode::save_map() { // TODO: change to save best_oc_grid and fix the fact that it was saved flipped
 //     if (!save_grid) return;
 //     auto lo_grids = slam_->particles() | beluga::views::elements<2>;
 //     auto& best_lo_grid = lo_grids[best_idx_];
@@ -287,7 +315,7 @@ void BelugaSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Soph
 
 //     cv::imwrite("final_map.png", map_img);
 //     RCLCPP_INFO(this->get_logger(), "Map saved successfully as PNG.");
-// } PONER QUE SEA CON BEST_OC_GRID Y ARREGLAR PORQUE SE GUARDABA DADO VUELTA
+// } 
 
 void BelugaSLAMNode::save_trajectory() {
     if (!publish_trajectory) return;
@@ -309,7 +337,7 @@ void BelugaSLAMNode::save_trajectory() {
     file.close();
 }
 
-Sophus::Matrix3<double> BelugaSLAMNode::compute_se2_covariance() {
+void BelugaSLAMNode::compute_se2_covariance() {
     auto poses = beluga::views::states(slam_->particles());
     auto weights = beluga::views::weights(slam_->particles());
 
@@ -318,24 +346,22 @@ Sophus::Matrix3<double> BelugaSLAMNode::compute_se2_covariance() {
     });
 
     auto mean = Sophus::SE2<double>{Eigen::Map<const Sophus::SE2<double>>{mean_vector.data()}};
-    auto covariance = Sophus::Matrix3<double>::Zero().eval();
+    auto covariance_ = Sophus::Matrix3<double>::Zero().eval();
 
     // Compute the covariance of the translation part.
-    covariance.template topLeftCorner<2, 2>() = beluga::covariance(
+    covariance_.template topLeftCorner<2, 2>() = beluga::covariance(
         poses, weights, mean.translation(), [](const auto& value) { return value.translation(); });
     
     // Compute the orientation variance and re-normalize the rotation component (after using the non-normal result).
     if (mean.so2().unit_complex().norm() < std::numeric_limits<double>::epsilon()) {
       // Handle the case where both averages are too close to zero.
       // Return infinite variance.
-      covariance.coeffRef(2, 2) = std::numeric_limits<double>::infinity();
+      covariance_.coeffRef(2, 2) = std::numeric_limits<double>::infinity();
     } else {
       // See circular standard deviation in
       // https://en.wikipedia.org/wiki/Directional_statistics#Dispersion.
       // 2*Var 
-      covariance.coeffRef(2, 2) = -2.0 * std::log(mean.so2().unit_complex().norm());
+      covariance_.coeffRef(2, 2) = -2.0 * std::log(mean.so2().unit_complex().norm());
     }
-
-    return covariance;
   } 
 

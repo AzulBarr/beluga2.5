@@ -22,6 +22,7 @@
 #include "geometry_msgs/msg/pose_array.hpp"
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <std_msgs/msg/float64.hpp>
 
 #include "belugaslam_core/fastslam_oc_grid_core.hpp"
 
@@ -97,7 +98,7 @@ private:
      * \brief Computes the covariance of the best particle's pose estimate and returns it as a 3x3 matrix.
      * The covariance is derived from the distribution of particles around the best estimate, providing insight into the uncertainty of the pose estimation.
      */
-    Sophus::Matrix3<double> compute_se2_covariance();
+    void compute_se2_covariance();
 
     std::unique_ptr<BelugaSLAM> slam_; // Pointer to the BelugaSLAM core implementation.
     
@@ -108,7 +109,8 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particle_cloud_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr entropy_pub_;
 
     state_type last_odom_;
     bool first_odom_received_ = false;
@@ -116,7 +118,6 @@ private:
 
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr trajectory_pub_;
     nav_msgs::msg::Path trajectory_msg_;
-    double min_distance_ = 0.2; 
 
     std::string odom_f;
     std::string base_f;
@@ -125,6 +126,12 @@ private:
     double range_max;
 
     int it = 0; // Iteration counter for debugging/logging purposes.
+
+    double distance = 0;
+
+    double angle_diff = 0;
+
+    Sophus::Matrix3<double> covariance_ = Sophus::Matrix3<double>::Zero().eval(); // Covariance matrix for the best particle's pose estimate.
 };
 
 #endif // __BELUGASLAM_NODE_HPP__
