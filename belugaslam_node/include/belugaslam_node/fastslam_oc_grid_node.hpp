@@ -100,6 +100,10 @@ private:
      */
     void compute_se2_covariance();
 
+    void compute_entropy();
+
+    void publish_uncertainty_map();
+
     std::unique_ptr<BelugaSLAM> slam_; // Pointer to the BelugaSLAM core implementation.
     
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -111,6 +115,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particle_cloud_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr entropy_pub_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr uncertainty_map_pub_;
 
     state_type last_odom_;
     bool first_odom_received_ = false;
@@ -125,13 +130,13 @@ private:
     bool save_grid;
     double range_max;
 
-    int it = 0; // Iteration counter for debugging/logging purposes.
+    int it = 0; // Iteration counter for controlling the frequency of certain operations (e.g., publishing the uncertainty map).
 
     double distance = 0;
 
     double angle_diff = 0;
 
-    Sophus::Matrix3<double> covariance_ = Sophus::Matrix3<double>::Zero().eval(); // Covariance matrix for the best particle's pose estimate.
-};
+    Sophus::Matrix3<double> covariance_ = 1e3 * Sophus::Matrix3<double>::Identity(); // Covariance matrix for the best particle's pose estimate.
+}; 
 
 #endif // __BELUGASLAM_NODE_HPP__

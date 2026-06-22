@@ -28,6 +28,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     particle_cloud_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/particle_cloud", 10);
     entropy_pub_ = this->create_publisher<std_msgs::msg::Float64>("/localization_entropy", 10);
     pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/best_pose", 10);
+    uncertainty_map_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/map_uncertainty", 1);
     trajectory_pub_ = this->create_publisher<nav_msgs::msg::Path>("/trajectory", 10);
     trajectory_msg_.header.frame_id = "map";
     
@@ -64,7 +65,7 @@ void BelugaSLAMNode::setup_slam() {
 
 void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {    
     try {
-        auto tf_now = tf_buffer_->lookupTransform(odom_f, base_f, msg->header.stamp, rclcpp::Duration::from_seconds(0.7)); //0.1
+        auto tf_now = tf_buffer_->lookupTransform(odom_f, base_f, msg->header.stamp, rclcpp::Duration::from_seconds(0.7));
         Sophus::SE2d current_odom = tf_to_se2(tf_now.transform);
 
         if (!first_odom_received_) {
@@ -95,6 +96,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         RCLCPP_INFO(this->get_logger(), "Weights calculated");
         auto t2 = std::chrono::high_resolution_clock::now();
         compute_se2_covariance();
+        compute_entropy();
         publish_best_pose(msg->header.stamp);
         RCLCPP_INFO(this->get_logger(), "Best pose published");
 
@@ -103,6 +105,10 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         auto t3 = std::chrono::high_resolution_clock::now();
 
         publish_map();
+        if (it % 10 == 0) { //TODO: change to publish every N iterations or seconds parameter
+            publish_uncertainty_map();
+        }
+        it ++;
         RCLCPP_INFO(this->get_logger(), "Map published");
         auto t4 = std::chrono::high_resolution_clock::now();
 
@@ -346,7 +352,6 @@ void BelugaSLAMNode::compute_se2_covariance() {
     });
 
     auto mean = Sophus::SE2<double>{Eigen::Map<const Sophus::SE2<double>>{mean_vector.data()}};
-    auto covariance_ = Sophus::Matrix3<double>::Zero().eval();
 
     // Compute the covariance of the translation part.
     covariance_.template topLeftCorner<2, 2>() = beluga::covariance(
@@ -365,3 +370,50 @@ void BelugaSLAMNode::compute_se2_covariance() {
     }
   } 
 
+void BelugaSLAMNode::compute_entropy() {
+    auto weights = beluga::views::weights(slam_->particles());
+    double entropy = 0.0;
+    for (const auto& w : weights) {
+        if (w > 1e-9) { // Avoid log(0)
+            entropy -= w * std::log(w);
+        }
+    }
+    std_msgs::msg::Float64 msg;
+    msg.data = entropy;
+    entropy_pub_->publish(msg);
+}
+
+void BelugaSLAMNode::publish_uncertainty_map() {
+    auto best_lo_grid = slam_->best_log_odds_grid();
+
+    nav_msgs::msg::OccupancyGrid msg;
+    msg.header.stamp = this->now();
+    msg.header.frame_id = "map";
+
+    msg.info.resolution = best_lo_grid.resolution();
+    msg.info.width = best_lo_grid.width();
+    msg.info.height = best_lo_grid.height();
+    
+    msg.info.origin.position.x = best_lo_grid.origin().translation().x();
+    msg.info.origin.position.y = best_lo_grid.origin().translation().y();
+    
+    tf2::Quaternion q;
+    q.setRPY(0, 0, best_lo_grid.origin().so2().log());
+    msg.info.origin.orientation = tf2::toMsg(q);
+
+    constexpr double eps = 1e-9;
+    msg.data.assign(best_lo_grid.data().size(), 0);
+    for (long unsigned int i = 0; i < best_lo_grid.data().size(); ++i) {
+        double p = 1.0f / (1.0f + std::exp(-best_lo_grid.data().at(i)));
+        p = std::clamp(p, eps, 1.0 - eps);
+
+        double H = -p * std::log(p) -(1.0 - p) * std::log(1.0 - p);
+
+        msg.data[i] = static_cast<int8_t>(100.0 * H / std::log(2.0));
+    }
+    uncertainty_map_pub_->publish(msg);
+    RCLCPP_WARN(
+    this->get_logger(),
+    "Publishing uncertainty map (%zu cells)",
+    msg.data.size());
+}

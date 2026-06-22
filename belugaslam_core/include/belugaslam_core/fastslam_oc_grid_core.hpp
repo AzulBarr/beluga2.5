@@ -125,6 +125,7 @@ public:
         std::get<1>(p) = beluga::Weight(1.0);
       }
       best_oc_grid_ = GridTypeOC();
+      best_lo_grid_ = GridTypeLO();
       best_pose_ = state_type{};
 
     }
@@ -254,8 +255,8 @@ public:
         size_t best_idx = std::distance(weights.begin(), max_weight_it);
 
         best_pose_ = poses[best_idx];
-        const auto& best_log_odds = lo_grids[best_idx];
-        sync_log_odds_to_occupancy(best_log_odds, best_oc_grid_);
+        best_lo_grid_ = lo_grids[best_idx];
+        sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
     }
 
     /// Update the occupancy grid map of each particle based on the transformed measurement.
@@ -419,6 +420,10 @@ public:
         return best_pose_;
     }
 
+    GridTypeLO best_log_odds_grid() const {
+        return best_lo_grid_;
+    }
+
 private:
     beluga::TupleVector<FastSLAMParticle> particles_;
 
@@ -433,6 +438,7 @@ private:
     beluga::spatial_hash<state_type> spatial_hasher_;
 
     GridTypeOC best_oc_grid_;
+    GridTypeLO best_lo_grid_;
     state_type best_pose_;
 
     std::mt19937 rng_;
