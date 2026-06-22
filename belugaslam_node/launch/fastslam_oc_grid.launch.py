@@ -96,17 +96,16 @@ def generate_launch_description():
             "odom_frame": LaunchConfiguration('odom_frame'), 
             "base_frame": LaunchConfiguration('base_frame'), 
             "publish_trajectory": False,
-            "save_map": False,
+            #save_map": False,
             "range_max": LaunchConfiguration('range_max'),
             "kld_epsilon": LaunchConfiguration('kld_epsilon'),
             "kld_z": LaunchConfiguration('kld_z'),
             "spatial_resolution_x": LaunchConfiguration('spatial_resolution_x'),
             "spatial_resolution_y": LaunchConfiguration('spatial_resolution_y'),
             "spatial_resolution_theta": LaunchConfiguration('spatial_resolution_theta'),
-            "random_seed": LaunchConfiguration('random_seed'),
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
-        arguments=["--ros-args", "--log-level", "WARN"],
+        arguments=["--ros-args", "--log-level", "INFO"],
         prefix=LaunchConfiguration('slam_prefix')
     )
 

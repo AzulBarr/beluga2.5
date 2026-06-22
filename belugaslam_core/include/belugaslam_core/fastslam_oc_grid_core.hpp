@@ -110,15 +110,13 @@ public:
     BelugaSLAM(
         MotionModel motion_model,
         MeasurementModel measurement_model,
-        const FastSLAMParams& params = FastSLAMParams{},
-        uint32_t seed = std::random_device{}())
+        const FastSLAMParams& params = FastSLAMParams{})
         : motion_model_(std::move(motion_model)),
           measurement_model_(std::move(measurement_model)),
           spatial_hasher_{params.spatial_resolution_x, 
                       params.spatial_resolution_y, 
                       params.spatial_resolution_theta},
-          params_(params),
-          rng_(seed) {
+          params_(params){
       particles_.resize(params_.min_particles);
       for (auto&& p : particles_) {
         std::get<0>(p) = state_type{};
@@ -317,7 +315,7 @@ public:
         const auto weights = beluga::views::weights(particles_) |
                          ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
                          ranges::to<std::vector<double>>();
-        auto resampling_view = beluga::views::sample(particles_, weights, rng_) |
+        auto resampling_view = beluga::views::sample(particles_, weights) |
                     beluga::views::take_while_kld(
                         [this](const auto& p) {
                             // Adapt the hasher to work with the full particle tuple by hashing only the pose
@@ -441,7 +439,7 @@ private:
     GridTypeLO best_lo_grid_;
     state_type best_pose_;
 
-    std::mt19937 rng_;
+    std::mt19937 rng_ = std::mt19937(std::random_device{}());
 };  
 
 #endif

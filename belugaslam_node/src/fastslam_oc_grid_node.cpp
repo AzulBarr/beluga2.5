@@ -14,7 +14,6 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("spatial_resolution_x", 0.05);
     this->declare_parameter("spatial_resolution_y", 0.05);
     this->declare_parameter("spatial_resolution_theta", 10 * Sophus::Constants<double>::pi() / 180);
-    this->declare_parameter("random_seed", 0);
     
     setup_slam();
 
@@ -55,10 +54,8 @@ void BelugaSLAMNode::setup_slam() {
     params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double();
     params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
     params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
-    uint32_t seed = static_cast<uint32_t>(get_parameter("random_seed").as_int());
     /// BelugaSLAM instance
-    if (seed == 0) slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params);
-    else slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params, seed);
+    slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params);
 
     RCLCPP_INFO(this->get_logger(), "SLAM setup completed with %zu - %zu particles", params.min_particles, params.max_particles); 
 }
@@ -244,7 +241,7 @@ void BelugaSLAMNode::publish_best_pose(const rclcpp::Time& stamp) {
 
     pose_pub_->publish(msg);
 
-    // Trayectoria
+    // Trajectory
     if (publish_trajectory) {
         geometry_msgs::msg::PoseStamped pose_msg;
 
@@ -294,54 +291,6 @@ void BelugaSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Soph
     tf_broadcaster_->sendTransform(t);
 }
 
-// void BelugaSLAMNode::save_map() { // TODO: change to save best_oc_grid and fix the fact that it was saved flipped
-//     if (!save_grid) return;
-//     auto lo_grids = slam_->particles() | beluga::views::elements<2>;
-//     auto& best_lo_grid = lo_grids[best_idx_];
-
-//     const int width = best_lo_grid.width();
-//     const int height = best_lo_grid.height();
-
-//     cv::Mat map_img(height, width, CV_8UC1);
-
-//     for (int r = 0; r < height; ++r) {
-//         for (int c = 0; c < width; ++c) {
-//             float lo = best_lo_grid.at(r * width + c);
-            
-//             uint8_t pixel_val;
-//             if (std::abs(lo) < 0.01f) {
-//                 pixel_val = 127; 
-//             } else {
-//                 float p = 1.0f / (1.0f + std::exp(-lo));
-//                 pixel_val = static_cast<uint8_t>((1.0f - p) * 255.0f);
-//             }
-//             map_img.at<uint8_t>(r, c) = pixel_val;
-//         }
-//     }
-
-//     cv::imwrite("final_map.png", map_img);
-//     RCLCPP_INFO(this->get_logger(), "Map saved successfully as PNG.");
-// } 
-
-void BelugaSLAMNode::save_trajectory() {
-    if (!publish_trajectory) return;
-    std::ofstream file("trajectory.txt");
-    for (const auto& pose_i : trajectory_msg_.poses) {
-        double x = pose_i.pose.position.x;
-        double y = pose_i.pose.position.y;
-        double z = 0.0;
-        double qx = pose_i.pose.orientation.x;
-        double qy = pose_i.pose.orientation.y;
-        double qz = pose_i.pose.orientation.z;
-        double qw = pose_i.pose.orientation.w;
-        file << std::fixed << std::setprecision(9)
-             << pose_i.header.stamp.sec + pose_i.header.stamp.nanosec * 1e-9 << " "
-             << x << " " << y << " " << z << " "
-             << qx << " " << qy << " " << qz << " " << qw
-             << "\n";    
-    }
-    file.close();
-}
 
 void BelugaSLAMNode::compute_se2_covariance() {
     auto poses = beluga::views::states(slam_->particles());

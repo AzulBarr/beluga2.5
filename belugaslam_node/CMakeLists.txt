@@ -19,7 +19,6 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(OpenCV REQUIRED)
 find_package(TBB REQUIRED)
 
 find_package(belugaslam_core REQUIRED)
@@ -37,14 +36,12 @@ add_executable( ################################################################
 
 target_link_libraries(belugaslam_node ############################################
     belugaslam_core::belugaslam_core
-    ${OpenCV_LIBRARIES}  # Aprovechamos para enlazar OpenCV correctamente aquí
     TBB::tbb
 )
 
 target_include_directories(belugaslam_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
-  ${OpenCV_INCLUDE_DIRS} #######################################################
 )
 
 target_compile_features(belugaslam_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
@@ -58,7 +55,6 @@ ament_target_dependencies(belugaslam_node
   tf2_geometry_msgs
   std_msgs
   sensor_msgs
-  OpenCV
   belugaslam_core
 )
 

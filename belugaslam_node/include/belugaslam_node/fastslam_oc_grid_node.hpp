@@ -1,5 +1,3 @@
-#include <opencv2/opencv.hpp>
-
 #ifndef __BELUGASLAM_NODE_HPP__
 #define __BELUGASLAM_NODE_HPP__
 
@@ -46,8 +44,6 @@ public:
     /// Constructor.
     BelugaSLAMNode();
     ~BelugaSLAMNode() {
-        //save_map();
-        //save_trajectory();
     }
 
 private:
@@ -78,7 +74,7 @@ private:
     void broadcast_map_to_odom(const rclcpp::Time& stamp, const state_type& current_odom);
     
     //void save_map();
-    void save_trajectory();
+    //void save_trajectory();
 
     /**
      * \brief Converts polar laser readings to Cartesian coordinates in the robot's local frame.
