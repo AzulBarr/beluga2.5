@@ -27,7 +27,7 @@ All experiments were conducted using KLD-adaptive sampling with a minimum of 5 p
 </p>
 
 --- 
-## EVO Trajectory Evaluation on different ROSBags 
+## Trajectory Evaluation on different ROSBags 
 
 <table align="center">
   <tr>
@@ -40,7 +40,7 @@ All experiments were conducted using KLD-adaptive sampling with a minimum of 5 p
   </tr>
 </table>
 <p align="center">
-  <sub><b></b> EVO evaluation on the HQ Simulation Dataset. The estimated trajectory is compared against the ground truth, yielding an Absolute Pose Error (APE) RMSE of <b>0.0393 m</b>.</sub>
+  <sub><b></b> Evaluation on the HQ Simulation Dataset. The estimated trajectory is compared against the ground truth, yielding an Absolute Pose Error (APE) RMSE of <b>0.0393 m</b>.</sub>
 </p>
 
 <table align="center">
@@ -54,7 +54,7 @@ All experiments were conducted using KLD-adaptive sampling with a minimum of 5 p
   </tr>
 </table>
 <p align="center">
-  <sub><b></b> EVO evaluation on the Intel Research Lab dataset. Absolute Pose Error (APE) RMSE of <b>0.1038 m</b>.</sub>
+  <sub><b></b> Evaluation on the Intel Research Lab dataset. Absolute Pose Error (APE) RMSE of <b>0.1038 m</b>.</sub>
 </p>
 
 <table align="center">
@@ -68,8 +68,13 @@ All experiments were conducted using KLD-adaptive sampling with a minimum of 5 p
   </tr>
 </table>
 <p align="center">
-  <sub><b></b> EVO evaluation on the MIT Stata Center Dataset. Absolute Pose Error (APE) RMSE of <b>0.2211 m</b>.</sub>
+  <sub><b></b> Evaluation on the MIT Stata Center Dataset. Absolute Pose Error (APE) RMSE of <b>0.2211 m</b>.</sub>
 </p>
 
+---
+## Evaluation Tools
 
+Trajectory evaluation was performed using EVO, a Python package for the evaluation of odometry and SLAM algorithms.
+
+Repository: https://github.com/MichaelGrupp/evo
 

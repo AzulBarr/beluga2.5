@@ -38,7 +38,7 @@ def generate_launch_description():
 
     declare_scan_topic_cmd = DeclareLaunchArgument(
         'scan_topic',
-        default_value='/base_scan',
+        default_value='/scan',
         description='Laser scan topic'
     )
 

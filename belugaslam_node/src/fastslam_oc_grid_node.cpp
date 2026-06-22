@@ -74,7 +74,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         angle_diff = (last_odom_.so2().inverse() * current_odom.so2()).log();
         angle_diff = std::abs(angle_diff);
 
-        if (distance < 0.1 && angle_diff < 0.1) {
+        if (distance < 0.1 && angle_diff < 0.1) { //TODO: make these parameters
             publish_best_pose(msg->header.stamp);
             return;
         }
