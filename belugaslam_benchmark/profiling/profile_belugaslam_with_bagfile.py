@@ -14,9 +14,6 @@ def setup_kernel():
 
 def main():
     parser = argparse.ArgumentParser(description="Replicating Beluga's profiler for BelugaSLAM.")
-    parser.add_argument('--bag_path', type=str, 
-                        default='/home/azul/ros2_ws/src/fastslam_oc_grid/belugaslam_example/bags/beluga_rosbag',
-                        help='Path to the rosbag file.')
     parser.add_argument('--rate', type=float, default=1.0, help='Playback rate.')
     args = parser.parse_args()
 
@@ -44,7 +41,6 @@ def main():
     # 5. Build the final command
     cmd = [
         'ros2', 'launch', 'belugaslam_example', 'beluga_rosbag_belugaslam.xml',
-        f'bag_path:={args.bag_path}',
         f'slam_prefix:={perf_prefix}',
         f'bag_rate:={args.rate}',
         'use_sim_time:=true'

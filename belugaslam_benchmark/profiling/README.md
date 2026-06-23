@@ -12,9 +12,9 @@ A flamegraph is a convenient tool for understanding how CPU time is being used.
     source install/local_setup.bash
     ros2 run belugaslam_benchmark profile_belugaslam_with_bagfile
     ```
-    `perf` will generate a `perf.data` file in the folder it was run.
+    >**Note:** Set **env=3** in the configuration file.
 
-    TODO: agregar indicación de cambiar el config file
+    `perf` will generate a `perf.data` file in the folder it was run.
 
 2. To generate a flamegraph from the recorded data, run:
     ```bash
@@ -31,5 +31,5 @@ A flamegraph is a convenient tool for understanding how CPU time is being used.
 
 ## Profiling (Flamegraph)
 
-[BelugaSLAM Flamegraph](../../docs/images/flamegraph.svg)
+[BelugaSLAM Flamegraph example](../../docs/images/flamegraph.svg)
 

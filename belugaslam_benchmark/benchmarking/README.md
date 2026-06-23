@@ -27,7 +27,10 @@ ros2 run belugaslam_benchmark parameterized_run.sh --help
 ## Visualizing results
 Use the following command:
 ```bash
-ros2 run belugaslam_benchmark time_results.py <PATH_TO_OUTPUT_DIR_OF_RUN>
+ros2 run belugaslam_benchmark compare_results.py <PATH_TO_OUTPUT_DIR_OF_RUN>
 ```
 >**Note:** If **<PATH_TO_OUTPUT_DIR_OF_RUN>** is a folder containing the outputs of varius benchmarking runs, and only that, the command allows to compare their times in a plot.
 
+---
+## Configuration
+Modify the config.py file located in [belugaslam_core/config/grid_config.py](../belugaslam_core/config/grid_config.py) to decide the size and resolution of the map.

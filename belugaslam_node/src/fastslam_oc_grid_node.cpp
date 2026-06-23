@@ -131,11 +131,11 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         auto d_tf = std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count();
         auto d_resample = std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count();
 
-        RCLCPP_WARN(this->get_logger(),
+        RCLCPP_INFO(this->get_logger(),
             "Times [ms] | sample: %ld | weight: %ld | map: %ld | pub_map: %ld | particles: %ld | tf: %ld | resample: %ld",
             d_sample, d_weight, d_map, d_pub_map, d_particles, d_tf, d_resample);
 
-        RCLCPP_WARN(
+        RCLCPP_INFO(
             get_logger(), "Particle filter update iteration stats: %ld particles - %.3fms",
             slam_->particles().size(),
             std::chrono::duration<double, std::milli>(update_duration).count());
@@ -361,8 +361,4 @@ void BelugaSLAMNode::publish_uncertainty_map() {
         msg.data[i] = static_cast<int8_t>(100.0 * H / std::log(2.0));
     }
     uncertainty_map_pub_->publish(msg);
-    RCLCPP_WARN(
-    this->get_logger(),
-    "Publishing uncertainty map (%zu cells)",
-    msg.data.size());
 }

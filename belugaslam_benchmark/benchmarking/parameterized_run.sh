@@ -1,15 +1,14 @@
 #!/bin/bash
-# Benchmarking similar to Beluga's but using GNU Time.
 
 SCRIPT_DIR=$(cd $(dirname "$(readlink -f "$0")") && pwd)
 
 read -r -d '' HELP << EOM
 Usage: $(basename $0) [...] <PARTICLES_0> ... <PARTICLES_N>\n
 \n
-    PARTICLES_N         For each positional argument the benchmark will be run using that amount of particles.\n
+    MAX_PARTICLES_N         For each positional argument the benchmark will be run using that amount of particles.\n
     [--package]         Package that OWNS the launch file, defaults to belugaslam_example.\n
     [--executable]      Executable to use, defaults to belugaslam_node.\n
-    [--launch-file]     Launch file relative path, defaults to beluga_rosbag_belugaslam.xml.\n
+    [--launch-file]     Launch file relative path, defaults to mit_rosbag_belugaslam.xml.\n
     [-b|--rosbag]       Use a different rosbag path, the names of the frames and topics should match with the launch file.\n
     [-r|--playback-rate] Rosbag playback frequency, defaults to 1.0.\n
     [--record-bag]     If set, the benchmark will record a rosbag of the execution in the output folder.\n
@@ -29,9 +28,8 @@ if [[ $RET_CODE -eq 1 ]]; then
     exit 1;
 fi
 
-# --- CONFIGURACIÓN POR DEFECTO CORREGIDA ---
 PACKAGE_NAME="belugaslam_example"
-LAUNCH_FILE="beluga_rosbag_belugaslam.xml"
+LAUNCH_FILE="mit_rosbag_belugaslam.xml"
 EXECUTABLE_NAME="belugaslam_node"
 PLAYBACK_RATE="1.0"
 ROSBAG_PATH=""
@@ -56,9 +54,7 @@ if [[ -z "$@" ]]; then
     exit 1
 fi
 
-# --- FIX: Convertir ruta de la bag a absoluta antes de hacer 'cd' ---
 if [[ -n "$ROSBAG_PATH" ]]; then
-    # Si la ruta no existe, avisar antes de fallar
     if [ ! -d "$ROSBAG_PATH" ] && [ ! -f "$ROSBAG_PATH" ]; then
         >&2 echo "Error: Bag path '$ROSBAG_PATH' not found."
         exit 1
@@ -66,7 +62,6 @@ if [[ -n "$ROSBAG_PATH" ]]; then
     ROSBAG_PATH=$(readlink -f "$ROSBAG_PATH")
 fi
 
-# Función de limpieza al interrumpir
 function cleanup() {
     echo -e "\nTerminating benchmark..."
     kill -SIGINT $(jobs -p) > /dev/null 2>&1
@@ -74,30 +69,33 @@ function cleanup() {
 }
 trap cleanup EXIT ERR
 
-# Loop principal
 for N in "$@"; do
     FOLDER="bench_output_${N}_particles"
     echo -e "\n>>> RUNNING BENCHMARK WITH $N PARTICLES..."
     mkdir -p "$FOLDER"
     
-    # Guardamos la ruta absoluta del archivo de stats
     STATS_FILE="$(pwd)/$FOLDER/time_stats.txt"
     LOG_FILE="$(pwd)/$FOLDER/console_output.log"
     
     cd "$FOLDER"
 
-    # Prefijo de tiempo
     TIME_PREFIX="/usr/bin/time -v -o time_stats.txt"
 
-    # LANZAMIENTO
     script -qefc "$TIME_PREFIX ros2 launch $PACKAGE_NAME $LAUNCH_FILE \
-        num_particles:=$N \
+        max_particles:=$N \
         bag_rate:=$PLAYBACK_RATE \
         record_bag:=$RECORD_BAG \
         $( [[ -n "$ROSBAG_PATH" ]] && echo "bag_path:=$ROSBAG_PATH" )" \
         "$LOG_FILE" &
 
     wait %1
+
+    echo "Computing RMSE..."
+
+    ros2 run belugaslam_benchmark compute_rmse.py \
+        "$(pwd)/bag_output_mit" \
+        "$(pwd)" \
+        --gt-file /home/azul/ros2_ws/src/fastslam_oc_grid/belugaslam_example/bags/mit_rosbag/gt.txt
 
     echo "Finished $N particles. Results in $FOLDER/"
     cd ..

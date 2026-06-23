@@ -6,7 +6,7 @@ find_package(ament_cmake REQUIRED)
 install(DIRECTORY 
   benchmarking
   profiling
-  RVIZFiles
+  #RVIZFiles
   DESTINATION share/${PROJECT_NAME}
 )
 
@@ -23,7 +23,8 @@ install(PROGRAMS
 
 install(PROGRAMS
   benchmarking/parameterized_run.sh
-  benchmarking/time_results.py
+  benchmarking/compare_results.py
+  benchmarking/compute_rmse.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

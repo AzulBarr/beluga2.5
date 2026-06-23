@@ -1,6 +1,6 @@
 <launch>
   <arg name="use_sim_time" default="true" />
-  <arg name="bag_path" default="/home/azul/ros2_ws/src/fastslam_oc_grid/belugaslam_example/bags/intel" />
+  <arg name="bag_path" default="/home/azul/ros2_ws/src/fastslam_oc_grid/belugaslam_example/bags/mit_rosbag/mit_bag_ros2" />
   <arg name="slam_prefix" default="" />
   <arg name="rviz_config_file" default="$(find-pkg-share belugaslam_example)/RVIZFiles/config.rviz"/>
   <arg name="min_particles" default="5"/>
@@ -13,7 +13,7 @@
     <arg name="odom_frame" value="odom_combined"/>
     <arg name="base_frame" value="base_footprint"/>
     <arg name="scan_topic" value="/base_scan"/>
-    <arg name="range_max" value="30.0"/>
+    <arg name="range_max" value="60.0"/>
     <arg name="min_particles" value="$(var min_particles)"/>
     <arg name="max_particles" value="$(var max_particles)"/>
   </include>
@@ -26,15 +26,15 @@
     <executable 
       cmd="ros2 bag record 
         /best_pose 
-        -o bag_output_intel" 
+        -o bag_output_mit" 
       output="screen"/>
   </group>
 
   <group if="$(eval '\'$(var bag_path)\' != \'\'')">
-    <executable
-      cmd="$(var bag_path)/intel_clf_to_ros2.py"
-      output="screen"
-      on_exit="shutdown" />
+  <executable 
+    cmd="timeout 80 ros2 bag play $(var bag_path) --clock" 
+    output="screen"
+    on_exit="shutdown" />
   </group>
 
 </launch>
