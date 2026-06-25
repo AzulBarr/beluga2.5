@@ -23,6 +23,7 @@ For other options, e.g. using a different launch file, see:
 ```bash
 ros2 run belugaslam_benchmark parameterized_run.sh --help
 ```
+> **Note:** RMSE evaluation requires the EVO toolkit (`evo_ape`). Ensure EVO is installed and available in your current environment before running the benchmark scripts.
 ---
 ## Visualizing results
 Use the following command:

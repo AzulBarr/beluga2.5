@@ -32,7 +32,7 @@
 
   <group if="$(eval '\'$(var bag_path)\' != \'\'')">
   <executable 
-    cmd="timeout 80 ros2 bag play $(var bag_path) --clock" 
+    cmd="timeout 180 ros2 bag play $(var bag_path) --clock" 
     output="screen"
     on_exit="shutdown" />
   </group>

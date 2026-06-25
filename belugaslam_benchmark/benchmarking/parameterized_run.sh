@@ -64,8 +64,15 @@ fi
 
 function cleanup() {
     echo -e "\nTerminating benchmark..."
+
     kill -SIGINT $(jobs -p) > /dev/null 2>&1
     wait $(jobs -p) > /dev/null 2>&1
+
+    # matar cualquier rosbag que haya quedado vivo
+    pkill -f "ros2 bag play" > /dev/null 2>&1 || true
+    pkill -f "rosbag2_player" > /dev/null 2>&1 || true
+    pkill -f "ros2 bag record" > /dev/null 2>&1 || true
+    pkill -f "rosbag2_recorder" > /dev/null 2>&1 || true
 }
 trap cleanup EXIT ERR
 
