@@ -84,6 +84,24 @@ def generate_launch_description():
         description='Random seed for reproducibility (0 for random seed)'
     )
 
+    declare_min_update_angle = DeclareLaunchArgument(
+        'min_update_angle',
+        default_value='0.1',
+        description='Minimum angle difference for resampling'
+    )
+
+    declare_min_update_distance = DeclareLaunchArgument(
+        'min_update_distance',
+        default_value='0.1',
+        description='Minimum distance difference for resampling'
+    )
+
+    declare_uncertainty_map_publish_interval = DeclareLaunchArgument(
+        'uncertainty_map_publish_interval',
+        default_value='10',
+        description='Publish uncertainty map every N iterations'
+    )
+
     belugaslam_node = Node(
         package="belugaslam_node",  
         executable="belugaslam_node", 
@@ -103,6 +121,9 @@ def generate_launch_description():
             "spatial_resolution_x": LaunchConfiguration('spatial_resolution_x'),
             "spatial_resolution_y": LaunchConfiguration('spatial_resolution_y'),
             "spatial_resolution_theta": LaunchConfiguration('spatial_resolution_theta'),
+            "min_update_angle": LaunchConfiguration('min_update_angle'),
+            "min_update_distance": LaunchConfiguration('min_update_distance'),
+            "uncertainty_map_publish_interval": LaunchConfiguration('uncertainty_map_publish_interval'),
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
         arguments=["--ros-args", "--log-level", "INFO"],
@@ -123,5 +144,8 @@ def generate_launch_description():
     declare_spatial_resolution_y,
     declare_spatial_resolution_theta,
     declare_random_seed,
+    declare_min_update_angle,
+    declare_min_update_distance,
+    declare_uncertainty_map_publish_interval,
     belugaslam_node,
     ])

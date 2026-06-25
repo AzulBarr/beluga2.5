@@ -125,6 +125,9 @@ private:
     bool publish_trajectory;
     bool save_grid;
     double range_max;
+    double min_update_angle;
+    double min_update_distance;
+    int uncertainty_map_publish_interval;
 
     int it = 0; // Iteration counter for controlling the frequency of certain operations (e.g., publishing the uncertainty map).
 

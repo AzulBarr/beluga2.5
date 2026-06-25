@@ -14,7 +14,10 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("spatial_resolution_x", 0.05);
     this->declare_parameter("spatial_resolution_y", 0.05);
     this->declare_parameter("spatial_resolution_theta", 10 * Sophus::Constants<double>::pi() / 180);
-    
+    this->declare_parameter("min_update_distance", 0.1);
+    this->declare_parameter("min_update_angle", 0.1);
+    this->declare_parameter("uncertainty_map_publish_interval", 10);
+
     setup_slam();
 
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -54,6 +57,10 @@ void BelugaSLAMNode::setup_slam() {
     params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double();
     params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
     params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
+    min_update_angle = get_parameter("min_update_angle").as_double();
+    min_update_distance = get_parameter("min_update_distance").as_double();
+    uncertainty_map_publish_interval = get_parameter("uncertainty_map_publish_interval").as_int();
+
     /// BelugaSLAM instance
     slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params);
 
@@ -74,7 +81,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         angle_diff = (last_odom_.so2().inverse() * current_odom.so2()).log();
         angle_diff = std::abs(angle_diff);
 
-        if (distance < 0.1 && angle_diff < 0.1) { //TODO: make these parameters
+        if (distance < min_update_distance && angle_diff < min_update_angle) {
             publish_best_pose(msg->header.stamp);
             return;
         }
@@ -102,7 +109,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         auto t3 = std::chrono::high_resolution_clock::now();
 
         publish_map();
-        if (it % 10 == 0) { //TODO: change to publish every N iterations or seconds parameter
+        if (it % uncertainty_map_publish_interval == 0) {
             publish_uncertainty_map();
         }
         it ++;
