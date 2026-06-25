@@ -9,6 +9,7 @@ from geometry_msgs.msg import TransformStamped
 from tf2_msgs.msg import TFMessage
 
 from math import pi
+# TODO: poner en requerimientos ros2 
 import tf_transformations
 from tf2_ros import StaticTransformBroadcaster
 

@@ -6,6 +6,12 @@ from launch.actions import DeclareLaunchArgument
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    declare_use_sim_time = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='true',
+        description='Use simulation time'
+    )
+
     declare_min_particles = DeclareLaunchArgument(
         'min_particles',
         default_value='10',
@@ -108,7 +114,7 @@ def generate_launch_description():
         name="belugaslam",
         output="screen",
         parameters=[{
-            "use_sim_time": True,
+            "use_sim_time": LaunchConfiguration('use_sim_time'),
             "min_particles": LaunchConfiguration('min_particles'),
             "max_particles": LaunchConfiguration('max_particles'),
             "odom_frame": LaunchConfiguration('odom_frame'), 
@@ -147,5 +153,6 @@ def generate_launch_description():
     declare_min_update_angle,
     declare_min_update_distance,
     declare_uncertainty_map_publish_interval,
+    declare_use_sim_time,
     belugaslam_node,
     ])

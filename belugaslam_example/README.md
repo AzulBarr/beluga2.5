@@ -43,13 +43,12 @@ For ROS 2 Jazzy, open three separate terminals and follow the steps below.
 ---
 
 ## Run an example using the Intel dataset (Quick Start).
-
 ```bash
 cd ~/ros2_ws
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select belugaslam_core belugaslam_node belugaslam_example belugaslam_benchmark 
 source install/setup.bash
-chmod +x src/fastslam_oc_grid/belugaslam_example/bags/intel/intel_clf_to_ros2.py
+chmod +x src/beluga2.5/belugaslam_example/bags/intel/intel_clf_to_ros2.py 
 ros2 launch belugaslam_example intel_dataset_belugaslam.xml record_bag:=true
 ```
 >**Note:** Set **env=2** in the configuration file.
