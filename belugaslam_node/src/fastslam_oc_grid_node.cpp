@@ -83,6 +83,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
 
         if (distance < min_update_distance && angle_diff < min_update_angle) {
             publish_best_pose(msg->header.stamp);
+            publish_map();
             return;
         }
         auto u = std::make_tuple(current_odom, last_odom_); // Control
