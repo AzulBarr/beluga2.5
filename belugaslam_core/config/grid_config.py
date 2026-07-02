@@ -15,15 +15,16 @@ ENV = 1
 kOCCUPIED = 100
 kFREE = 0
 kUNKNOWN = -1
-kROBOT_RADIUS = 0.01
+kROBOT_RADIUS = 0.01 #m
 
 ###################### PARTICLE.hpp ######################
 
 if ENV == 1:
     GRID_COLS = 400
     GRID_ROWS = 250
-    GRID_RESOLUTION = 0.1
+    GRID_RESOLUTION = 0.1 #m
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
+    # Define dónde se ubica el borde inferior izquierdo o centro de la cuadrícula con respecto al punto (0,0) del mundo.
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.15
 elif ENV == 2:
     GRID_ROWS = 350
@@ -44,11 +45,11 @@ elif ENV == 4:
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
 else:
-    GRID_ROWS = 500
+    GRID_ROWS = 200
     GRID_RESOLUTION = 0.05
     GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.25
+    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.1
+    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.1
 
 def generate_header(output_path):
     content = f"""/**
