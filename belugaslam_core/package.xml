@@ -4,7 +4,7 @@
   <version>0.1.0</version>
   <description>Core FastSLAM logic</description>
   <maintainer email="azul@todo.todo">azul</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
