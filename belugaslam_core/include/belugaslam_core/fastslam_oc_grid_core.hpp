@@ -15,6 +15,7 @@
 #include <range/v3/view/take_exactly.hpp>
 
 #include "particle.hpp"
+#include "submap.hpp"
 
 /// Beluga Core & Models
 #include <beluga/algorithm/estimation.hpp>
@@ -44,11 +45,11 @@ const double ROBOT_RADIUS = kRobotRadius;
 
 /// 2D pose for particle's state and motion model state.
 using state_type = Sophus::SE2d;
-/// Particle type, containing pose, weight, log-odds grid and occupancy grid.
+/// Particle type, containing pose, weight, and a list of submaps.
 using FastSLAMParticle = std::tuple<
     state_type,
     beluga::Weight,
-    GridTypeLO
+    SubmapList
 >;
 
 /// Parameters to construct a BelugaSLAM instance.
@@ -172,7 +173,7 @@ public:
         
         /// Synchronize the sensor model with the reference map from the best particle
         /// to ensure likelihood calculations are based on the latest environment estimate.
-        auto lo_grids = particles_ | beluga::views::elements<2>;
+        auto submap_lists = particles_ | beluga::views::elements<2>;
         auto poses = particles_ | beluga::views::elements<0>;
         
         /// Scan Matching
@@ -253,7 +254,7 @@ public:
         size_t best_idx = std::distance(weights.begin(), max_weight_it);
 
         best_pose_ = poses[best_idx];
-        best_lo_grid_ = lo_grids[best_idx];
+        composite_submaps(submap_lists[best_idx], best_lo_grid_);
         sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
     }
 
@@ -270,8 +271,18 @@ public:
     void update_occupancy_grid(const measurement_type& z) {        
         for (auto&& p : particles_) {
             auto& pose = std::get<0>(p);
-            auto& lo_grid = std::get<2>(p);
-            //auto& oc_grid = std::get<3>(p);
+            auto& submaps = std::get<2>(p);
+
+            /// Ensure we have an independent copy of the active submap if it was shared during resampling
+            submaps.make_active_unique();
+
+            /// If there's no active submap (or the previous one was frozen), create a new one anchored at current pose
+            if (!submaps.active_submap) {
+                // We use GRID_COLS and GRID_ROWS for now to ensure the lidar rays fit in the local patch
+                submaps.active_submap = std::make_shared<Submap>(pose, GRID_COLS, GRID_ROWS, GRID_RESOLUTION);
+            }
+
+            auto& lo_grid = *submaps.active_submap->grid();
 
             /// Determine the ray origin in grid coordinates from the current particle pose.
             int gx0, gy0, dummy_idx;
@@ -300,6 +311,14 @@ public:
                 if (impact_in_map) {
                     lo_grid.at(hit_idx) = std::min(lo_grid.at(hit_idx) + l_occ_, 5.0f);
                 }
+            }
+
+            submaps.active_submap->add_insertion();
+            // Freeze submap after a certain number of insertions (e.g., 50 scans)
+            if (submaps.active_submap->num_insertions() >= 50) {
+                submaps.active_submap->finish();
+                submaps.history.push_back(submaps.active_submap);
+                submaps.active_submap = nullptr; 
             }
         }
     }
@@ -420,6 +439,39 @@ public:
 
     GridTypeLO best_log_odds_grid() const {
         return best_lo_grid_;
+    }
+
+    /// Composites the history of submaps and active submap into a global LogOddsGrid.
+    void composite_submaps(const SubmapList& submaps, GridTypeLO& global_lo) {
+        std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
+
+        auto draw_submap = [&](const std::shared_ptr<Submap>& sm) {
+            if (!sm) return;
+            const auto& local_lo = *sm->grid();
+            for (int ly = 0; ly < local_lo.height(); ++ly) {
+                for (int lx = 0; lx < local_lo.width(); ++lx) {
+                    float val = local_lo.at(lx, ly);
+                    if (val == 0.0f) continue;
+
+                    double wx = local_lo.origin_x() + (lx + 0.5) * local_lo.resolution();
+                    double wy = local_lo.origin_y() + (ly + 0.5) * local_lo.resolution();
+
+                    int gx, gy, g_idx;
+                    if (world_to_index(wx, wy, gx, gy, g_idx, global_lo)) {
+                        global_lo.at(g_idx) += val;
+                    }
+                }
+            }
+        };
+
+        for (const auto& sm : submaps.history) {
+            draw_submap(sm);
+        }
+        draw_submap(submaps.active_submap);
+
+        for (auto& val : global_lo.data()) {
+            val = std::clamp(val, -5.0f, 5.0f);
+        }
     }
 
 private:

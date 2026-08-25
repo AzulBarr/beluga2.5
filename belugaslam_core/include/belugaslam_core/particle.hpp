@@ -97,8 +97,11 @@ public:
   /// Get the resolution of the log-odds grid discretization, in meters.
   [[nodiscard]] double resolution() const { return resolution_; }
 
-  /// Get a reference to the underlying data storage
+  /// Get a reference to the underlying data storage (read-only)
   [[nodiscard]] const std::vector<float>& data() const { return data_; }
+
+  /// Get a reference to the underlying data storage
+  [[nodiscard]] std::vector<float>& data() { return data_; }
 
 private:
   int width_;
