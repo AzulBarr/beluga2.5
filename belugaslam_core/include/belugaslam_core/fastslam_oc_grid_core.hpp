@@ -387,7 +387,7 @@ public:
             std::vector<FastSLAMParticle> c_particles;
             std::vector<double> c_weights;
             for (size_t idx : cluster_to_indices[cid]) {
-                c_particles.push_back(*(particles_.begin() + idx));
+                c_particles.push_back(*(particles_.beg[idx]);
                 c_weights.push_back(weights[idx]);
             }
 
