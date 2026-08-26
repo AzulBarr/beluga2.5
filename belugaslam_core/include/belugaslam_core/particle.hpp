@@ -66,6 +66,14 @@ public:
   [[nodiscard]] float& at(int x, int y){ return data_[y * width_ + x]; }
 
   /**
+   * \brief Accesses a cell value by grid coordinates (x, y) (read-only).
+   * \param x Column index.
+   * \param y Row index.
+   * \return Constant reference to the log-odds value of the cell.
+   */
+  [[nodiscard]] const float& at(int x, int y) const { return data_[y * width_ + x]; }
+
+  /**
    * \brief Accesses a cell value by linear index.
    * \param index The flat index in row-major order.
    * \return Reference to the log-odds value of the cell.
