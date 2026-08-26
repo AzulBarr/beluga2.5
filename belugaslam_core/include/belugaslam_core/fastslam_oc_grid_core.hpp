@@ -184,6 +184,9 @@ public:
         auto dxys2 = {-0.05, 0.0, 0.05};
         auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180};
 
+        std::vector<double> log_scores;
+        log_scores.reserve(particles_.size());
+
         for (auto&& p : particles_) {
             auto& pose_pred = std::get<0>(p);
             auto& weight = std::get<1>(p);
@@ -194,23 +197,21 @@ public:
 
             // Fast Endpoint-Score Model (Cartographer style)
             // No need to compute EDT! We directly query the probabilities at the hit points.
+            // Fast Endpoint-Score Model (Cartographer style)
             auto score_fn = [&](const state_type& candidate_pose) {
-                double prob_sum = 0.0;
+                double log_prob_sum = 0.0;
                 for (const auto& local_point : z_sparse) {
                     auto hit = candidate_pose * Eigen::Vector2d(local_point.first, local_point.second);
                     int gx, gy, hit_idx;
                     if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, local_lo_grid_)) {
-                        double L = local_lo_grid_.at(hit_idx);
-                        double prob = 1.0 - (1.0 / (1.0 + std::exp(L)));
-                        prob_sum += prob; // Accumulate pseudo-probability
+                        log_prob_sum += local_lo_grid_.at(hit_idx);
                     }
                 }
-                // Exponentiate to create a valid importance weight, scaled to avoid overflow
-                return std::exp(prob_sum / z_sparse.size() * 5.0); 
+                return log_prob_sum;
             };
 
             auto best_pose = pose_pred;
-            double best_score = score_fn(pose_pred);
+            double best_log_score = score_fn(pose_pred);
 
             for (double dx : dxys1) {
                 for (double dy : dxys1) {
@@ -219,11 +220,9 @@ public:
                             Sophus::SO2d{pose_pred.so2().log() + dtheta}, 
                             Eigen::Vector2d{pose_pred.translation().x() + dx, pose_pred.translation().y() + dy}
                         };
-
                         double score = score_fn(candidate_pose);
-
-                        if (score > best_score) {
-                            best_score = score;
+                        if (score > best_log_score) {
+                            best_log_score = score;
                             best_pose = candidate_pose;
                         }
                     }
@@ -237,11 +236,9 @@ public:
                             Sophus::SO2d{best_pose.so2().log() + dtheta}, 
                             Eigen::Vector2d{best_pose.translation().x() + dx, best_pose.translation().y() + dy}
                         };
-
                         double score = score_fn(candidate_pose);
-
-                        if (score > best_score) {
-                            best_score = score;
+                        if (score > best_log_score) {
+                            best_log_score = score;
                             best_pose = candidate_pose;
                         }
                     }
@@ -249,24 +246,42 @@ public:
             }
 
             pose_pred = best_pose;
-            weight = beluga::Weight(best_score);         /// Update individual particle weights by evaluating the measurement model likelihood function.
+            log_scores.push_back(best_log_score);
+        }
+
+        // --- Safely Convert Log-Scores to Weights and Accumulate ---
+        double max_log_score = -std::numeric_limits<double>::infinity();
+        for (double s : log_scores) {
+            if (s > max_log_score) max_log_score = s;
         }
 
         double sum_w = 0.0;
+        size_t idx = 0;
         for (auto&& p : particles_) {
-            sum_w += static_cast<double>(std::get<1>(p));
+            auto& weight = std::get<1>(p);
+            
+            // Convert log score to a likelihood [0, 1] using max_log_score to prevent overflow.
+            // A multiplier of 0.05 is used to scale the log odds sum to a reasonable contrast level.
+            double likelihood = std::exp((log_scores[idx] - max_log_score) * 0.05);
+            
+            // ACCUMULATE with the previous weight! This is what causes ESS to drop over time!
+            double new_weight = static_cast<double>(weight) * likelihood;
+            weight = beluga::Weight(new_weight);
+            
+            sum_w += new_weight;
+            idx++;
         }
 
         if (sum_w > 1e-9) {
             for (auto&& p : particles_) {
                 auto& weight = std::get<1>(p);
-            
-                weight = weight/sum_w;
+                weight = beluga::Weight(static_cast<double>(weight) / sum_w);
             }
         }
         else {
-            for (auto&& w : beluga::views::weights(particles_)) {
-                w = beluga::Weight(1.0 / particles_.size());
+            for (auto&& p : particles_) {
+                auto& weight = std::get<1>(p);
+                weight = beluga::Weight(1.0 / particles_.size());
             }
         }
         auto weights = particles_ | beluga::views::elements<1>;
