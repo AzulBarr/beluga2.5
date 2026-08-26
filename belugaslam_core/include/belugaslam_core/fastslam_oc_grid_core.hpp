@@ -366,6 +366,18 @@ public:
                        ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
                        ranges::to<std::vector<double>>();
 
+        // Calculate Effective Sample Size (ESS)
+        double sum_sq = 0.0;
+        for (double w : weights) {
+            sum_sq += w * w;
+        }
+        double n_eff = (sum_sq > 0.0) ? (1.0 / sum_sq) : 0.0;
+
+        // Only resample if ESS drops below half of the current particle count
+        if (n_eff >= particles_.size() / 2.0) {
+            return;
+        }
+
         // 1. Group particles into spatial clusters
         beluga::ParticleClusterizerParam cluster_params;
         cluster_params.linear_hash_resolution = 1.0; 
