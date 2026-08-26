@@ -2,6 +2,7 @@
 #define __BELUGASLAM_NODE_H__
 
 #include <vector>
+#include <map>
 #include <memory>
 #include <cmath>
 #include <iostream>
@@ -28,6 +29,8 @@
 #include <beluga/actions/assign.hpp>
 #include <beluga/primitives.hpp>
 #include <beluga/views.hpp>
+#include <beluga/algorithm/spatial_hash.hpp>
+#include <beluga/algorithm/cluster_based_estimation.hpp>
 #include <beluga/algorithm/estimation.hpp>
 
 #include "belugaslam_core/grid_config.hpp"
@@ -342,30 +345,84 @@ public:
      * - Clones the selected particles (including their maps).
      * - Resets all weights to a uniform value (1.0).
      */
+    /// Multi-hypothesis resampling based on spatial clustering.
     void resample() {
-        const auto weights = beluga::views::weights(particles_) |
-                         ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
-                         ranges::to<std::vector<double>>();
-        auto resampling_view = beluga::views::sample(particles_, weights) |
-                    beluga::views::take_while_kld(
-                        [this](const auto& p) {
-                            // Adapt the hasher to work with the full particle tuple by hashing only the pose
-                            return spatial_hasher_(std::get<0>(p));
-                        },
-                        params_.min_particles,
-                        params_.max_particles,
-                        params_.kld_epsilon,
-                        params_.kld_z);
+        auto states = particles_ | beluga::views::elements<0>;
+        auto weights = particles_ | beluga::views::elements<1> | 
+                       ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
+                       ranges::to<std::vector<double>>();
+
+        // 1. Group particles into spatial clusters
+        beluga::ParticleClusterizerParam cluster_params;
+        cluster_params.linear_hash_resolution = 1.0; 
+        cluster_params.angular_hash_resolution = 0.5;
+        beluga::ParticleClusterizer clusterizer(cluster_params);
+        
+        auto cluster_ids = clusterizer(states, weights);
+
+        std::map<size_t, std::vector<size_t>> cluster_to_indices;
+        std::map<size_t, double> cluster_weights;
+        for (size_t i = 0; i < cluster_ids.size(); ++i) {
+            cluster_to_indices[cluster_ids[i]].push_back(i);
+            cluster_weights[cluster_ids[i]] += weights[i];
+        }
+
+        double total_weight = 0;
+        for (auto& pair : cluster_weights) total_weight += pair.second;
+
+        // Sort clusters by weight descending
+        std::vector<std::pair<size_t, double>> sorted_clusters(cluster_weights.begin(), cluster_weights.end());
+        std::sort(sorted_clusters.begin(), sorted_clusters.end(), [](const auto& a, const auto& b){ return a.second > b.second; });
 
         std::vector<FastSLAMParticle> buffer;
         buffer.reserve(params_.max_particles);
-        
-        for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
-            buffer.push_back(*it); 
+
+        // 2. Sample from valid clusters independently
+        for (const auto& [cid, cweight] : sorted_clusters) {
+            // Only preserve valid hypotheses (e.g. > 5% weight)
+            if (cweight / total_weight < 0.05) continue;
+
+            std::vector<FastSLAMParticle> c_particles;
+            std::vector<double> c_weights;
+            for (size_t idx : cluster_to_indices[cid]) {
+                c_particles.push_back(particles_[idx]);
+                c_weights.push_back(weights[idx]);
+            }
+
+            // Allocate max particles proportional to weight, but guarantee a minimum (e.g., 5)
+            // to prevent the cluster from dying out prematurely.
+            size_t c_max = std::max<size_t>(5, std::round(params_.max_particles * (cweight / total_weight)));
+            size_t c_min = std::min<size_t>(5, c_max);
+
+            auto resampling_view = beluga::views::sample(c_particles, c_weights) |
+                        beluga::views::take_while_kld(
+                            [this](const auto& p) { return spatial_hasher_(std::get<0>(p)); },
+                            c_min, c_max, params_.kld_epsilon, params_.kld_z);
+            
+            for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
+                if (buffer.size() >= params_.max_particles) break;
+                buffer.push_back(*it); 
+            }
+            if (buffer.size() >= params_.max_particles) break;
+        }
+
+        // 3. Fallback if buffer is still too small
+        if (buffer.size() < params_.min_particles) {
+            auto resampling_view = beluga::views::sample(particles_, weights) |
+                        beluga::views::take_while_kld(
+                            [this](const auto& p) { return spatial_hasher_(std::get<0>(p)); },
+                            params_.min_particles - buffer.size(), 
+                            params_.max_particles - buffer.size(), 
+                            params_.kld_epsilon, params_.kld_z);
+            for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
+                if (buffer.size() >= params_.max_particles) break;
+                buffer.push_back(*it); 
+            }
         }
 
         particles_.assign(buffer.begin(), buffer.end());
 
+        // Reset weights
         for (auto&& w : beluga::views::weights(particles_)) {
             w = beluga::Weight(1.0);
         }
