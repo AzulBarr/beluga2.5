@@ -390,8 +390,10 @@ public:
 
         // Only resample if ESS drops below half of the current particle count
         if (n_eff >= particles_.size() / 2.0) {
+            std::cout << "[TEMP] Salteando resample. ESS = " << n_eff << " / " << particles_.size() << std::endl;
             return;
         }
+        std::cout << "[TEMP] Resampleando! ESS = " << n_eff << " / " << particles_.size() << std::endl;
 
         // 1. Group particles into spatial clusters
         beluga::ParticleClusterizerParam cluster_params;
@@ -414,6 +416,13 @@ public:
         // Sort clusters by weight descending
         std::vector<std::pair<size_t, double>> sorted_clusters(cluster_weights.begin(), cluster_weights.end());
         std::sort(sorted_clusters.begin(), sorted_clusters.end(), [](const auto& a, const auto& b){ return a.second > b.second; });
+
+        std::cout << "[TEMP] Clusters totales detectados: " << sorted_clusters.size() << std::endl;
+        int valid_clusters = 0;
+        for (const auto& [cid, cweight] : sorted_clusters) {
+            if (cweight / total_weight >= 0.05) valid_clusters++;
+        }
+        std::cout << "[TEMP] Clusters validos (>5% peso): " << valid_clusters << std::endl;
 
         std::vector<FastSLAMParticle> buffer;
         buffer.reserve(params_.max_particles);
