@@ -191,11 +191,23 @@ public:
 
             // Composite ONLY THIS particle's local submaps
             composite_submaps(particle_submaps, local_lo_grid_, true);
-            sync_log_odds_to_occupancy(local_lo_grid_, local_oc_grid_);
 
-            // Update the measurement model for THIS specific particle's map
-            measurement_model_.update_map(local_oc_grid_);
-            auto score_fn = measurement_model_(measurement_type(z_sparse));
+            // Fast Endpoint-Score Model (Cartographer style)
+            // No need to compute EDT! We directly query the probabilities at the hit points.
+            auto score_fn = [&](const state_type& candidate_pose) {
+                double prob_sum = 0.0;
+                for (const auto& local_point : z_sparse) {
+                    auto hit = candidate_pose * Eigen::Vector2d(local_point.first, local_point.second);
+                    int gx, gy, hit_idx;
+                    if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, local_lo_grid_)) {
+                        double L = local_lo_grid_.at(hit_idx);
+                        double prob = 1.0 - (1.0 / (1.0 + std::exp(L)));
+                        prob_sum += prob; // Accumulate pseudo-probability
+                    }
+                }
+                // Exponentiate to create a valid importance weight, scaled to avoid overflow
+                return std::exp(prob_sum / z_sparse.size() * 5.0); 
+            };
 
             auto best_pose = pose_pred;
             double best_score = score_fn(pose_pred);
@@ -387,7 +399,7 @@ public:
             std::vector<FastSLAMParticle> c_particles;
             std::vector<double> c_weights;
             for (size_t idx : cluster_to_indices[cid]) {
-                c_particles.push_back(particles_[idx]);
+                c_particles.push_back(*(particles_.begin() + idx));
                 c_weights.push_back(weights[idx]);
             }
 
