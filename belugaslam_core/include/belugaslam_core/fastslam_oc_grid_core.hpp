@@ -80,6 +80,9 @@ struct FastSLAMParams {
 
     /// \brief Spatial resolution around the z-axis to create buckets for KLD resampling.
     double spatial_resolution_theta = 10 * Sophus::Constants<double>::pi() / 180;
+
+    /// \brief Scaling factor for the endpoint score to tune particle filter confidence.
+    double likelihood_scaling_factor = 0.05;
 };
 
 /**
@@ -261,8 +264,8 @@ public:
             auto& weight = std::get<1>(p);
             
             // Convert log score to a likelihood [0, 1] using max_log_score to prevent overflow.
-            // A multiplier of 0.05 is used to scale the log odds sum to a reasonable contrast level.
-            double likelihood = std::exp((log_scores[idx] - max_log_score) * 0.05);
+            // A multiplier is used to scale the log odds sum to a reasonable contrast level.
+            double likelihood = std::exp((log_scores[idx] - max_log_score) * params_.likelihood_scaling_factor);
             
             // ACCUMULATE with the previous weight! This is what causes ESS to drop over time!
             double new_weight = static_cast<double>(weight) * likelihood;
@@ -390,10 +393,8 @@ public:
 
         // Only resample if ESS drops below half of the current particle count
         if (n_eff >= particles_.size() / 2.0) {
-            std::cout << "[TEMP] Salteando resample. ESS = " << n_eff << " / " << particles_.size() << std::endl;
             return;
         }
-        std::cout << "[TEMP] Resampleando! ESS = " << n_eff << " / " << particles_.size() << std::endl;
 
         // 1. Group particles into spatial clusters
         beluga::ParticleClusterizerParam cluster_params;
@@ -416,13 +417,6 @@ public:
         // Sort clusters by weight descending
         std::vector<std::pair<size_t, double>> sorted_clusters(cluster_weights.begin(), cluster_weights.end());
         std::sort(sorted_clusters.begin(), sorted_clusters.end(), [](const auto& a, const auto& b){ return a.second > b.second; });
-
-        std::cout << "[TEMP] Clusters totales detectados: " << sorted_clusters.size() << std::endl;
-        int valid_clusters = 0;
-        for (const auto& [cid, cweight] : sorted_clusters) {
-            if (cweight / total_weight >= 0.05) valid_clusters++;
-        }
-        std::cout << "[TEMP] Clusters validos (>5% peso): " << valid_clusters << std::endl;
 
         std::vector<FastSLAMParticle> buffer;
         buffer.reserve(params_.max_particles);

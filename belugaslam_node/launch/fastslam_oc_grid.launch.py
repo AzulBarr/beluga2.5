@@ -108,6 +108,13 @@ def generate_launch_description():
         description='Publish uncertainty map every N iterations'
     )
 
+    declare_alpha1 = DeclareLaunchArgument('alpha1', default_value='0.1', description='Rotation noise from rotation')
+    declare_alpha2 = DeclareLaunchArgument('alpha2', default_value='0.05', description='Rotation noise from translation')
+    declare_alpha3 = DeclareLaunchArgument('alpha3', default_value='0.1', description='Translation noise from translation')
+    declare_alpha4 = DeclareLaunchArgument('alpha4', default_value='0.05', description='Translation noise from rotation')
+    declare_alpha5 = DeclareLaunchArgument('alpha5', default_value='0.1', description='Translation noise (extra)')
+    declare_likelihood_scaling_factor = DeclareLaunchArgument('likelihood_scaling_factor', default_value='0.05', description='Scaling factor for scan matching likelihood')
+
     belugaslam_node = Node(
         package="belugaslam_node",  
         executable="belugaslam_node", 
@@ -130,6 +137,12 @@ def generate_launch_description():
             "min_update_angle": LaunchConfiguration('min_update_angle'),
             "min_update_distance": LaunchConfiguration('min_update_distance'),
             "uncertainty_map_publish_interval": LaunchConfiguration('uncertainty_map_publish_interval'),
+            "alpha1": LaunchConfiguration('alpha1'),
+            "alpha2": LaunchConfiguration('alpha2'),
+            "alpha3": LaunchConfiguration('alpha3'),
+            "alpha4": LaunchConfiguration('alpha4'),
+            "alpha5": LaunchConfiguration('alpha5'),
+            "likelihood_scaling_factor": LaunchConfiguration('likelihood_scaling_factor'),
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
         arguments=["--ros-args", "--log-level", "INFO"],
@@ -154,5 +167,11 @@ def generate_launch_description():
     declare_min_update_distance,
     declare_uncertainty_map_publish_interval,
     declare_use_sim_time,
+    declare_alpha1,
+    declare_alpha2,
+    declare_alpha3,
+    declare_alpha4,
+    declare_alpha5,
+    declare_likelihood_scaling_factor,
     belugaslam_node,
     ])

@@ -17,6 +17,12 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("min_update_distance", 0.1);
     this->declare_parameter("min_update_angle", 0.1);
     this->declare_parameter("uncertainty_map_publish_interval", 10);
+    this->declare_parameter("alpha1", 0.1);
+    this->declare_parameter("alpha2", 0.05);
+    this->declare_parameter("alpha3", 0.1);
+    this->declare_parameter("alpha4", 0.05);
+    this->declare_parameter("alpha5", 0.1);
+    this->declare_parameter("likelihood_scaling_factor", 0.05);
 
     setup_slam();
 
@@ -38,7 +44,12 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
 }
 
 void BelugaSLAMNode::setup_slam() {
-    beluga::DifferentialDriveModelParam motion_params{0.1, 0.05, 0.1, 0.05, 0.1};
+    double a1 = get_parameter("alpha1").as_double();
+    double a2 = get_parameter("alpha2").as_double();
+    double a3 = get_parameter("alpha3").as_double();
+    double a4 = get_parameter("alpha4").as_double();
+    double a5 = get_parameter("alpha5").as_double();
+    beluga::DifferentialDriveModelParam motion_params{a1, a2, a3, a4, a5};
     beluga::DifferentialDriveModel<state_type> motion_model{motion_params};
 
     beluga::LikelihoodFieldProbModelParam sensor_params{100.0, 2.0, 0.5, 0.5, 0.2, true};
@@ -57,6 +68,7 @@ void BelugaSLAMNode::setup_slam() {
     params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double();
     params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
     params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
+    params.likelihood_scaling_factor = get_parameter("likelihood_scaling_factor").as_double();
     min_update_angle = get_parameter("min_update_angle").as_double();
     min_update_distance = get_parameter("min_update_distance").as_double();
     uncertainty_map_publish_interval = get_parameter("uncertainty_map_publish_interval").as_int();
