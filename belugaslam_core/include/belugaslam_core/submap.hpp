@@ -27,11 +27,11 @@ public:
         num_insertions_(0),
         is_finished_(false) {
     
-    // We center the submap origin so the robot starts in the middle of it.
-    Sophus::SE2d grid_origin_offset{Sophus::SO2d{0.0}, Eigen::Vector2d{- (width * resolution) / 2.0, - (height * resolution) / 2.0}};
-    Sophus::SE2d grid_global_origin = global_pose * grid_origin_offset;
+    // The grid's origin is now strictly in the local frame of the submap.
+    // We center it so the submap's origin (0,0) is precisely in the middle of the grid matrix.
+    Sophus::SE2d grid_local_origin{Sophus::SO2d{0.0}, Eigen::Vector2d{- (width * resolution) / 2.0, - (height * resolution) / 2.0}};
 
-    grid_ = std::make_shared<LogOddsGrid>(width, height, resolution, grid_global_origin);
+    grid_ = std::make_shared<LogOddsGrid>(width, height, resolution, grid_local_origin);
   }
 
   /// Get the local LogOddsGrid.

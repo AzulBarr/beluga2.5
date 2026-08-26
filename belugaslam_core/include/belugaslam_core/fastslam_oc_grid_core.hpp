@@ -125,6 +125,8 @@ public:
       }
       best_oc_grid_ = GridTypeOC();
       best_lo_grid_ = GridTypeLO();
+      local_oc_grid_ = GridTypeOC();
+      local_lo_grid_ = GridTypeLO();
       best_pose_ = state_type{};
 
     }
@@ -176,8 +178,8 @@ public:
         auto submap_lists = particles_ | beluga::views::elements<2>;
         auto poses = particles_ | beluga::views::elements<0>;
         
-        /// Scan Matching
-        measurement_model_.update_map(best_oc_grid_);
+        /// Scan Matching using ONLY the local submaps (Cartographer-style Local SLAM)
+        measurement_model_.update_map(local_oc_grid_);
         auto score_fn = measurement_model_(measurement_type(z_sparse));
 
         auto dxys1 = {-0.1, 0.0, 0.1};
@@ -254,7 +256,13 @@ public:
         size_t best_idx = std::distance(weights.begin(), max_weight_it);
 
         best_pose_ = poses[best_idx];
-        composite_submaps(submap_lists[best_idx], best_lo_grid_);
+
+        // Composite local submaps for the NEXT step's measurement_model_
+        composite_submaps(submap_lists[best_idx], local_lo_grid_, true);
+        sync_log_odds_to_occupancy(local_lo_grid_, local_oc_grid_);
+
+        // Composite full global map for RViz / external use
+        composite_submaps(submap_lists[best_idx], best_lo_grid_, false);
         sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
     }
 
@@ -284,19 +292,23 @@ public:
 
             auto& lo_grid = *submaps.active_submap->grid();
 
-            /// Determine the ray origin in grid coordinates from the current particle pose.
+            /// Compute the robot's pose relative to the active submap (Local SLAM)
+            auto T_w_s = submaps.active_submap->global_pose();
+            auto T_s_r = T_w_s.inverse() * pose;
+
+            /// Determine the ray origin in local grid coordinates from the relative particle pose.
             int gx0, gy0, dummy_idx;
-            if (!world_to_index(pose.translation().x(), pose.translation().y(), gx0, gy0, dummy_idx, lo_grid)) continue; // Skip particles currently outside the map bounds.
+            if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid)) continue; // Skip particles currently outside the map bounds.
             
             /// Clear the area occupied by the robot to remove potential sensor artifacts.
             clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
 
             for (const auto& local_point : z) {
-                /// Project the local sensor hit into world coordinates using the particle's pose hypothesis.
-                auto world_point = pose * Eigen::Vector2d(local_point.first, local_point.second);
+                /// Project the local sensor hit into the submap's local coordinates using the relative pose.
+                auto hit_in_submap = T_s_r * Eigen::Vector2d(local_point.first, local_point.second);
 
                 int gx1, gy1, hit_idx;
-                bool impact_in_map = world_to_index(world_point.x(), world_point.y(), gx1, gy1, hit_idx, lo_grid);
+                bool impact_in_map = world_to_index(hit_in_submap.x(), hit_in_submap.y(), gx1, gy1, hit_idx, lo_grid);
 
                 /// Update cells along the beam path as free space using Bresenham's algorithm.
                 auto points_in_line = bresenham(gx0, gy0, gx1, gy1);
@@ -442,7 +454,8 @@ public:
     }
 
     /// Composites the history of submaps and active submap into a global LogOddsGrid.
-    void composite_submaps(const SubmapList& submaps, GridTypeLO& global_lo) {
+    /// \param only_local If true, only draws the active submap and the most recent frozen submap.
+    void composite_submaps(const SubmapList& submaps, GridTypeLO& global_lo, bool only_local = false) {
         std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
 
         auto draw_submap = [&](const std::shared_ptr<Submap>& sm) {
@@ -453,20 +466,33 @@ public:
                     float val = local_lo.at(lx, ly);
                     if (val == 0.0f) continue;
 
-                    double wx = local_lo.origin_x() + (lx + 0.5) * local_lo.resolution();
-                    double wy = local_lo.origin_y() + (ly + 0.5) * local_lo.resolution();
+                    // Convert local cell index to local coordinates
+                    double local_x = local_lo.origin_x() + (lx + 0.5) * local_lo.resolution();
+                    double local_y = local_lo.origin_y() + (ly + 0.5) * local_lo.resolution();
+
+                    // Convert local coordinates to global coordinates using the submap's global pose
+                    auto global_pt = sm->global_pose() * Eigen::Vector2d(local_x, local_y);
 
                     int gx, gy, g_idx;
-                    if (world_to_index(wx, wy, gx, gy, g_idx, global_lo)) {
+                    if (world_to_index(global_pt.x(), global_pt.y(), gx, gy, g_idx, global_lo)) {
                         global_lo.at(g_idx) += val;
                     }
                 }
             }
         };
 
-        for (const auto& sm : submaps.history) {
-            draw_submap(sm);
+        if (only_local) {
+            // Draw only the most recent frozen submap and the active one
+            if (!submaps.history.empty()) {
+                draw_submap(submaps.history.back());
+            }
+        } else {
+            // Draw full history
+            for (const auto& sm : submaps.history) {
+                draw_submap(sm);
+            }
         }
+        
         draw_submap(submaps.active_submap);
 
         for (auto& val : global_lo.data()) {
@@ -489,6 +515,8 @@ private:
 
     GridTypeOC best_oc_grid_;
     GridTypeLO best_lo_grid_;
+    GridTypeOC local_oc_grid_;
+    GridTypeLO local_lo_grid_;
     state_type best_pose_;
 
     std::mt19937 rng_ = std::mt19937(std::random_device{}());
