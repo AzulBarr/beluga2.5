@@ -178,13 +178,6 @@ public:
         
         /// Synchronize the sensor model with the reference map from the best particle
         /// to ensure likelihood calculations are based on the latest environment estimate.
-        auto submap_lists = particles_ | beluga::views::elements<2>;
-        auto poses = particles_ | beluga::views::elements<0>;
-        
-        /// Scan Matching using ONLY the local submaps (Cartographer-style Local SLAM)
-        measurement_model_.update_map(local_oc_grid_);
-        auto score_fn = measurement_model_(measurement_type(z_sparse));
-
         auto dxys1 = {-0.1, 0.0, 0.1};
         auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0, 5 * Sophus::Constants<double>::pi() / 180};
 
@@ -194,6 +187,16 @@ public:
         for (auto&& p : particles_) {
             auto& pose_pred = std::get<0>(p);
             auto& weight = std::get<1>(p);
+            auto& particle_submaps = std::get<2>(p);
+
+            // Composite ONLY THIS particle's local submaps
+            composite_submaps(particle_submaps, local_lo_grid_, true);
+            sync_log_odds_to_occupancy(local_lo_grid_, local_oc_grid_);
+
+            // Update the measurement model for THIS specific particle's map
+            measurement_model_.update_map(local_oc_grid_);
+            auto score_fn = measurement_model_(measurement_type(z_sparse));
+
             auto best_pose = pose_pred;
             double best_score = score_fn(pose_pred);
 
@@ -258,11 +261,10 @@ public:
         auto max_weight_it = std::max_element(weights.begin(), weights.end());
         size_t best_idx = std::distance(weights.begin(), max_weight_it);
 
-        best_pose_ = poses[best_idx];
+        auto poses = particles_ | beluga::views::elements<0>;
+        auto submap_lists = particles_ | beluga::views::elements<2>;
 
-        // Composite local submaps for the NEXT step's measurement_model_
-        composite_submaps(submap_lists[best_idx], local_lo_grid_, true);
-        sync_log_odds_to_occupancy(local_lo_grid_, local_oc_grid_);
+        best_pose_ = poses[best_idx];
 
         // Composite full global map for RViz / external use
         composite_submaps(submap_lists[best_idx], best_lo_grid_, false);
