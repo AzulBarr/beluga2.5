@@ -5,6 +5,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Sophus REQUIRED)
 find_package(TBB REQUIRED)
+find_package(Ceres REQUIRED)
 
 set(GRID_CONFIG_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/config/grid_config.py")
 set(GRID_CONFIG_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/grid_config.hpp")
@@ -29,6 +30,7 @@ target_link_libraries(${PROJECT_NAME}
   Sophus::Sophus
   Eigen3::Eigen
   TBB::tbb
+  Ceres::ceres
 )
 
 ament_target_dependencies(${PROJECT_NAME}

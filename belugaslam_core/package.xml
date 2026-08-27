@@ -10,6 +10,7 @@
 
   <depend>eigen3</depend>
   <depend>sophus</depend>
+  <depend>ceres-solver</depend>
   <test_depend>ament_cmake_gtest</test_depend>
 
   <export>

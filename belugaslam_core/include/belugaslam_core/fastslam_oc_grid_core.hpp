@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <chrono>
 #include <numeric>
+#include <ceres/ceres.h>
 
 #include <range/v3/view/take.hpp>
 #include <range/v3/range/conversion.hpp> 
@@ -55,6 +56,48 @@ using FastSLAMParticle = std::tuple<
     beluga::Weight,
     SubmapList
 >;
+
+struct PoseGraphEdgeError {
+    PoseGraphEdgeError(double dx, double dy, double dtheta)
+        : dx_(dx), dy_(dy), dtheta_(dtheta) {}
+
+    template <typename T>
+    bool operator()(const T* const pose_i, const T* const pose_j, T* residuals) const {
+        T xi = pose_i[0];
+        T yi = pose_i[1];
+        T theta_i = pose_i[2];
+
+        T xj = pose_j[0];
+        T yj = pose_j[1];
+        T theta_j = pose_j[2];
+
+        T cos_theta_i = ceres::cos(theta_i);
+        T sin_theta_i = ceres::sin(theta_i);
+
+        // Relative position of j in i's frame
+        T dx_ij = xj - xi;
+        T dy_ij = yj - yi;
+
+        T local_x = cos_theta_i * dx_ij + sin_theta_i * dy_ij;
+        T local_y = -sin_theta_i * dx_ij + cos_theta_i * dy_ij;
+
+        // Residuals
+        residuals[0] = local_x - T(dx_);
+        residuals[1] = local_y - T(dy_);
+        
+        T diff_theta = (theta_j - theta_i) - T(dtheta_);
+        residuals[2] = ceres::atan2(ceres::sin(diff_theta), ceres::cos(diff_theta));
+
+        return true;
+    }
+
+    static ceres::CostFunction* Create(double dx, double dy, double dtheta) {
+        return new ceres::AutoDiffCostFunction<PoseGraphEdgeError, 3, 3, 3>(
+            new PoseGraphEdgeError(dx, dy, dtheta));
+    }
+
+    double dx_, dy_, dtheta_;
+};
 
 /// Parameters to construct a BelugaSLAM instance.
 struct FastSLAMParams {
@@ -733,6 +776,11 @@ public:
                         auto& p_submaps = std::get<2>(p);
                         p_submaps.history.push_back(history[i]);
                         
+                        // Save the exact drift error for Pose Graph Optimization
+                        if (k == 0) {
+                            loop_drift_error_ = best_match * current_pose.inverse();
+                        }
+                        
                         // Reset active submap to start fresh in the old area
                         double res = history[i]->grid()->resolution();
                         int w = history[i]->grid()->width();
@@ -760,54 +808,99 @@ public:
         }
     }
 
-    /// Step 4: Pose Graph Optimization (PGO) - Linear Trajectory Relaxation
+    /// Step 4: Pose Graph Optimization (PGO) - Ceres Solver
     void optimize_pose_graph(SubmapList& submap_list, size_t loop_start, size_t loop_end) {
         auto& hist = submap_list.history;
         if (loop_start >= loop_end || loop_end >= hist.size()) return;
 
-        std::cout << "\n[PGO] Iniciando Pose Graph Optimization..." << std::endl;
-        std::cout << "[PGO] Relajando submapas desde " << loop_start << " hasta " << loop_end << std::endl;
-        
-        // The anchor pose (True pose of the room)
-        Sophus::SE2d anchor_pose = hist[loop_start]->global_pose();
-        
-        // The drifted pose (Where the robot thought it was just before the loop closed)
-        Sophus::SE2d drifted_pose = hist[loop_end - 1]->global_pose();
-        
-        // Calculate the total accumulated error in the global frame
-        double dx = anchor_pose.translation().x() - drifted_pose.translation().x();
-        double dy = anchor_pose.translation().y() - drifted_pose.translation().y();
-        
-        // Calculate angular error, ensuring it's normalized between -pi and pi
-        double dtheta = anchor_pose.so2().log() - drifted_pose.so2().log();
-        while (dtheta > Sophus::Constants<double>::pi()) dtheta -= 2 * Sophus::Constants<double>::pi();
-        while (dtheta < -Sophus::Constants<double>::pi()) dtheta += 2 * Sophus::Constants<double>::pi();
+        std::cout << "\n[PGO] Iniciando Ceres Pose Graph Optimization..." << std::endl;
+        std::cout << "[PGO] Optimizando grafo desde submapa " << loop_start << " hasta " << loop_end - 1 << std::endl;
 
-        size_t N = loop_end - loop_start;
-        
-        // Distribute the error linearly across all intermediate submaps
-        for (size_t k = loop_start + 1; k < loop_end; ++k) {
-            double f = static_cast<double>(k - loop_start) / static_cast<double>(N);
-            
-            auto current = hist[k]->global_pose();
-            
-            double new_x = current.translation().x() + f * dx;
-            double new_y = current.translation().y() + f * dy;
-            double new_theta = current.so2().log() + f * dtheta;
-            
-            Sophus::SE2d corrected_pose{
-                Sophus::SO2d{new_theta}, 
-                Eigen::Vector2d{new_x, new_y}
-            };
-            
-            hist[k]->set_global_pose(corrected_pose);
+        size_t num_poses = loop_end - loop_start;
+        std::vector<std::array<double, 3>> poses(num_poses);
+
+        // 1. Initialize parameter blocks with current drifted poses
+        for (size_t i = 0; i < num_poses; ++i) {
+            auto current_pose = hist[loop_start + i]->global_pose();
+            poses[i][0] = current_pose.translation().x();
+            poses[i][1] = current_pose.translation().y();
+            poses[i][2] = current_pose.so2().log();
         }
 
-        std::cout << "[PGO] Mapa enderezado exitosamente. Error absorbido: X=" << dx << "m, Y=" << dy << "m, Yaw=" << dtheta << "rad" << std::endl;
+        ceres::Problem problem;
+
+        // 2. Add Odometry Edges (Sequential constraints)
+        for (size_t i = 0; i < num_poses - 1; ++i) {
+            // Calculate the original relative transform (including drift)
+            auto pose_a = hist[loop_start + i]->global_pose();
+            auto pose_b = hist[loop_start + i + 1]->global_pose();
+            auto relative_tf = pose_a.inverse() * pose_b;
+
+            ceres::CostFunction* cost_function = PoseGraphEdgeError::Create(
+                relative_tf.translation().x(),
+                relative_tf.translation().y(),
+                relative_tf.so2().log()
+            );
+
+            // Odometry is usually trusted, but we give it a uniform weight
+            problem.AddResidualBlock(cost_function, nullptr, poses[i].data(), poses[i + 1].data());
+        }
+
+        // 3. Anchor the first pose
+        problem.SetParameterBlockConstant(poses[0].data());
+
+        // 4. Add the Loop Closure Edge
+        // The last pose in the chain (loop_end - 1) should be pulled towards its true location.
+        // Its true location is exactly its current drifted pose multiplied by the drift error.
+        auto drifted_end_pose = hist[loop_end - 1]->global_pose();
+        auto true_end_pose = loop_drift_error_ * drifted_end_pose;
+        
+        // We create an absolute constraint for the last pose
+        std::array<double, 3> target_end_pose = {
+            true_end_pose.translation().x(),
+            true_end_pose.translation().y(),
+            true_end_pose.so2().log()
+        };
+
+        // We can just add a strong relative constraint between the anchor and the end pose
+        // representing the "corrected" relationship.
+        auto expected_relative_tf = hist[loop_start]->global_pose().inverse() * true_end_pose;
+        
+        ceres::CostFunction* loop_cost = PoseGraphEdgeError::Create(
+            expected_relative_tf.translation().x(),
+            expected_relative_tf.translation().y(),
+            expected_relative_tf.so2().log()
+        );
+
+        // Give the loop closure a higher weight or just normal weight
+        problem.AddResidualBlock(loop_cost, nullptr, poses[0].data(), poses[num_poses - 1].data());
+
+        // 5. Solve
+        ceres::Solver::Options options;
+        options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+        options.minimizer_progress_to_stdout = true;
+        options.max_num_iterations = 100;
+        
+        ceres::Solver::Summary summary;
+        ceres::Solve(options, &problem, &summary);
+
+        std::cout << summary.BriefReport() << std::endl;
+
+        // 6. Write back optimized poses
+        for (size_t i = 1; i < num_poses; ++i) {
+            Sophus::SE2d corrected_pose{
+                Sophus::SO2d{poses[i][2]}, 
+                Eigen::Vector2d{poses[i][0], poses[i][1]}
+            };
+            hist[loop_start + i]->set_global_pose(corrected_pose);
+        }
+
+        std::cout << "[PGO] Ceres Optimization Finalizada. Mapa enderezado." << std::endl;
     }
 
 private:
     std::set<std::pair<size_t, size_t>> optimized_loops_;
+    Sophus::SE2d loop_drift_error_;
     int loop_closure_cooldown_ = 0;
     beluga::TupleVector<FastSLAMParticle> particles_;
 
