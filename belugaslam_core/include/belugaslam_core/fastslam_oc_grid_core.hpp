@@ -708,6 +708,16 @@ public:
                         p_submaps.active_submap = std::make_shared<Submap>(best_match, w, h, res);
                     }
                     
+                    // Re-normalize all weights so they sum to 1.0 exactly
+                    double final_sum_w = 0.0;
+                    for (const auto& p : particles_) final_sum_w += static_cast<double>(std::get<1>(p));
+                    if (final_sum_w > 1e-9) {
+                        for (auto&& p : particles_) {
+                            auto& weight = std::get<1>(p);
+                            weight = beluga::Weight(static_cast<double>(weight) / final_sum_w);
+                        }
+                    }
+
                     // Break after finding the first good loop closure to avoid multiple injections at once
                     break;
                 } else {
