@@ -287,6 +287,10 @@ public:
                 weight = beluga::Weight(1.0 / particles_.size());
             }
         }
+        
+        // --- Loop Closure Detection (Radar) ---
+        detect_loop_closure(z_sparse);
+
         auto weights = particles_ | beluga::views::elements<1>;
         auto max_weight_it = std::max_element(weights.begin(), weights.end());
         size_t best_idx = std::distance(weights.begin(), max_weight_it);
@@ -598,6 +602,67 @@ public:
 
         for (auto& val : global_lo.data()) {
             val = std::clamp(val, -5.0f, 5.0f);
+        }
+    }
+
+    /// Step 3.1: Detect Loop Closure candidates using Radial Signatures
+    void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse) {
+        // 1. Compute radial signature of current scan
+        const int NUM_BINS = 50;
+        const double BIN_SIZE = 0.5;
+        std::vector<double> current_sig(NUM_BINS, 0.0);
+        
+        for (const auto& pt : z_sparse) {
+            double dist = std::sqrt(pt.first*pt.first + pt.second*pt.second);
+            int bin = static_cast<int>(dist / BIN_SIZE);
+            if (bin >= 0 && bin < NUM_BINS) {
+                current_sig[bin] += 1.0;
+            }
+        }
+        
+        // Normalize
+        if (!z_sparse.empty()) {
+            for (int i = 0; i < NUM_BINS; ++i) {
+                current_sig[i] /= z_sparse.size();
+            }
+        }
+
+        // 2. Find the best particle to use its history
+        auto best_it = std::max_element(particles_.begin(), particles_.end(),
+            [](const auto& a, const auto& b) {
+                return static_cast<double>(std::get<1>(a)) < static_cast<double>(std::get<1>(b));
+            });
+        
+        const auto& history = std::get<2>(*best_it).history;
+        const auto& current_pose = std::get<0>(*best_it);
+
+        // 3. Search history for matches
+        for (size_t i = 0; i < history.size(); ++i) {
+            // Ignore very recent submaps (e.g. the last 5 submaps)
+            if (i + 5 >= history.size()) continue;
+
+            auto old_submap = history[i];
+            
+            // Fast Proximity Check (Radar)
+            double dx = current_pose.translation().x() - old_submap->global_pose().translation().x();
+            double dy = current_pose.translation().y() - old_submap->global_pose().translation().y();
+            double distance = std::sqrt(dx*dx + dy*dy);
+
+            if (distance < 5.0) { // Within 5 meters
+                // Compare Radial Signatures
+                const auto& old_sig = old_submap->radial_signature();
+                if (old_sig.empty()) continue;
+
+                double diff = 0.0;
+                for (int b = 0; b < NUM_BINS; ++b) {
+                    diff += std::abs(current_sig[b] - old_sig[b]);
+                }
+
+                if (diff < 0.25) { // Threshold for similarity
+                    std::cout << "\n[LOOP CLOSURE] Candidato detectado! Submapa " << i 
+                              << " a " << distance << "m. Diferencia radial: " << diff << std::endl;
+                }
+            }
         }
     }
 

@@ -50,8 +50,11 @@ public:
   /// Check if the submap is finished (frozen).
   bool is_finished() const { return is_finished_; }
 
-  /// Mark the submap as finished.
-  void finish() { is_finished_ = true; }
+  /// Mark the submap as finished and compute its radial signature.
+  void finish() { 
+    is_finished_ = true; 
+    compute_radial_signature();
+  }
 
   /// Deep copy the submap (used for copy-on-write in particle filter)
   std::shared_ptr<Submap> clone() const {
@@ -60,11 +63,53 @@ public:
     return new_submap;
   }
 
+  /// Get the computed radial signature (histogram of occupied cell distances)
+  const std::vector<double>& radial_signature() const { return radial_signature_; }
+
 private:
+  void compute_radial_signature() {
+    // 50 bins of 0.5 meters = up to 25 meters radius
+    const int NUM_BINS = 50;
+    const double BIN_SIZE = 0.5;
+    radial_signature_.assign(NUM_BINS, 0.0);
+
+    double res = grid_->resolution();
+    double cx = grid_->width() * res / 2.0;
+    double cy = grid_->height() * res / 2.0;
+
+    int valid_cells = 0;
+
+    for (int y = 0; y < grid_->height(); ++y) {
+      for (int x = 0; x < grid_->width(); ++x) {
+        // Only consider highly occupied cells
+        if (grid_->at(x, y) > 0.5) {
+          // Distance from the submap's center (0,0) in local coordinates
+          double dx = (x * res) - cx;
+          double dy = (y * res) - cy;
+          double dist = std::sqrt(dx*dx + dy*dy);
+
+          int bin = static_cast<int>(dist / BIN_SIZE);
+          if (bin >= 0 && bin < NUM_BINS) {
+            radial_signature_[bin] += 1.0;
+            valid_cells++;
+          }
+        }
+      }
+    }
+
+    // Normalize the histogram to make it robust to different densities
+    if (valid_cells > 0) {
+      for (int i = 0; i < NUM_BINS; ++i) {
+        radial_signature_[i] /= valid_cells;
+      }
+    }
+  }
+
   Sophus::SE2d global_pose_;
   std::shared_ptr<LogOddsGrid> grid_;
   int num_insertions_;
   bool is_finished_;
+  std::vector<double> radial_signature_;
 };
 
 /**
