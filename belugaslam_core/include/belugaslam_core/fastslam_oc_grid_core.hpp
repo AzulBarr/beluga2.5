@@ -692,7 +692,7 @@ public:
 
                     for (size_t k = 0; k < num_inject; ++k) {
                         size_t idx = indices[k];
-                        auto& p = *(particles_.begin() + idx);
+                        auto p = *(particles_.begin() + idx);
                         
                         std::get<0>(p) = best_match; // Teleport
                         std::get<1>(p) = beluga::Weight(avg_w); // Revive weight
