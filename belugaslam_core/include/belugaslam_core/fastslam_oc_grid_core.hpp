@@ -301,6 +301,31 @@ public:
 
         best_pose_ = poses[best_idx];
 
+        // --- PGO Trigger ---
+        auto& winning_hist = submap_lists[best_idx].history;
+        bool has_loop = false;
+        size_t loop_start = 0;
+        size_t loop_end = 0;
+        
+        for (size_t i = 0; i < winning_hist.size(); ++i) {
+            for (size_t j = i + 5; j < winning_hist.size(); ++j) {
+                if (winning_hist[i] == winning_hist[j]) {
+                    if (optimized_loops_.find({i, j}) == optimized_loops_.end()) {
+                        has_loop = true;
+                        loop_start = i;
+                        loop_end = j;
+                        optimized_loops_.insert({i, j});
+                        break;
+                    }
+                }
+            }
+            if (has_loop) break;
+        }
+
+        if (has_loop) {
+            optimize_pose_graph(submap_lists[best_idx], loop_start, loop_end);
+        }
+
         // Composite full global map for RViz / external use
         composite_submaps(submap_lists[best_idx], best_lo_grid_, false);
         sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
@@ -735,7 +760,54 @@ public:
         }
     }
 
+    /// Step 4: Pose Graph Optimization (PGO) - Linear Trajectory Relaxation
+    void optimize_pose_graph(SubmapList& submap_list, size_t loop_start, size_t loop_end) {
+        auto& hist = submap_list.history;
+        if (loop_start >= loop_end || loop_end >= hist.size()) return;
+
+        std::cout << "\n[PGO] Iniciando Pose Graph Optimization..." << std::endl;
+        std::cout << "[PGO] Relajando submapas desde " << loop_start << " hasta " << loop_end << std::endl;
+        
+        // The anchor pose (True pose of the room)
+        Sophus::SE2d anchor_pose = hist[loop_start]->global_pose();
+        
+        // The drifted pose (Where the robot thought it was just before the loop closed)
+        Sophus::SE2d drifted_pose = hist[loop_end - 1]->global_pose();
+        
+        // Calculate the total accumulated error in the global frame
+        double dx = anchor_pose.translation().x() - drifted_pose.translation().x();
+        double dy = anchor_pose.translation().y() - drifted_pose.translation().y();
+        
+        // Calculate angular error, ensuring it's normalized between -pi and pi
+        double dtheta = anchor_pose.so2().log() - drifted_pose.so2().log();
+        while (dtheta > Sophus::Constants<double>::pi()) dtheta -= 2 * Sophus::Constants<double>::pi();
+        while (dtheta < -Sophus::Constants<double>::pi()) dtheta += 2 * Sophus::Constants<double>::pi();
+
+        size_t N = loop_end - loop_start;
+        
+        // Distribute the error linearly across all intermediate submaps
+        for (size_t k = loop_start + 1; k < loop_end; ++k) {
+            double f = static_cast<double>(k - loop_start) / static_cast<double>(N);
+            
+            auto current = hist[k]->global_pose();
+            
+            double new_x = current.translation().x() + f * dx;
+            double new_y = current.translation().y() + f * dy;
+            double new_theta = current.so2().log() + f * dtheta;
+            
+            Sophus::SE2d corrected_pose{
+                Sophus::SO2d{new_theta}, 
+                Eigen::Vector2d{new_x, new_y}
+            };
+            
+            hist[k]->set_global_pose(corrected_pose);
+        }
+
+        std::cout << "[PGO] Mapa enderezado exitosamente. Error absorbido: X=" << dx << "m, Y=" << dy << "m, Yaw=" << dtheta << "rad" << std::endl;
+    }
+
 private:
+    std::set<std::pair<size_t, size_t>> optimized_loops_;
     int loop_closure_cooldown_ = 0;
     beluga::TupleVector<FastSLAMParticle> particles_;
 

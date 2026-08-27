@@ -41,6 +41,9 @@ public:
   /// Get the global pose of this submap.
   const Sophus::SE2d& global_pose() const { return global_pose_; }
 
+  /// Set the global pose of this submap (used during Pose Graph Optimization).
+  void set_global_pose(const Sophus::SE2d& pose) { global_pose_ = pose; }
+
   /// Number of scans inserted into this submap.
   int num_insertions() const { return num_insertions_; }
 
