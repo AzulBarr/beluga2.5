@@ -649,6 +649,9 @@ public:
             double distance = std::sqrt(dx*dx + dy*dy);
 
             if (distance < 5.0) { // Within 5 meters
+                std::cout << "\n[LOOP CLOSURE] Candidato por PROXIMIDAD! Submapa " << i 
+                          << " detectado a " << distance << "m." << std::endl;
+
                 // Compare Radial Signatures
                 const auto& old_sig = old_submap->radial_signature();
                 if (old_sig.empty()) continue;
@@ -659,8 +662,7 @@ public:
                 }
 
                 if (diff < 0.25) { // Threshold for similarity
-                    std::cout << "\n[LOOP CLOSURE] Candidato detectado! Submapa " << i 
-                              << " a " << distance << "m. Diferencia radial: " << diff << std::endl;
+                    std::cout << "[LOOP CLOSURE] Candidato por FIRMA RADIAL CONFIRMADO! Diferencia: " << diff << std::endl;
                 }
             }
         }
