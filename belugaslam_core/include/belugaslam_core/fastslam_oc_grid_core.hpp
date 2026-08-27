@@ -10,6 +10,7 @@
 #include <execution>
 #include <iomanip>
 #include <chrono>
+#include <numeric>
 
 #include <range/v3/view/take.hpp>
 #include <range/v3/range/conversion.hpp> 
@@ -605,29 +606,11 @@ public:
         }
     }
 
-    /// Step 3.1: Detect Loop Closure candidates using Radial Signatures
+    /// Step 3: Detect and Inject Loop Closure candidates
     void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse) {
-        // 1. Compute radial signature of current scan
-        const int NUM_BINS = 50;
-        const double BIN_SIZE = 0.5;
-        std::vector<double> current_sig(NUM_BINS, 0.0);
-        
-        for (const auto& pt : z_sparse) {
-            double dist = std::sqrt(pt.first*pt.first + pt.second*pt.second);
-            int bin = static_cast<int>(dist / BIN_SIZE);
-            if (bin >= 0 && bin < NUM_BINS) {
-                current_sig[bin] += 1.0;
-            }
-        }
-        
-        // Normalize
-        if (!z_sparse.empty()) {
-            for (int i = 0; i < NUM_BINS; ++i) {
-                current_sig[i] /= z_sparse.size();
-            }
-        }
+        if (z_sparse.empty()) return;
 
-        // 2. Find the best particle to use its history
+        // 1. Find the best particle to use its history
         auto best_it = std::max_element(particles_.begin(), particles_.end(),
             [](const auto& a, const auto& b) {
                 return static_cast<double>(std::get<1>(a)) < static_cast<double>(std::get<1>(b));
@@ -636,7 +619,7 @@ public:
         const auto& history = std::get<2>(*best_it).history;
         const auto& current_pose = std::get<0>(*best_it);
 
-        // 3. Search history for matches
+        // 2. Search history for matches
         for (size_t i = 0; i < history.size(); ++i) {
             // Ignore very recent submaps (e.g. the last 5 submaps)
             if (i + 5 >= history.size()) continue;
@@ -650,19 +633,84 @@ public:
 
             if (distance < 5.0) { // Within 5 meters
                 std::cout << "\n[LOOP CLOSURE] Candidato por PROXIMIDAD! Submapa " << i 
-                          << " detectado a " << distance << "m." << std::endl;
+                          << " detectado a " << distance << "m. Iniciando escaneo correlativo..." << std::endl;
 
-                // Compare Radial Signatures
-                const auto& old_sig = old_submap->radial_signature();
-                if (old_sig.empty()) continue;
+                // 3. Fast Correlative Scan Matching (FCSM)
+                double best_score = -std::numeric_limits<double>::infinity();
+                state_type best_match = current_pose;
 
-                double diff = 0.0;
-                for (int b = 0; b < NUM_BINS; ++b) {
-                    diff += std::abs(current_sig[b] - old_sig[b]);
+                // Search window: +/- 3m in X/Y, +/- 30 degrees in Yaw
+                for (double sx = -3.0; sx <= 3.0; sx += 0.25) {
+                    for (double sy = -3.0; sy <= 3.0; sy += 0.25) {
+                        for (double stheta = -0.5; stheta <= 0.5; stheta += 0.1) {
+                            
+                            state_type candidate{
+                                Sophus::SO2d{current_pose.so2().log() + stheta},
+                                Eigen::Vector2d{current_pose.translation().x() + sx, current_pose.translation().y() + sy}
+                            };
+
+                            // Score candidate against the old_submap
+                            Sophus::SE2d T_submap_robot = old_submap->global_pose().inverse() * candidate;
+                            double score = 0.0;
+                            for (const auto& pt : z_sparse) {
+                                auto hit = T_submap_robot * Eigen::Vector2d(pt.first, pt.second);
+                                int gx, gy, hit_idx;
+                                if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, *(old_submap->grid()))) {
+                                    score += old_submap->grid()->at(hit_idx);
+                                }
+                            }
+
+                            if (score > best_score) {
+                                best_score = score;
+                                best_match = candidate;
+                            }
+                        }
+                    }
                 }
 
-                if (diff < 0.25) { // Threshold for similarity
-                    std::cout << "[LOOP CLOSURE] Candidato por FIRMA RADIAL CONFIRMADO! Diferencia: " << diff << std::endl;
+                // Average log-odds per hit. If > 0.5, it's a solid match (mostly hitting occupied cells).
+                double avg_score = best_score / z_sparse.size();
+                if (avg_score > 0.5) {
+                    std::cout << "[LOOP CLOSURE] ALINEACION EXITOSA! Score: " << avg_score << ". Inyectando hipotesis..." << std::endl;
+
+                    // 4. Particle Injection (Deferred Verification)
+                    // We teleport the worst 20% of particles to the new pose and truncate their map history.
+                    size_t num_inject = std::max<size_t>(1, particles_.size() * 0.2);
+                    
+                    // Sort particles by weight ascending so we can overwrite the worst ones
+                    std::vector<size_t> indices(particles_.size());
+                    std::iota(indices.begin(), indices.end(), 0);
+                    std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+                        return static_cast<double>(std::get<1>(particles_[a])) < static_cast<double>(std::get<1>(particles_[b]));
+                    });
+
+                    // Get average weight to give to injected particles so they survive the next few cycles to be evaluated
+                    double sum_w = 0.0;
+                    for (const auto& p : particles_) sum_w += static_cast<double>(std::get<1>(p));
+                    double avg_w = sum_w / particles_.size();
+
+                    for (size_t k = 0; k < num_inject; ++k) {
+                        size_t idx = indices[k];
+                        auto& p = particles_[idx];
+                        
+                        std::get<0>(p) = best_match; // Teleport
+                        std::get<1>(p) = beluga::Weight(avg_w); // Revive weight
+                        
+                        // Truncate history up to the matched submap so local composite works correctly
+                        auto& p_submaps = std::get<2>(p);
+                        p_submaps.history.assign(history.begin(), history.begin() + i + 1);
+                        
+                        // Reset active submap to start fresh in the old area
+                        double res = p_submaps.history.front()->grid()->resolution();
+                        int w = p_submaps.history.front()->grid()->width();
+                        int h = p_submaps.history.front()->grid()->height();
+                        p_submaps.active_submap = std::make_shared<Submap>(best_match, w, h, res);
+                    }
+                    
+                    // Break after finding the first good loop closure to avoid multiple injections at once
+                    break;
+                } else {
+                    std::cout << "[LOOP CLOSURE] Falsa alarma (Score bajo: " << avg_score << ")" << std::endl;
                 }
             }
         }
