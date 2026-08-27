@@ -681,7 +681,8 @@ public:
                     std::vector<size_t> indices(particles_.size());
                     std::iota(indices.begin(), indices.end(), 0);
                     std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
-                        return static_cast<double>(std::get<1>(particles_[a])) < static_cast<double>(std::get<1>(particles_[b]));
+                        return static_cast<double>(std::get<1>(*(particles_.begin() + a))) < 
+                               static_cast<double>(std::get<1>(*(particles_.begin() + b)));
                     });
 
                     // Get average weight to give to injected particles so they survive the next few cycles to be evaluated
@@ -691,7 +692,7 @@ public:
 
                     for (size_t k = 0; k < num_inject; ++k) {
                         size_t idx = indices[k];
-                        auto& p = particles_[idx];
+                        auto& p = *(particles_.begin() + idx);
                         
                         std::get<0>(p) = best_match; // Teleport
                         std::get<1>(p) = beluga::Weight(avg_w); // Revive weight
