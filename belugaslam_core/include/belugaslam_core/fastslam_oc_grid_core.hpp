@@ -610,6 +610,11 @@ public:
     void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse) {
         if (z_sparse.empty()) return;
 
+        if (loop_closure_cooldown_ > 0) {
+            loop_closure_cooldown_--;
+            return;
+        }
+
         // 1. Find the best particle to use its history
         auto best_it = std::max_element(particles_.begin(), particles_.end(),
             [](const auto& a, const auto& b) {
@@ -721,6 +726,7 @@ public:
                     }
 
                     // Break after finding the first good loop closure to avoid multiple injections at once
+                    loop_closure_cooldown_ = 200; // Cooldown of ~20 seconds at 10Hz to let the filter settle
                     break;
                 } else {
                     std::cout << "[LOOP CLOSURE] Falsa alarma (Score bajo: " << avg_score << ")" << std::endl;
@@ -730,6 +736,7 @@ public:
     }
 
 private:
+    int loop_closure_cooldown_ = 0;
     beluga::TupleVector<FastSLAMParticle> particles_;
 
     MotionModel motion_model_;
