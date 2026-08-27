@@ -697,14 +697,16 @@ public:
                         std::get<0>(p) = best_match; // Teleport
                         std::get<1>(p) = beluga::Weight(avg_w); // Revive weight
                         
-                        // Truncate history up to the matched submap so local composite works correctly
+                        // Do not truncate history! We want to keep the whole map.
+                        // Instead, push the matched submap to the end so it becomes the 'local' reference
+                        // for scan matching, and creates a topological loop closure edge.
                         auto& p_submaps = std::get<2>(p);
-                        p_submaps.history.assign(history.begin(), history.begin() + i + 1);
+                        p_submaps.history.push_back(history[i]);
                         
                         // Reset active submap to start fresh in the old area
-                        double res = p_submaps.history.front()->grid()->resolution();
-                        int w = p_submaps.history.front()->grid()->width();
-                        int h = p_submaps.history.front()->grid()->height();
+                        double res = history[i]->grid()->resolution();
+                        int w = history[i]->grid()->width();
+                        int h = history[i]->grid()->height();
                         p_submaps.active_submap = std::make_shared<Submap>(best_match, w, h, res);
                     }
                     
