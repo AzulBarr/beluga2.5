@@ -119,7 +119,6 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
 
         slam_->update_occupancy_grid(z);
         RCLCPP_INFO(this->get_logger(), "Occupancy grid updated");
-        auto t3_a = std::chrono::high_resolution_clock::now();
 
         slam_->post_update(z);
         RCLCPP_INFO(this->get_logger(), "Post update completed");
