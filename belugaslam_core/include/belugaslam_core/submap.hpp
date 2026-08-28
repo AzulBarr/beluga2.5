@@ -116,11 +116,21 @@ private:
   std::vector<double> radial_signature_;
 };
 
+struct LoopConstraint {
+  size_t id;
+  size_t query_idx;
+  size_t reference_idx;
+
+  Sophus::SE2d T_reference_query;
+  Eigen::Matrix3d information;
+};
+
 /**
  * \brief A list of submaps maintained by each particle.
  */
 struct SubmapList {
   std::vector<std::shared_ptr<Submap>> history;
+  std::vector<LoopConstraint> loop_constraints;
   std::shared_ptr<Submap> active_submap;
 
   // Make sure active_submap is independent if shared
@@ -132,19 +142,17 @@ struct SubmapList {
 };
 
 /**
- * \brief Represents a global hypothesis (cluster) in the multi-hypothesis SLAM system.
+ * \brief Represents a global hypothesis in the multi-hypothesis SLAM system.
  * 
- * Each cluster owns a shared submap history that all its member particles reference.
- * Particles within a cluster handle local pose refinement; the cluster handles
+ * Each hypothesis owns a shared submap history that all its member particles reference.
+ * Particles within a hypothesis handle local pose refinement; the hypothesis handles
  * the global map, loop closure detection, and pose graph optimization.
  */
-struct Cluster {
+struct Hypothesis {
   size_t id = 0;
   SubmapList submaps;                                    // Shared submap history
-  int loop_closure_cooldown = 0;                         // Per-cluster cooldown
-  bool has_loop_closure = false;                         // Was this cluster born from a loop closure?
-  Sophus::SE2d loop_drift_error;                         // Drift error at the moment of loop closure
-  std::set<std::pair<size_t, size_t>> optimized_loops;   // Already-optimized loop pairs
+  int loop_closure_cooldown = 0;                         // Per-hypothesis cooldown
+  size_t optimized_loops_count = 0;                      // Number of optimized loop constraints
 };
 
 #endif // __BELUGASLAM_CORE_SUBMAP_HPP__

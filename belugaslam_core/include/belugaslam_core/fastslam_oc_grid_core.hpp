@@ -50,11 +50,11 @@ const double ROBOT_RADIUS = kRobotRadius;
 
 /// 2D pose for particle's state and motion model state.
 using state_type = Sophus::SE2d;
-/// Particle type, containing pose, weight, and a reference to its cluster (hypothesis).
+/// Particle type, containing pose, weight, and a reference to its hypothesis.
 using FastSLAMParticle = std::tuple<
     state_type,
     beluga::Weight,
-    std::shared_ptr<Cluster>
+    std::shared_ptr<Hypothesis>
 >;
 
 struct PoseGraphEdgeError {
@@ -169,16 +169,16 @@ public:
                       params.spatial_resolution_theta},
           params_(params){
       
-      // Create the initial cluster (single hypothesis: "exploring")
-      auto initial_cluster = std::make_shared<Cluster>();
-      initial_cluster->id = next_cluster_id_++;
-      clusters_.push_back(initial_cluster);
+      // Create the initial hypothesis (single hypothesis: "exploring")
+      auto initial_hypothesis = std::make_shared<Hypothesis>();
+      initial_hypothesis->id = next_hypothesis_id_++;
+      hypotheses_.push_back(initial_hypothesis);
 
       particles_.resize(params_.min_particles);
       for (auto&& p : particles_) {
         std::get<0>(p) = state_type{};
         std::get<1>(p) = beluga::Weight(1.0);
-        std::get<2>(p) = initial_cluster;  // All particles share the same cluster
+        std::get<2>(p) = initial_hypothesis;  // All particles share the same hypothesis
       }
       best_oc_grid_ = GridTypeOC();
       best_lo_grid_ = GridTypeLO();
@@ -237,23 +237,23 @@ public:
         auto dxys2 = {-0.05, 0.0, 0.05};
         auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180};
 
-        // 1. Composite local map ONCE PER CLUSTER and cache it
-        std::map<size_t, GridTypeLO> cluster_lo_cache;
-        for (auto& cluster : clusters_) {
-            composite_submaps(cluster->submaps, local_lo_grid_, true);
-            cluster_lo_cache[cluster->id] = local_lo_grid_;
+        // 1. Composite local map ONCE PER HYPOTHESIS and cache it
+        std::map<size_t, GridTypeLO> hypothesis_lo_cache;
+        for (auto& hypothesis : hypotheses_) {
+            composite_submaps(hypothesis->submaps, local_lo_grid_, true);
+            hypothesis_lo_cache[hypothesis->id] = local_lo_grid_;
         }
 
         std::vector<double> log_scores;
         log_scores.reserve(particles_.size());
 
-        // 2. Score each particle against ITS cluster's cached map
+        // 2. Score each particle against ITS hypothesis's cached map
         for (auto&& p : particles_) {
             auto& pose_pred = std::get<0>(p);
             auto& weight = std::get<1>(p);
-            auto& cluster = std::get<2>(p);
+            auto& hypothesis = std::get<2>(p);
 
-            auto& cached_grid = cluster_lo_cache[cluster->id];
+            auto& cached_grid = hypothesis_lo_cache[hypothesis->id];
 
             // Fast Endpoint-Score Model (Cartographer style)
             auto score_fn = [&](const state_type& candidate_pose) {
@@ -340,107 +340,31 @@ public:
             }
         }
         
-        // --- Loop Closure Detection (per cluster) ---
-        detect_loop_closure(z_sparse);
-
-        // --- Determine Best Hypothesis & Best Pose ---
-        // 1. Find the cluster with the highest total weight
-        std::map<size_t, double> cluster_weights;
-        for (const auto& p : particles_) {
-            cluster_weights[std::get<2>(p)->id] += static_cast<double>(std::get<1>(p));
-        }
-
-        size_t best_cluster_id = clusters_.front()->id;
-        double max_cluster_weight = -1.0;
-        for (const auto& [cid, cw] : cluster_weights) {
-            if (cw > max_cluster_weight) {
-                max_cluster_weight = cw;
-                best_cluster_id = cid;
-            }
-        }
-
-        std::shared_ptr<Cluster> best_cluster = nullptr;
-        for (auto& c : clusters_) {
-            if (c->id == best_cluster_id) {
-                best_cluster = c;
-                break;
-            }
-        }
-
-        // 2. Find the best particle *within* the winning cluster
-        double best_particle_weight = -1.0;
-        for (const auto& p : particles_) {
-            if (std::get<2>(p)->id == best_cluster_id) {
-                double w = static_cast<double>(std::get<1>(p));
-                if (w > best_particle_weight) {
-                    best_particle_weight = w;
-                    best_pose_ = std::get<0>(p);
-                }
-            }
-        }
-
-        // --- PGO Trigger (for the winning cluster) ---
-        if (best_cluster->has_loop_closure) {
-            auto& winning_hist = best_cluster->submaps.history;
-            bool has_loop = false;
-            size_t loop_start = 0;
-            size_t loop_end = 0;
-            
-            for (size_t i = 0; i < winning_hist.size(); ++i) {
-                for (size_t j = i + 5; j < winning_hist.size(); ++j) {
-                    if (winning_hist[i] == winning_hist[j]) {
-                        if (best_cluster->optimized_loops.find({i, j}) == best_cluster->optimized_loops.end()) {
-                            has_loop = true;
-                            loop_start = i;
-                            loop_end = j;
-                            best_cluster->optimized_loops.insert({i, j});
-                            break;
-                        }
-                    }
-                }
-                if (has_loop) break;
-            }
-
-            if (has_loop) {
-                optimize_pose_graph(best_cluster->submaps, loop_start, loop_end, best_cluster->loop_drift_error);
-            }
-        }
-
-        // Composite full global map from the best particle's cluster for RViz
-        composite_submaps(best_cluster->submaps, best_lo_grid_, false);
-        sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
     }
 
-    /// Update the occupancy grid map of each particle based on the transformed measurement.
-    /**
-     * - Converts the particle's pose to grid coordinates to establish the ray's origin.
-     * - (optional) Clears the robot's footprint area to mitigate self-mapping noise.
-     * - Projects each local measurement point into the world frame based on the particle's pose.
-     * - Updates the Log-Odds representation along the beam (free space) and at the hit point (occupied).
-     * - Synchronizes the internal StaticOccupancyGrid used by the measurement model.
-     * 
-     * \param measurement Measurement data.
-     */
-    void update_occupancy_grid(const measurement_type& z) {        
-        for (auto& cluster : clusters_) {
-            auto& submaps = cluster->submaps;
+    /// Update the occupancy grid map of each hypothesis based on the transformed measurement.
+    void update_occupancy_grid(const measurement_type& z) {
+        for (auto& hypothesis : hypotheses_) {
+            auto& submaps = hypothesis->submaps;
 
-            // 1. Find the best particle in THIS cluster
+            // 1. Find the best particle in THIS hypothesis
             double best_w = -1.0;
             state_type best_pose;
             for (const auto& p : particles_) {
-                if (std::get<2>(p) != cluster) continue;
+                if (std::get<2>(p) != hypothesis) continue;
                 double w = static_cast<double>(std::get<1>(p));
                 if (w > best_w) {
                     best_w = w;
                     best_pose = std::get<0>(p);
                 }
             }
-            if (best_w < 0) continue;  // Dead cluster (no particles)
+            if (best_w < 0) continue;  // Dead hypothesis (no particles)
 
-            // 2. Ensure we have an active submap
+            // 2. Ensure we have an active submap, and enforce Copy-On-Write if shared
             if (!submaps.active_submap) {
                 submaps.active_submap = std::make_shared<Submap>(best_pose, GRID_COLS, GRID_ROWS, GRID_RESOLUTION);
+            } else {
+                submaps.make_active_unique();
             }
 
             auto& lo_grid = *submaps.active_submap->grid();
@@ -482,6 +406,63 @@ public:
         }
     }
 
+    /// Step 5: Post-update processing (Loop closure, PGO, Best map composite)
+    void post_update(const measurement_type& z) {
+        measurement_type z_sparse;
+        constexpr size_t kStep = 2;
+        z_sparse.reserve(z.size() / kStep + 1);
+        for (size_t i = 0; i < z.size(); i += kStep) {
+            z_sparse.push_back(z[i]);
+        }
+
+        // --- Loop Closure Detection (per hypothesis) ---
+        detect_loop_closure(z_sparse);
+
+        // --- Determine Best Hypothesis & Best Pose ---
+        std::map<size_t, double> hypothesis_weights;
+        for (const auto& p : particles_) {
+            hypothesis_weights[std::get<2>(p)->id] += static_cast<double>(std::get<1>(p));
+        }
+
+        size_t best_hypothesis_id = hypotheses_.front()->id;
+        double max_hypothesis_weight = -1.0;
+        for (const auto& [hid, hw] : hypothesis_weights) {
+            if (hw > max_hypothesis_weight) {
+                max_hypothesis_weight = hw;
+                best_hypothesis_id = hid;
+            }
+        }
+
+        std::shared_ptr<Hypothesis> best_hypothesis = nullptr;
+        for (auto& h : hypotheses_) {
+            if (h->id == best_hypothesis_id) {
+                best_hypothesis = h;
+                break;
+            }
+        }
+
+        double best_particle_weight = -1.0;
+        for (const auto& p : particles_) {
+            if (std::get<2>(p)->id == best_hypothesis_id) {
+                double w = static_cast<double>(std::get<1>(p));
+                if (w > best_particle_weight) {
+                    best_particle_weight = w;
+                    best_pose_ = std::get<0>(p);
+                }
+            }
+        }
+
+        // --- PGO Trigger (for the winning hypothesis) ---
+        if (best_hypothesis->submaps.loop_constraints.size() > best_hypothesis->optimized_loops_count) {
+            optimize_pose_graph(best_hypothesis->submaps);
+            best_hypothesis->optimized_loops_count = best_hypothesis->submaps.loop_constraints.size();
+        }
+
+        // Composite full global map from the best particle's hypothesis for RViz
+        composite_submaps(best_hypothesis->submaps, best_lo_grid_, false);
+        sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
+    }
+
     /// Multinomial resampling based on the current importance weights.
     /**
      * - Creates a discrete distribution based on the importance weights.
@@ -495,57 +476,168 @@ public:
                        ranges::views::transform([](auto w) { return static_cast<double>(w); }) |
                        ranges::to<std::vector<double>>();
 
-        // Calculate Effective Sample Size (ESS)
+        // 1. Always detect and split spatial modes BEFORE deciding whether to resample
+        detect_and_split_modes(weights_view);
+
+        // 2. Kill hypotheses with negligible total weight (< 5%)
+        std::map<size_t, double> hypothesis_total_weight;
+        double global_total = 0.0;
+        for (size_t i = 0; i < particles_.size(); ++i) {
+            auto& hypothesis = std::get<2>(particles_[i]);
+            double w = weights_view[i];
+            hypothesis_total_weight[hypothesis->id] += w;
+            global_total += w;
+        }
+
+        std::set<size_t> dead_hypotheses;
+        for (auto& h : hypotheses_) {
+            if (global_total > 0 && (hypothesis_total_weight[h->id] / global_total) < 0.05) {
+                dead_hypotheses.insert(h->id);
+            }
+        }
+
+        // 3. Calculate Global ESS
         double sum_sq = 0.0;
         for (double w : weights_view) {
             sum_sq += w * w;
         }
         double n_eff = (sum_sq > 0.0) ? (1.0 / sum_sq) : 0.0;
 
-        // Only resample if ESS drops below half of the current particle count
-        if (n_eff >= particles_.size() / 2.0) {
+        // We MUST resample if ESS is low, OR if there are dead hypotheses that need to be purged,
+        // OR if particle counts drastically mismatch weight quotas (we assume ESS catches this).
+        if (n_eff >= particles_.size() / 2.0 && dead_hypotheses.empty()) {
+            // We can safely skip resampling. 
+            // The spatial modes are already split and tracked as independent hypotheses.
             return;
         }
 
-        // 1. Calculate total weight per cluster
-        std::map<size_t, double> cluster_total_weight;
-        std::map<size_t, std::vector<size_t>> cluster_particle_indices;
-        double global_total = 0.0;
-
+        // --- ACTUAL RESAMPLING ---
+        std::map<size_t, std::vector<size_t>> hypothesis_particle_indices;
         for (size_t i = 0; i < particles_.size(); ++i) {
-            auto it = particles_.begin() + i;
-            auto& cluster = std::get<2>(*it);
-            double w = weights_view[i];
-            cluster_total_weight[cluster->id] += w;
-            cluster_particle_indices[cluster->id].push_back(i);
-            global_total += w;
+            hypothesis_particle_indices[std::get<2>(particles_[i])->id].push_back(i);
+        }
+
+        // Gather surviving hypotheses and normalize their weights
+        std::vector<std::pair<size_t, double>> surviving_hypotheses;
+        double surviving_weight_sum = 0.0;
+        for (auto& h : hypotheses_) {
+            if (!dead_hypotheses.count(h->id)) {
+                double w = hypothesis_total_weight[h->id];
+                surviving_hypotheses.push_back({h->id, w});
+                surviving_weight_sum += w;
+            }
+        }
+
+        // Sort descending by weight
+        std::sort(surviving_hypotheses.begin(), surviving_hypotheses.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        // Enforce maximum of 4 hypotheses to protect the budget
+        size_t max_hypotheses = 4;
+        while (surviving_hypotheses.size() > max_hypotheses) {
+            dead_hypotheses.insert(surviving_hypotheses.back().first);
+            surviving_weight_sum -= surviving_hypotheses.back().second;
+            surviving_hypotheses.pop_back();
+        }
+
+        size_t K = surviving_hypotheses.size();
+        if (K == 0) return; // Should never happen unless weights are all exactly zero
+
+        size_t N_budget = (K == 1) ? params_.min_particles : params_.max_particles;
+        size_t N_min = 12;
+        
+        // Safety check if parameters are strange
+        if (K * N_min > N_budget) {
+            N_min = N_budget / K;
+        }
+
+        size_t remaining_budget = N_budget - (K * N_min);
+
+        // Pre-calculate exact allocations
+        std::map<size_t, size_t> h_quotas;
+        size_t allocated = 0;
+        for (size_t i = 0; i < K; ++i) {
+            size_t hid = surviving_hypotheses[i].first;
+            double w_norm = surviving_weight_sum > 0 ? (surviving_hypotheses[i].second / surviving_weight_sum) : (1.0 / K);
+            
+            size_t quota = N_min + std::round(remaining_budget * w_norm);
+            
+            // Adjust last one to exactly match budget (absorb rounding errors)
+            if (i == K - 1) {
+                quota = N_budget - allocated;
+            }
+            h_quotas[hid] = quota;
+            allocated += quota;
         }
 
         std::vector<FastSLAMParticle> buffer;
-        buffer.reserve(params_.max_particles);
+        buffer.reserve(N_budget);
 
-        // 2. Sample from each cluster proportionally
-        auto clusters_snapshot = clusters_; // Copy for safe iteration while modifying clusters_
-        for (auto& cluster : clusters_snapshot) {
-            double frac = (global_total > 0) ? cluster_total_weight[cluster->id] / global_total : 0.0;
-            
-            // Kill hypothesis clusters with less than 5% weight
-            if (frac < 0.05) continue;
+        for (auto& hypothesis : hypotheses_) {
+            if (dead_hypotheses.count(hypothesis->id)) continue;
 
-            // Gather this cluster's particles and weights
+            size_t h_quota = h_quotas[hypothesis->id];
+
             std::vector<FastSLAMParticle> c_particles;
             std::vector<double> c_weights;
-            auto c_states = c_particles | beluga::views::elements<0>;
             
-            for (size_t idx : cluster_particle_indices[cluster->id]) {
-                c_particles.push_back(*(particles_.begin() + idx));
+            for (size_t idx : hypothesis_particle_indices[hypothesis->id]) {
+                c_particles.push_back(particles_[idx]);
                 c_weights.push_back(weights_view[idx]);
             }
 
-            // Allocate particles proportional to hypothesis weight
-            size_t h_quota = std::max<size_t>(5, std::round(params_.max_particles * frac));
+            if (c_particles.empty()) continue;
 
-            // --- SPATIAL CLUSTERING (HYPOTHESIS SPLIT) ---
+            auto resampling_view = beluga::views::sample(c_particles, c_weights) | 
+                                   ranges::views::take(h_quota);
+            
+            for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
+                buffer.push_back(*it); 
+            }
+        }
+
+        particles_.assign(buffer.begin(), buffer.end());
+
+        // Reset weights ensuring the global sum across ALL hypotheses is exactly 1.0
+        double uniform_weight = 1.0 / particles_.size();
+        for (auto&& w : beluga::views::weights(particles_)) {
+            w = beluga::Weight(uniform_weight);
+        }
+
+        // Garbage collect: remove hypotheses with no surviving particles
+        hypotheses_.erase(
+            std::remove_if(hypotheses_.begin(), hypotheses_.end(),
+                [this](const auto& hypothesis) {
+                    for (const auto& p : particles_) {
+                        if (std::get<2>(p) == hypothesis) return false;
+                    }
+                    return true;
+                }),
+            hypotheses_.end());
+    }
+
+    void detect_and_split_modes(const std::vector<double>& weights_view) {
+        auto hypotheses_snapshot = hypotheses_;
+        
+        std::map<size_t, std::vector<size_t>> hypothesis_particle_indices;
+        for (size_t i = 0; i < particles_.size(); ++i) {
+            hypothesis_particle_indices[std::get<2>(particles_[i])->id].push_back(i);
+        }
+
+        for (auto& hypothesis : hypotheses_snapshot) {
+            const auto& indices = hypothesis_particle_indices[hypothesis->id];
+            if (indices.empty()) continue;
+
+            std::vector<state_type> c_states;
+            std::vector<double> c_weights;
+            c_states.reserve(indices.size());
+            c_weights.reserve(indices.size());
+            for (size_t idx : indices) {
+                c_states.push_back(std::get<0>(particles_[idx]));
+                c_weights.push_back(weights_view[idx]);
+            }
+
+            // --- SPATIAL CLUSTERING ---
             beluga::ParticleClusterizerParam cluster_params;
             cluster_params.linear_hash_resolution = 1.0; 
             cluster_params.angular_hash_resolution = 0.5;
@@ -569,78 +661,33 @@ public:
 
             bool is_first_spatial_cluster = true;
             for (const auto& [scid, scweight] : sorted_s_clusters) {
-                // Only preserve valid spatial sub-hypotheses (e.g. > 5% weight of the hypothesis)
+                // Only preserve valid spatial sub-hypotheses (e.g. > 5% weight of the local hypothesis)
                 if (scweight / s_total_weight < 0.05) continue;
 
-                std::shared_ptr<Cluster> target_cluster = cluster;
+                std::shared_ptr<Hypothesis> target_hypothesis = hypothesis;
 
                 if (!is_first_spatial_cluster) {
                     // SPATIAL DIVERGENCE FORK!
-                    target_cluster = std::make_shared<Cluster>(*cluster); // Copy history & properties
-                    target_cluster->id = next_cluster_id_++;
+                    target_hypothesis = std::make_shared<Hypothesis>(*hypothesis); // Copy history & properties
+                    target_hypothesis->id = next_hypothesis_id_++;
                     
-                    // The new hypothesis MUST have its own independent active submap
-                    if (target_cluster->submaps.active_submap) {
-                        target_cluster->submaps.active_submap = target_cluster->submaps.active_submap->clone();
-                    }
-                    clusters_.push_back(target_cluster);
+                    // The new hypothesis explicitly SHARES the exact same active submap.
+                    // Copy-on-Write (COW) is enforced right before inserting the scan in update_occupancy_grid.
+                    target_hypothesis->submaps.active_submap = hypothesis->submaps.active_submap;
+                    hypotheses_.push_back(target_hypothesis);
                     
-                    std::cout << "\n[SPATIAL DIVERGENCE] Hipotesis " << cluster->id 
-                              << " se bifurco en el cluster " << target_cluster->id << std::endl;
+                    std::cout << "\n[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id 
+                              << " se bifurco en la hipotesis " << target_hypothesis->id << std::endl;
                 }
                 is_first_spatial_cluster = false;
 
-                std::vector<FastSLAMParticle> sc_particles;
-                std::vector<double> sc_weights;
-                for (size_t idx : s_cluster_to_indices[scid]) {
-                    sc_particles.push_back(c_particles[idx]);
-                    sc_weights.push_back(c_weights[idx]);
+                // Re-assign the particles to the correct hypothesis
+                for (size_t local_idx : s_cluster_to_indices[scid]) {
+                    size_t global_idx = indices[local_idx];
+                    std::get<2>(particles_[global_idx]) = target_hypothesis;
                 }
-
-                size_t target_count = std::max<size_t>(5, std::round(h_quota * (scweight / s_total_weight)));
-
-                auto resampling_view = beluga::views::sample(sc_particles, sc_weights) | 
-                                       ranges::views::take(target_count);
-                
-                for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
-                    if (buffer.size() >= params_.max_particles) break;
-                    auto p = *it;
-                    std::get<2>(p) = target_cluster; // Assign to the correct hypothesis
-                    buffer.push_back(p); 
-                }
-                if (buffer.size() >= params_.max_particles) break;
             }
         }
-
-        // 3. Fallback if buffer is still too small
-        if (buffer.size() < params_.min_particles) {
-            size_t missing = params_.min_particles - buffer.size();
-            auto resampling_view = beluga::views::sample(particles_, weights_view) | 
-                                   ranges::views::take(missing);
-            for (auto it = resampling_view.begin(); it != resampling_view.end(); ++it) {
-                if (buffer.size() >= params_.max_particles) break;
-                buffer.push_back(*it); 
-            }
-        }
-
-        particles_.assign(buffer.begin(), buffer.end());
-
-        // 4. Reset weights ensuring the global sum across ALL hypotheses is exactly 1.0
-        double uniform_weight = 1.0 / particles_.size();
-        for (auto&& w : beluga::views::weights(particles_)) {
-            w = beluga::Weight(uniform_weight);
-        }
-
-        // 5. Garbage collect: remove clusters with no surviving particles
-        clusters_.erase(
-            std::remove_if(clusters_.begin(), clusters_.end(),
-                [this](const auto& cluster) {
-                    for (const auto& p : particles_) {
-                        if (std::get<2>(p) == cluster) return false;
-                    }
-                    return true;  // No particles reference this cluster
-                }),
-            clusters_.end());
     }
 
     /// Bresenham's 2D line drawing algorithm.
@@ -772,35 +819,35 @@ public:
         }
     }
 
-    /// Step 3: Detect and Inject Loop Closure candidates (per cluster)
+    /// Step 3: Detect and Inject Loop Closure candidates (per hypothesis)
     void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse) {
         if (z_sparse.empty()) return;
 
-        // We iterate over a copy of clusters_ because we may add new clusters during iteration
-        auto clusters_snapshot = clusters_;
+        // We iterate over a copy of hypotheses_ because we may add new hypotheses during iteration
+        auto hypotheses_snapshot = hypotheses_;
 
-        for (auto& cluster : clusters_snapshot) {
-            // Per-cluster cooldown
-            if (cluster->loop_closure_cooldown > 0) {
-                cluster->loop_closure_cooldown--;
+        for (auto& hypothesis : hypotheses_snapshot) {
+            // Per-hypothesis cooldown
+            if (hypothesis->loop_closure_cooldown > 0) {
+                hypothesis->loop_closure_cooldown--;
                 continue;
             }
 
-            // 1. Find the best particle in THIS cluster for its representative pose
+            // 1. Find the best particle in THIS hypothesis for its representative pose
             double best_w = -1.0;
             state_type representative_pose;
             for (const auto& p : particles_) {
-                if (std::get<2>(p) != cluster) continue;
+                if (std::get<2>(p) != hypothesis) continue;
                 double w = static_cast<double>(std::get<1>(p));
                 if (w > best_w) {
                     best_w = w;
                     representative_pose = std::get<0>(p);
                 }
             }
-            if (best_w < 0) continue;  // Dead cluster
+            if (best_w < 0) continue;  // Dead hypothesis
 
-            // 2. Search THIS cluster's history for proximity matches
-            const auto& history = cluster->submaps.history;
+            // 2. Search THIS hypothesis's history for proximity matches
+            const auto& history = hypothesis->submaps.history;
             for (size_t i = 0; i < history.size(); ++i) {
                 if (i + 5 >= history.size()) continue;
 
@@ -811,7 +858,7 @@ public:
                 double distance = std::sqrt(dx*dx + dy*dy);
 
                 if (distance < 5.0) {
-                    std::cout << "\n[LOOP CLOSURE] Cluster " << cluster->id 
+                    std::cout << "\n[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                               << ": Candidato por PROXIMIDAD! Submapa " << i 
                               << " detectado a " << distance << "m. Iniciando escaneo correlativo..." << std::endl;
 
@@ -848,62 +895,80 @@ public:
 
                     double avg_score = best_score / z_sparse.size();
                     if (avg_score > 0.5) {
-                        std::cout << "[LOOP CLOSURE] Cluster " << cluster->id 
+                        std::cout << "[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                                   << ": ALINEACION EXITOSA! Score: " << avg_score 
-                                  << ". Creando nuevo cluster (hipotesis)..." << std::endl;
+                                  << ". Creando nueva hipotesis bifurcada..." << std::endl;
 
-                        // 4. Create a NEW cluster (fork the hypothesis)
-                        auto new_cluster = std::make_shared<Cluster>();
-                        new_cluster->id = next_cluster_id_++;
-                        new_cluster->submaps = cluster->submaps;  // Copy the full history
-                        new_cluster->submaps.history.push_back(history[i]);  // Add the loop closure edge
-                        new_cluster->has_loop_closure = true;
-                        new_cluster->loop_drift_error = best_match * representative_pose.inverse();
-                        
-                        // Throw away the drifted active submap because it overlaps with the old visited map!
-                        // The system will automatically create a fresh one at the corrected pose on the next scan.
-                        new_cluster->submaps.active_submap = nullptr;
-                        
-                        clusters_.push_back(new_cluster);
-
-                        // 5. Move the worst 20% of THIS cluster's particles to the new cluster
-                        std::vector<std::pair<double, size_t>> cluster_particles_sorted;
+                        // 3. Move worst 20% of particles from this hypothesis
+                        std::vector<size_t> h_indices;
                         for (size_t pi = 0; pi < particles_.size(); ++pi) {
-                            auto pit = particles_.begin() + pi;
-                            if (std::get<2>(*pit) == cluster) {
-                                cluster_particles_sorted.push_back({static_cast<double>(std::get<1>(*pit)), pi});
+                            if (std::get<2>(*(particles_.begin() + pi)) == hypothesis) {
+                                h_indices.push_back(pi);
                             }
                         }
-                        std::sort(cluster_particles_sorted.begin(), cluster_particles_sorted.end());
 
-                        size_t num_inject = std::max<size_t>(1, cluster_particles_sorted.size() * 0.2);
-                        double avg_w = 0.0;
-                        for (const auto& [pw, _] : cluster_particles_sorted) avg_w += pw;
-                        avg_w /= cluster_particles_sorted.size();
-
-                        for (size_t k = 0; k < num_inject && k < cluster_particles_sorted.size(); ++k) {
-                            size_t pidx = cluster_particles_sorted[k].second;
-                            auto pit = particles_.begin() + pidx;
+                        if (h_indices.size() > 5) {
+                            std::sort(h_indices.begin(), h_indices.end(), [&](size_t a, size_t b) {
+                                return std::get<1>(*(particles_.begin() + a)) < std::get<1>(*(particles_.begin() + b));
+                            });
                             
-                            std::get<0>(*pit) = best_match;           // Teleport
-                            std::get<1>(*pit) = beluga::Weight(avg_w); // Revive weight
-                            std::get<2>(*pit) = new_cluster;           // Move to new cluster
-                        }
+                            size_t to_move = h_indices.size() * 0.2;
+                            if (to_move > 0) {
+                                // 4. Create a NEW hypothesis (fork)
+                                auto new_hypothesis = std::make_shared<Hypothesis>();
+                                new_hypothesis->id = next_hypothesis_id_++;
+                                new_hypothesis->submaps = hypothesis->submaps;  // Copy the full history
+                                
+                                // Insert explicit loop constraint
+                                LoopConstraint constraint;
+                                constraint.id = new_hypothesis->submaps.loop_constraints.size();
+                                constraint.query_idx = new_hypothesis->submaps.history.size() - 1; // The latest finished submap
+                                constraint.reference_idx = i;
+                                // The transform from reference to query
+                                constraint.T_reference_query = old_submap->global_pose().inverse() * best_match;
+                                constraint.information = Eigen::Matrix3d::Identity();
+                                new_hypothesis->submaps.loop_constraints.push_back(constraint);
 
-                        // Re-normalize all weights
-                        double final_sum_w = 0.0;
-                        for (const auto& p : particles_) final_sum_w += static_cast<double>(std::get<1>(p));
-                        if (final_sum_w > 1e-9) {
-                            for (auto&& p : particles_) {
-                                auto& weight = std::get<1>(p);
-                                weight = beluga::Weight(static_cast<double>(weight) / final_sum_w);
+                                // Throw away the drifted active submap because it overlaps with the old visited map!
+                                // The system will automatically create a fresh one at the corrected pose on the next scan.
+                                new_hypothesis->submaps.active_submap = nullptr;
+                                
+                                hypotheses_.push_back(new_hypothesis);
+
+                                // Calculate average weight of the top 80% to give to the moved ones
+                                double sum_w_top = 0.0;
+                                for (size_t k = to_move; k < h_indices.size(); ++k) {
+                                    sum_w_top += static_cast<double>(std::get<1>(*(particles_.begin() + h_indices[k])));
+                                }
+                                double avg_w = sum_w_top / (h_indices.size() - to_move);
+
+                                for (size_t k = 0; k < to_move; ++k) {
+                                    auto it = particles_.begin() + h_indices[k];
+                                    // Teleport particle
+                                    std::get<0>(*it) = best_match * representative_pose.inverse() * std::get<0>(*it);
+                                    // Assign to new hypothesis
+                                    std::get<2>(*it) = new_hypothesis;
+                                    // Boost weight
+                                    std::get<1>(*it) = beluga::Weight(avg_w);
+                                }
+
+                                // Set cooldown for BOTH to avoid rapid re-triggering while ambiguity resolves
+                                hypothesis->loop_closure_cooldown = 200;
+                                new_hypothesis->loop_closure_cooldown = 200;
+
+                                // Renormalize all weights across all particles
+                                double global_sum = 0.0;
+                                for (const auto& p : particles_) global_sum += static_cast<double>(std::get<1>(p));
+                                if (global_sum > 0.0) {
+                                    for (auto&& p : particles_) {
+                                        std::get<1>(p) = beluga::Weight(static_cast<double>(std::get<1>(p)) / global_sum);
+                                    }
+                                }
+                                break; // Only process one loop closure per hypothesis per step
                             }
                         }
-
-                        cluster->loop_closure_cooldown = 200;
-                        break;  // One loop closure per cluster per cycle
                     } else {
-                        std::cout << "[LOOP CLOSURE] Cluster " << cluster->id 
+                        std::cout << "[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                                   << ": Falsa alarma (Score bajo: " << avg_score << ")" << std::endl;
                     }
                 }
@@ -912,19 +977,20 @@ public:
     }
 
     /// Step 4: Pose Graph Optimization (PGO) - Ceres Solver
-    void optimize_pose_graph(SubmapList& submap_list, size_t loop_start, size_t loop_end, const Sophus::SE2d& drift_error) {
+    void optimize_pose_graph(SubmapList& submap_list) {
         auto& hist = submap_list.history;
-        if (loop_start >= loop_end || loop_end >= hist.size()) return;
+        size_t num_poses = hist.size();
+        if (num_poses < 2) return;
 
         std::cout << "\n[PGO] Iniciando Ceres Pose Graph Optimization..." << std::endl;
-        std::cout << "[PGO] Optimizando grafo desde submapa " << loop_start << " hasta " << loop_end - 1 << std::endl;
+        std::cout << "[PGO] Optimizando grafo con " << num_poses << " nodos y " 
+                  << submap_list.loop_constraints.size() << " loop closures." << std::endl;
 
-        size_t num_poses = loop_end - loop_start;
         std::vector<std::array<double, 3>> poses(num_poses);
 
-        // 1. Initialize parameter blocks with current drifted poses
+        // 1. Initialize parameter blocks with current poses
         for (size_t i = 0; i < num_poses; ++i) {
-            auto current_pose = hist[loop_start + i]->global_pose();
+            auto current_pose = hist[i]->global_pose();
             poses[i][0] = current_pose.translation().x();
             poses[i][1] = current_pose.translation().y();
             poses[i][2] = current_pose.so2().log();
@@ -934,9 +1000,9 @@ public:
 
         // 2. Add Odometry Edges (Sequential constraints)
         for (size_t i = 0; i < num_poses - 1; ++i) {
-            // Calculate the original relative transform (including drift)
-            auto pose_a = hist[loop_start + i]->global_pose();
-            auto pose_b = hist[loop_start + i + 1]->global_pose();
+            // Calculate the original relative transform between adjacent submaps
+            auto pose_a = hist[i]->global_pose();
+            auto pose_b = hist[i + 1]->global_pose();
             auto relative_tf = pose_a.inverse() * pose_b;
 
             ceres::CostFunction* cost_function = PoseGraphEdgeError::Create(
@@ -945,38 +1011,26 @@ public:
                 relative_tf.so2().log()
             );
 
-            // Odometry is usually trusted, but we give it a uniform weight
             problem.AddResidualBlock(cost_function, nullptr, poses[i].data(), poses[i + 1].data());
         }
 
-        // 3. Anchor the first pose
+        // 3. Add Loop Closure Edges
+        for (const auto& constraint : submap_list.loop_constraints) {
+            if (constraint.query_idx >= num_poses || constraint.reference_idx >= num_poses) continue;
+
+            ceres::CostFunction* loop_cost = PoseGraphEdgeError::Create(
+                constraint.T_reference_query.translation().x(),
+                constraint.T_reference_query.translation().y(),
+                constraint.T_reference_query.so2().log()
+            );
+
+            // We can add a robust loss function (e.g., HuberLoss) for loop closures to reject outliers
+            ceres::LossFunction* loss_function = new ceres::HuberLoss(1.0);
+            problem.AddResidualBlock(loop_cost, loss_function, poses[constraint.reference_idx].data(), poses[constraint.query_idx].data());
+        }
+
+        // 4. Anchor the first pose
         problem.SetParameterBlockConstant(poses[0].data());
-
-        // 4. Add the Loop Closure Edge
-        // The last pose in the chain (loop_end - 1) should be pulled towards its true location.
-        // Its true location is exactly its current drifted pose multiplied by the drift error.
-        auto drifted_end_pose = hist[loop_end - 1]->global_pose();
-        auto true_end_pose = drift_error * drifted_end_pose;
-        
-        // We create an absolute constraint for the last pose
-        std::array<double, 3> target_end_pose = {
-            true_end_pose.translation().x(),
-            true_end_pose.translation().y(),
-            true_end_pose.so2().log()
-        };
-
-        // We can just add a strong relative constraint between the anchor and the end pose
-        // representing the "corrected" relationship.
-        auto expected_relative_tf = hist[loop_start]->global_pose().inverse() * true_end_pose;
-        
-        ceres::CostFunction* loop_cost = PoseGraphEdgeError::Create(
-            expected_relative_tf.translation().x(),
-            expected_relative_tf.translation().y(),
-            expected_relative_tf.so2().log()
-        );
-
-        // Give the loop closure a higher weight or just normal weight
-        problem.AddResidualBlock(loop_cost, nullptr, poses[0].data(), poses[num_poses - 1].data());
 
         // 5. Solve
         ceres::Solver::Options options;
@@ -989,28 +1043,53 @@ public:
 
         std::cout << summary.BriefReport() << std::endl;
 
-        // 6. Write back optimized poses
+        // 6. Write back optimized poses and compute correction delta
+        auto old_last_pose = hist.back()->global_pose();
+        
         for (size_t i = 1; i < num_poses; ++i) {
             Sophus::SE2d corrected_pose{
                 Sophus::SO2d{poses[i][2]}, 
                 Eigen::Vector2d{poses[i][0], poses[i][1]}
             };
 
-            // Copy-on-Write: If this submap is shared with another hypothesis cluster, clone it
-            // to avoid modifying the other cluster's map.
-            if (hist[loop_start + i].use_count() > 1) {
-                hist[loop_start + i] = hist[loop_start + i]->clone();
+            // Copy-on-Write: If this submap is shared with another hypothesis, clone it
+            if (hist[i].use_count() > 1) {
+                hist[i] = hist[i]->clone();
             }
 
-            hist[loop_start + i]->set_global_pose(corrected_pose);
+            hist[i]->set_global_pose(corrected_pose);
         }
 
-        std::cout << "[PGO] Ceres Optimization Finalizada. Mapa enderezado." << std::endl;
+        auto new_last_pose = hist.back()->global_pose();
+        auto delta_tf = new_last_pose * old_last_pose.inverse();
+
+        // 7. Apply correction delta to the active submap to preserve relative anchoring
+        if (submap_list.active_submap) {
+            submap_list.make_active_unique();
+            submap_list.active_submap->set_global_pose(delta_tf * submap_list.active_submap->global_pose());
+        }
+
+        // 8. Apply correction delta to all particles in hypotheses sharing this history
+        for (auto& p : particles_) {
+            auto& hypothesis = std::get<2>(p);
+            // If the particle belongs to a hypothesis that shares this exact submap history
+            if (hypothesis->submaps.history.data() == submap_list.history.data() || 
+                (!hypothesis->submaps.history.empty() && !submap_list.history.empty() && 
+                 hypothesis->submaps.history.back() == submap_list.history.back())) {
+                
+                std::get<0>(p) = delta_tf * std::get<0>(p);
+            }
+        }
+
+        // Correct the global best pose if it was moved
+        best_pose_ = delta_tf * best_pose_;
+
+        std::cout << "[PGO] Ceres Optimization Finalizada. Particulas y submapas corregidos." << std::endl;
     }
 
 private:
-    std::vector<std::shared_ptr<Cluster>> clusters_;
-    size_t next_cluster_id_ = 0;
+    std::vector<std::shared_ptr<Hypothesis>> hypotheses_;
+    size_t next_hypothesis_id_ = 0;
     beluga::TupleVector<FastSLAMParticle> particles_;
 
     MotionModel motion_model_;

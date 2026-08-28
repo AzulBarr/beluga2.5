@@ -112,14 +112,23 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         slam_->measurement_model_map(z);
         RCLCPP_INFO(this->get_logger(), "Weights calculated");
         auto t2 = std::chrono::high_resolution_clock::now();
+
+        slam_->resample();
+        RCLCPP_INFO(this->get_logger(), "Resample completed");
+        auto t3 = std::chrono::high_resolution_clock::now();
+
+        slam_->update_occupancy_grid(z);
+        RCLCPP_INFO(this->get_logger(), "Occupancy grid updated");
+        auto t3_a = std::chrono::high_resolution_clock::now();
+
+        slam_->post_update(z);
+        RCLCPP_INFO(this->get_logger(), "Post update completed");
+        auto t4 = std::chrono::high_resolution_clock::now();
+
         compute_se2_covariance();
         compute_entropy();
         publish_best_pose(msg->header.stamp);
         RCLCPP_INFO(this->get_logger(), "Best pose published");
-
-        slam_->update_occupancy_grid(z);
-        RCLCPP_INFO(this->get_logger(), "Occupancy grid updated");
-        auto t3 = std::chrono::high_resolution_clock::now();
 
         publish_map();
         if (it % uncertainty_map_publish_interval == 0) {
@@ -127,33 +136,30 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         }
         it ++;
         RCLCPP_INFO(this->get_logger(), "Map published");
-        auto t4 = std::chrono::high_resolution_clock::now();
+        auto t5 = std::chrono::high_resolution_clock::now();
 
         publish_particles(msg->header.stamp);
         RCLCPP_INFO(this->get_logger(), "Particles published");
-        auto t5 = std::chrono::high_resolution_clock::now();
+        auto t6 = std::chrono::high_resolution_clock::now();
 
         broadcast_map_to_odom(msg->header.stamp, current_odom);
         RCLCPP_INFO(this->get_logger(), "Map to odom TF published");
-        auto t6 = std::chrono::high_resolution_clock::now();
-
-        slam_->resample();
-        RCLCPP_INFO(this->get_logger(), "Resample completed");
         auto t7 = std::chrono::high_resolution_clock::now();
+
         const auto update_stop_time = std::chrono::high_resolution_clock::now();
         const auto update_duration = update_stop_time - update_start_time;
 
         auto d_sample = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
         auto d_weight = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-        auto d_map = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
-        auto d_pub_map = std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count();
-        auto d_particles = std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
-        auto d_tf = std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count();
-        auto d_resample = std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count();
+        auto d_resample = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+        auto d_map = std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count();
+        auto d_pub_map = std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
+        auto d_particles = std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count();
+        auto d_tf = std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count();
 
         RCLCPP_INFO(this->get_logger(),
-            "Times [ms] | sample: %ld | weight: %ld | map: %ld | pub_map: %ld | particles: %ld | tf: %ld | resample: %ld",
-            d_sample, d_weight, d_map, d_pub_map, d_particles, d_tf, d_resample);
+            "Times [ms] | sample: %ld | weight: %ld | resample: %ld | map: %ld | pub_map: %ld | particles: %ld | tf: %ld",
+            d_sample, d_weight, d_resample, d_map, d_pub_map, d_particles, d_tf);
 
         RCLCPP_INFO(
             get_logger(), "Particle filter update iteration stats: %ld particles - %.3fms",
