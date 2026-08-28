@@ -1071,7 +1071,7 @@ public:
         }
 
         // 8. Apply correction delta to all particles in THIS hypothesis
-        for (auto& p : particles_) {
+        for (auto&& p : particles_) {
             if (std::get<2>(p) == target_hypothesis) {
                 std::get<0>(p) = delta_tf * std::get<0>(p);
             }
