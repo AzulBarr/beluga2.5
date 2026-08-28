@@ -765,15 +765,15 @@ public:
 
                     for (size_t k = 0; k < num_inject; ++k) {
                         size_t idx = indices[k];
-                        auto p = *(particles_.begin() + idx);
+                        auto it = particles_.begin() + idx;
                         
-                        std::get<0>(p) = best_match; // Teleport
-                        std::get<1>(p) = beluga::Weight(avg_w); // Revive weight
+                        // Write each field directly through the iterator proxy
+                        // (TupleVector iterators return proxy tuples that forward writes to storage)
+                        std::get<0>(*it) = best_match; // Teleport
+                        std::get<1>(*it) = beluga::Weight(avg_w); // Revive weight
                         
-                        // Do not truncate history! We want to keep the whole map.
-                        // Instead, push the matched submap to the end so it becomes the 'local' reference
-                        // for scan matching, and creates a topological loop closure edge.
-                        auto& p_submaps = std::get<2>(p);
+                        // Modify submaps: push the matched submap and reset active
+                        auto& p_submaps = std::get<2>(*it);
                         p_submaps.history.push_back(history[i]);
                         
                         // Save the exact drift error for Pose Graph Optimization
