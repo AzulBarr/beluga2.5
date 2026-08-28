@@ -454,7 +454,7 @@ public:
 
         // --- PGO Trigger (for the winning hypothesis) ---
         if (best_hypothesis->submaps.loop_constraints.size() > best_hypothesis->optimized_loops_count) {
-            optimize_pose_graph(best_hypothesis->submaps);
+            optimize_pose_graph(best_hypothesis);
             best_hypothesis->optimized_loops_count = best_hypothesis->submaps.loop_constraints.size();
         }
 
@@ -483,7 +483,7 @@ public:
         std::map<size_t, double> hypothesis_total_weight;
         double global_total = 0.0;
         for (size_t i = 0; i < particles_.size(); ++i) {
-            auto& hypothesis = std::get<2>(particles_[i]);
+            auto& hypothesis = std::get<2>(*(particles_.begin() + i));
             double w = weights_view[i];
             hypothesis_total_weight[hypothesis->id] += w;
             global_total += w;
@@ -514,7 +514,7 @@ public:
         // --- ACTUAL RESAMPLING ---
         std::map<size_t, std::vector<size_t>> hypothesis_particle_indices;
         for (size_t i = 0; i < particles_.size(); ++i) {
-            hypothesis_particle_indices[std::get<2>(particles_[i])->id].push_back(i);
+            hypothesis_particle_indices[std::get<2>(*(particles_.begin() + i))->id].push_back(i);
         }
 
         // Gather surviving hypotheses and normalize their weights
@@ -582,7 +582,7 @@ public:
             std::vector<double> c_weights;
             
             for (size_t idx : hypothesis_particle_indices[hypothesis->id]) {
-                c_particles.push_back(particles_[idx]);
+                c_particles.push_back(*(particles_.begin() + idx));
                 c_weights.push_back(weights_view[idx]);
             }
 
@@ -621,7 +621,7 @@ public:
         
         std::map<size_t, std::vector<size_t>> hypothesis_particle_indices;
         for (size_t i = 0; i < particles_.size(); ++i) {
-            hypothesis_particle_indices[std::get<2>(particles_[i])->id].push_back(i);
+            hypothesis_particle_indices[std::get<2>(*(particles_.begin() + i))->id].push_back(i);
         }
 
         for (auto& hypothesis : hypotheses_snapshot) {
@@ -633,7 +633,7 @@ public:
             c_states.reserve(indices.size());
             c_weights.reserve(indices.size());
             for (size_t idx : indices) {
-                c_states.push_back(std::get<0>(particles_[idx]));
+                c_states.push_back(std::get<0>(*(particles_.begin() + idx)));
                 c_weights.push_back(weights_view[idx]);
             }
 
@@ -684,7 +684,7 @@ public:
                 // Re-assign the particles to the correct hypothesis
                 for (size_t local_idx : s_cluster_to_indices[scid]) {
                     size_t global_idx = indices[local_idx];
-                    std::get<2>(particles_[global_idx]) = target_hypothesis;
+                    std::get<2>(*(particles_.begin() + global_idx)) = target_hypothesis;
                 }
             }
         }
@@ -977,7 +977,8 @@ public:
     }
 
     /// Step 4: Pose Graph Optimization (PGO) - Ceres Solver
-    void optimize_pose_graph(SubmapList& submap_list) {
+    void optimize_pose_graph(std::shared_ptr<Hypothesis> target_hypothesis) {
+        auto& submap_list = target_hypothesis->submaps;
         auto& hist = submap_list.history;
         size_t num_poses = hist.size();
         if (num_poses < 2) return;
@@ -1069,14 +1070,9 @@ public:
             submap_list.active_submap->set_global_pose(delta_tf * submap_list.active_submap->global_pose());
         }
 
-        // 8. Apply correction delta to all particles in hypotheses sharing this history
+        // 8. Apply correction delta to all particles in THIS hypothesis
         for (auto& p : particles_) {
-            auto& hypothesis = std::get<2>(p);
-            // If the particle belongs to a hypothesis that shares this exact submap history
-            if (hypothesis->submaps.history.data() == submap_list.history.data() || 
-                (!hypothesis->submaps.history.empty() && !submap_list.history.empty() && 
-                 hypothesis->submaps.history.back() == submap_list.history.back())) {
-                
+            if (std::get<2>(p) == target_hypothesis) {
                 std::get<0>(p) = delta_tf * std::get<0>(p);
             }
         }
