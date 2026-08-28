@@ -926,8 +926,15 @@ public:
                                 constraint.id = new_hypothesis->submaps.loop_constraints.size();
                                 constraint.query_idx = new_hypothesis->submaps.history.size() - 1; // The latest finished submap
                                 constraint.reference_idx = i;
-                                // The transform from reference to query
-                                constraint.T_reference_query = old_submap->global_pose().inverse() * best_match;
+                                // Calculate the rigid correction delta that snaps the drifted robot to the true aligned pose
+                                auto correction_delta = best_match * representative_pose.inverse();
+                                
+                                // The query submap suffered the same drift as the robot. Apply the delta to find its true pose.
+                                auto query_submap = new_hypothesis->submaps.history.back();
+                                auto true_query_pose = correction_delta * query_submap->global_pose();
+
+                                // The relative transform constraint is from the reference submap to the true query submap
+                                constraint.T_reference_query = old_submap->global_pose().inverse() * true_query_pose;
                                 constraint.information = Eigen::Matrix3d::Identity();
                                 new_hypothesis->submaps.loop_constraints.push_back(constraint);
 
