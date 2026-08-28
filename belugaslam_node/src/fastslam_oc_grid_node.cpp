@@ -161,8 +161,9 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
             d_sample, d_weight, d_resample, d_map, d_pub_map, d_particles, d_tf);
 
         RCLCPP_INFO(
-            get_logger(), "Particle filter update iteration stats: %ld particles - %.3fms",
+            get_logger(), "Particle filter update iteration stats: %ld particles | %ld active hypotheses | %.3fms",
             slam_->particles().size(),
+            slam_->get_active_hypotheses_count(),
             std::chrono::duration<double, std::milli>(update_duration).count());
 
     } catch (tf2::TransformException &ex) {
@@ -251,10 +252,14 @@ void BelugaSLAMNode::publish_best_pose(const rclcpp::Time& stamp) {
 
     msg.pose.covariance.fill(0.0);
 
-    msg.pose.covariance[0]  = cov(0,0);  // x-x
+    msg.pose.covariance[0]  = cov(0,0) + 1e-6;  // x-x
     msg.pose.covariance[1]  = cov(0,1);  // x-y
     msg.pose.covariance[6]  = cov(1,0);  // y-x
-    msg.pose.covariance[7]  = cov(1,1);  // y-y
+    msg.pose.covariance[7]  = cov(1,1) + 1e-6;  // y-y
+
+    msg.pose.covariance[14] = 1e-6; // z-z
+    msg.pose.covariance[21] = 1e-6; // roll-roll
+    msg.pose.covariance[28] = 1e-6; // pitch-pitch
 
     msg.pose.covariance[5]  = cov(0,2);  // x-yaw
     msg.pose.covariance[30] = cov(2,0);  // yaw-x
@@ -262,7 +267,7 @@ void BelugaSLAMNode::publish_best_pose(const rclcpp::Time& stamp) {
     msg.pose.covariance[11] = cov(1,2);  // y-yaw
     msg.pose.covariance[31] = cov(2,1);  // yaw-y
 
-    msg.pose.covariance[35] = cov(2,2);  // yaw-yaw
+    msg.pose.covariance[35] = cov(2,2) + 1e-6;  // yaw-yaw
 
     pose_pub_->publish(msg);
 
@@ -327,10 +332,17 @@ void BelugaSLAMNode::compute_se2_covariance() {
 
     auto mean = Sophus::SE2<double>{Eigen::Map<const Sophus::SE2<double>>{mean_vector.data()}};
 
+    // Clear the full matrix to avoid uninitialized memory in cross-covariances
+    covariance_.setZero();
+
     // Compute the covariance of the translation part.
     covariance_.template topLeftCorner<2, 2>() = beluga::covariance(
         poses, weights, mean.translation(), [](const auto& value) { return value.translation(); });
     
+    // Symmetrize just in case of floating point inaccuracies
+    covariance_(0, 1) = (covariance_(0, 1) + covariance_(1, 0)) / 2.0;
+    covariance_(1, 0) = covariance_(0, 1);
+
     // Compute the orientation variance and re-normalize the rotation component (after using the non-normal result).
     if (mean.so2().unit_complex().norm() < std::numeric_limits<double>::epsilon()) {
       // Handle the case where both averages are too close to zero.

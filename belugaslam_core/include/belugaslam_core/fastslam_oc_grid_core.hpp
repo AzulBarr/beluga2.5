@@ -192,6 +192,8 @@ public:
     [[nodiscard]] const auto& particles() const { return particles_; }
     [[nodiscard]] auto& particles() { return particles_; }
 
+    [[nodiscard]] size_t get_active_hypotheses_count() const { return hypotheses_.size(); }
+
     /// Samples from the motion distribution to propagate particle states.
     /**
      * This function computes a motion sampler based on the provided control action 
