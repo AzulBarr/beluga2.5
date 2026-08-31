@@ -307,9 +307,7 @@ public:
                 }
             }
 
-            // Remove manual overriding of the particle's pose to the coarse grid match.
-            // Forcing it to snap to a 5cm / 2.5deg grid completely destroys the sub-pixel 
-            // continuous accuracy of the particle filter and causes double-wall jitter over time!
+            pose_pred = best_pose;
             log_scores.push_back(best_log_score);
         }
 
