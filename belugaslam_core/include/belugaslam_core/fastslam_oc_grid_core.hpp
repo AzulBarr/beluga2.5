@@ -476,6 +476,13 @@ public:
         // Composite full global map from the best particle's hypothesis for RViz
         composite_submaps(best_hypothesis->submaps, best_lo_grid_, false);
         sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
+
+        // RESET WEIGHTS: After all mapping and decision logic is done, reset weights 
+        // to uniform (1/N) so the filter is ready for the next motion update.
+        double uniform_weight = 1.0 / particles_.size();
+        for (auto&& w : beluga::views::weights(particles_)) {
+            w = beluga::Weight(uniform_weight);
+        }
     }
 
     /// Multinomial resampling based on the current importance weights.
@@ -612,12 +619,6 @@ public:
         }
 
         particles_.assign(buffer.begin(), buffer.end());
-
-        // Reset weights ensuring the global sum across ALL hypotheses is exactly 1.0
-        double uniform_weight = 1.0 / particles_.size();
-        for (auto&& w : beluga::views::weights(particles_)) {
-            w = beluga::Weight(uniform_weight);
-        }
 
         // Garbage collect: remove hypotheses with no surviving particles
         hypotheses_.erase(
