@@ -16,9 +16,9 @@ static constexpr std::size_t GRID_COLS = kGridCols;
 static constexpr std::size_t GRID_ROWS = kGridRows;
 
 // Submap size (decoupled from global map size).
-// 12 meters / 0.1 resolution = 120 cells
-static constexpr std::size_t SUBMAP_COLS = 120;
-static constexpr std::size_t SUBMAP_ROWS = 120;
+// Dynamically calculated to always be exactly 12m x 12m regardless of the resolution chosen in grid_config.py
+static constexpr std::size_t SUBMAP_COLS = static_cast<std::size_t>(12.0 / kGridResolution);
+static constexpr std::size_t SUBMAP_ROWS = static_cast<std::size_t>(12.0 / kGridResolution);
 static constexpr double GRID_RESOLUTION = kGridResolution;
 static constexpr double ORIGIN_X = kOriginX;
 static constexpr double ORIGIN_Y = kOriginY;
