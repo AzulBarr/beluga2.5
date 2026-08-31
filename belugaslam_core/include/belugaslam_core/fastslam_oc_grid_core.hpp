@@ -382,7 +382,14 @@ public:
             auto T_s_r = T_w_s.inverse() * best_pose;
 
             int gx0, gy0, dummy_idx;
-            if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid)) continue;
+            if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid)) {
+                // The robot drove outside the physical bounds of the submap before reaching 50 insertions!
+                // Force finish the submap early so a new one is created at the new position on the next frame.
+                submaps.active_submap->finish();
+                submaps.history.push_back(submaps.active_submap);
+                submaps.active_submap = nullptr;
+                continue;
+            }
             
             clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
 
