@@ -58,8 +58,9 @@ using FastSLAMParticle = std::tuple<
 >;
 
 struct PoseGraphEdgeError {
-    PoseGraphEdgeError(double dx, double dy, double dtheta)
-        : dx_(dx), dy_(dy), dtheta_(dtheta) {}
+    PoseGraphEdgeError(double dx, double dy, double dtheta, double weight_translation = 1.0, double weight_rotation = 1.0)
+        : dx_(dx), dy_(dy), dtheta_(dtheta), 
+          weight_translation_(weight_translation), weight_rotation_(weight_rotation) {}
 
     template <typename T>
     bool operator()(const T* const pose_i, const T* const pose_j, T* residuals) const {
@@ -81,22 +82,23 @@ struct PoseGraphEdgeError {
         T local_x = cos_theta_i * dx_ij + sin_theta_i * dy_ij;
         T local_y = -sin_theta_i * dx_ij + cos_theta_i * dy_ij;
 
-        // Residuals
-        residuals[0] = local_x - T(dx_);
-        residuals[1] = local_y - T(dy_);
+        // Residuals scaled by weights
+        residuals[0] = (local_x - T(dx_)) * T(weight_translation_);
+        residuals[1] = (local_y - T(dy_)) * T(weight_translation_);
         
         T diff_theta = (theta_j - theta_i) - T(dtheta_);
-        residuals[2] = ceres::atan2(ceres::sin(diff_theta), ceres::cos(diff_theta));
+        residuals[2] = ceres::atan2(ceres::sin(diff_theta), ceres::cos(diff_theta)) * T(weight_rotation_);
 
         return true;
     }
 
-    static ceres::CostFunction* Create(double dx, double dy, double dtheta) {
+    static ceres::CostFunction* Create(double dx, double dy, double dtheta, double weight_translation = 1.0, double weight_rotation = 1.0) {
         return new ceres::AutoDiffCostFunction<PoseGraphEdgeError, 3, 3, 3>(
-            new PoseGraphEdgeError(dx, dy, dtheta));
+            new PoseGraphEdgeError(dx, dy, dtheta, weight_translation, weight_rotation));
     }
 
     double dx_, dy_, dtheta_;
+    double weight_translation_, weight_rotation_;
 };
 
 /// Parameters to construct a BelugaSLAM instance.
@@ -305,7 +307,9 @@ public:
                 }
             }
 
-            pose_pred = best_pose;
+            // Remove manual overriding of the particle's pose to the coarse grid match.
+            // Forcing it to snap to a 5cm / 2.5deg grid completely destroys the sub-pixel 
+            // continuous accuracy of the particle filter and causes double-wall jitter over time!
             log_scores.push_back(best_log_score);
         }
 
@@ -364,7 +368,7 @@ public:
 
             // 2. Ensure we have an active submap, and enforce Copy-On-Write if shared
             if (!submaps.active_submap) {
-                submaps.active_submap = std::make_shared<Submap>(best_pose, GRID_COLS, GRID_ROWS, GRID_RESOLUTION);
+                submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
             } else {
                 submaps.make_active_unique();
             }
@@ -829,9 +833,19 @@ public:
         auto hypotheses_snapshot = hypotheses_;
 
         for (auto& hypothesis : hypotheses_snapshot) {
-            // Per-hypothesis cooldown
+            // Per-hypothesis cooldown ticks down every scan
             if (hypothesis->loop_closure_cooldown > 0) {
                 hypothesis->loop_closure_cooldown--;
+            }
+
+            // OPTIMIZATION: Only search for loop closures precisely when a submap finishes.
+            // This prevents redundant intra-submap checks and ensures the constraint links full submaps.
+            if (hypothesis->submaps.active_submap != nullptr) {
+                continue;
+            }
+
+            // If cooldown is still active, wait until it finishes
+            if (hypothesis->loop_closure_cooldown > 0) {
                 continue;
             }
 
@@ -1031,7 +1045,9 @@ public:
             ceres::CostFunction* loop_cost = PoseGraphEdgeError::Create(
                 constraint.T_reference_query.translation().x(),
                 constraint.T_reference_query.translation().y(),
-                constraint.T_reference_query.so2().log()
+                constraint.T_reference_query.so2().log(),
+                10.0, // translation weight (10x stronger means 100x squared cost)
+                10.0  // rotation weight
             );
 
             // We can add a robust loss function (e.g., HuberLoss) for loop closures to reject outliers
