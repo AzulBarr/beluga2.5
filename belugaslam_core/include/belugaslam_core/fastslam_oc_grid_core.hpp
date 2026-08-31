@@ -388,7 +388,7 @@ public:
                 int gx1, gy1, hit_idx;
                 bool impact_in_map = world_to_index(hit_in_submap.x(), hit_in_submap.y(), gx1, gy1, hit_idx, lo_grid);
 
-                auto points_in_line = bresenham(gx0, gy0, gx1, gy1);
+                auto points_in_line = bresenham(gx0, gy0, gx1, gy1, lo_grid.width(), lo_grid.height());
                 for (const auto& cell : points_in_line) {
                     if (cell.first == gx0 && cell.second == gy0) continue;
                     
@@ -695,7 +695,7 @@ public:
     }
 
     /// Bresenham's 2D line drawing algorithm.
-    std::vector<std::pair<int, int>> bresenham(int x0, int y0, int x1, int y1) {
+    std::vector<std::pair<int, int>> bresenham(int x0, int y0, int x1, int y1, int max_x, int max_y) const {
         std::vector<std::pair<int, int>> line;
         int dx = std::abs(x1 - x0);
         int dy = std::abs(y1 - y0);
@@ -705,7 +705,7 @@ public:
 
         while (true) {
             if (x0 == x1 && y0 == y1) break;
-            if (x0 >= 0 && x0 < GRID_COLS && y0 >= 0 && y0 < GRID_ROWS) {
+            if (x0 >= 0 && x0 < max_x && y0 >= 0 && y0 < max_y) {
                 line.push_back({x0, y0});
             }
             int e2 = 2 * err;
