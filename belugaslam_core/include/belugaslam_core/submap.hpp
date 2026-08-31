@@ -116,6 +116,12 @@ private:
   std::vector<double> radial_signature_;
 };
 
+struct SequentialConstraint {
+  size_t from_idx;
+  size_t to_idx;
+  Sophus::SE2d relative_pose;
+};
+
 struct LoopConstraint {
   size_t id;
   size_t query_idx;
@@ -130,6 +136,7 @@ struct LoopConstraint {
  */
 struct SubmapList {
   std::vector<std::shared_ptr<Submap>> history;
+  std::vector<SequentialConstraint> odometry_constraints;
   std::vector<LoopConstraint> loop_constraints;
   std::shared_ptr<Submap> active_submap;
 
@@ -138,6 +145,26 @@ struct SubmapList {
     if (active_submap && active_submap.use_count() > 1) {
       active_submap = active_submap->clone();
     }
+  }
+
+  // Finishes the active submap, generates the immutable odometry constraint, and archives it.
+  void finish_active_submap() {
+    if (!active_submap) return;
+    
+    active_submap->finish();
+
+    if (!history.empty()) {
+        SequentialConstraint odom;
+        odom.from_idx = history.size() - 1;
+        odom.to_idx = history.size();
+        auto pose_a = history.back()->global_pose();
+        auto pose_b = active_submap->global_pose();
+        odom.relative_pose = pose_a.inverse() * pose_b;
+        odometry_constraints.push_back(odom);
+    }
+
+    history.push_back(active_submap);
+    active_submap = nullptr;
   }
 };
 

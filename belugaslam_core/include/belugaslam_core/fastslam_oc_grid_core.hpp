@@ -385,9 +385,7 @@ public:
             if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid)) {
                 // The robot drove outside the physical bounds of the submap before reaching 50 insertions!
                 // Force finish the submap early so a new one is created at the new position on the next frame.
-                submaps.active_submap->finish();
-                submaps.history.push_back(submaps.active_submap);
-                submaps.active_submap = nullptr;
+                submaps.finish_active_submap();
                 continue;
             }
             
@@ -414,9 +412,7 @@ public:
             submaps.active_submap->add_insertion();
             // Freeze submap after a certain number of insertions
             if (submaps.active_submap->num_insertions() >= 50) {
-                submaps.active_submap->finish();
-                submaps.history.push_back(submaps.active_submap);
-                submaps.active_submap = nullptr; 
+                submaps.finish_active_submap();
             }
         }
     }
@@ -1033,19 +1029,16 @@ public:
         ceres::Problem problem;
 
         // 2. Add Odometry Edges (Sequential constraints)
-        for (size_t i = 0; i < num_poses - 1; ++i) {
-            // Calculate the original relative transform between adjacent submaps
-            auto pose_a = hist[i]->global_pose();
-            auto pose_b = hist[i + 1]->global_pose();
-            auto relative_tf = pose_a.inverse() * pose_b;
-
+        for (const auto& odom : submap_list.odometry_constraints) {
+            if (odom.from_idx >= num_poses || odom.to_idx >= num_poses) continue;
+            
             ceres::CostFunction* cost_function = PoseGraphEdgeError::Create(
-                relative_tf.translation().x(),
-                relative_tf.translation().y(),
-                relative_tf.so2().log()
+                odom.relative_pose.translation().x(),
+                odom.relative_pose.translation().y(),
+                odom.relative_pose.so2().log()
             );
 
-            problem.AddResidualBlock(cost_function, nullptr, poses[i].data(), poses[i + 1].data());
+            problem.AddResidualBlock(cost_function, nullptr, poses[odom.from_idx].data(), poses[odom.to_idx].data());
         }
 
         // 3. Add Loop Closure Edges
