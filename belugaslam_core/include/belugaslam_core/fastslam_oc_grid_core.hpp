@@ -195,6 +195,10 @@ public:
     [[nodiscard]] auto& particles() { return particles_; }
 
     [[nodiscard]] size_t get_active_hypotheses_count() const { return hypotheses_.size(); }
+    
+    [[nodiscard]] size_t get_submaps_count() const { 
+        return hypotheses_.empty() ? 0 : hypotheses_.front()->submaps.history.size(); 
+    }
 
     /// Samples from the motion distribution to propagate particle states.
     /**

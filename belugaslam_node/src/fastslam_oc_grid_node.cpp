@@ -161,9 +161,10 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
             d_sample, d_weight, d_resample, d_map, d_pub_map, d_particles, d_tf);
 
         RCLCPP_INFO(
-            get_logger(), "Particle filter update iteration stats: %ld particles | %ld active hypotheses | %.3fms",
+            get_logger(), "Particle filter update iteration stats: %ld particles | %ld active hypotheses | %ld submaps | %.3fms",
             slam_->particles().size(),
             slam_->get_active_hypotheses_count(),
+            slam_->get_submaps_count(),
             std::chrono::duration<double, std::milli>(update_duration).count());
 
     } catch (tf2::TransformException &ex) {
