@@ -131,6 +131,11 @@ struct LoopConstraint {
   Eigen::Matrix3d information;
 };
 
+struct FinishedSubmapEvent {
+  size_t hypothesis_id;
+  size_t query_idx; // The history index of the submap that just finished
+};
+
 /**
  * \brief A list of submaps maintained by each particle.
  */

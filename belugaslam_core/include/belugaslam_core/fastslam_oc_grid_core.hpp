@@ -360,19 +360,23 @@ public:
     }
 
     /// Update the occupancy grid map of each hypothesis based on the transformed measurement.
-    void update_occupancy_grid(const measurement_type& z) {
+    std::vector<FinishedSubmapEvent> update_occupancy_grid(const measurement_type& z) {
+        std::vector<FinishedSubmapEvent> finished_events;
+
         for (auto& hypothesis : hypotheses_) {
             auto& submaps = hypothesis->submaps;
+            bool finished_this_step = false;
 
             // 1. Find the best particle in THIS hypothesis
             double best_w = -1.0;
             state_type best_pose;
             for (const auto& p : particles_) {
-                if (std::get<2>(p) != hypothesis) continue;
-                double w = static_cast<double>(std::get<1>(p));
-                if (w > best_w) {
-                    best_w = w;
-                    best_pose = std::get<0>(p);
+                if (std::get<2>(p)->id == hypothesis->id) {
+                    double w = static_cast<double>(std::get<1>(p));
+                    if (w > best_w) {
+                        best_w = w;
+                        best_pose = std::get<0>(p);
+                    }
                 }
             }
             if (best_w < 0) continue;  // Dead hypothesis (no particles)
@@ -390,6 +394,7 @@ public:
                 if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, *(submaps.active_submap->grid()))) {
                     // Force finish the submap early and immediately spawn a new one so we don't drop the current scan!
                     submaps.finish_active_submap();
+                    finished_this_step = true;
                     submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
                 }
             }
@@ -425,14 +430,20 @@ public:
 
             submaps.active_submap->add_insertion();
             // Freeze submap after a certain number of insertions
-            if (submaps.active_submap->num_insertions() >= 50) {
+            if (submaps.active_submap->num_insertions() >= 50 && !finished_this_step) {
                 submaps.finish_active_submap();
+                finished_this_step = true;
+            }
+
+            if (finished_this_step && !submaps.history.empty()) {
+                finished_events.push_back({hypothesis->id, submaps.history.size() - 1});
             }
         }
+        return finished_events;
     }
 
     /// Step 5: Post-update processing (Loop closure, PGO, Best map composite)
-    void post_update(const measurement_type& z) {
+    void post_update(const measurement_type& z, const std::vector<FinishedSubmapEvent>& finished_events) {
         measurement_type z_sparse;
         constexpr size_t kStep = 2;
         z_sparse.reserve(z.size() / kStep + 1);
@@ -440,8 +451,15 @@ public:
             z_sparse.push_back(z[i]);
         }
 
-        // --- Loop Closure Detection (per hypothesis) ---
-        detect_loop_closure(z_sparse);
+        // --- Tick down per-hypothesis loop closure cooldown ---
+        for (auto& hypothesis : hypotheses_) {
+            if (hypothesis->loop_closure_cooldown > 0) {
+                hypothesis->loop_closure_cooldown--;
+            }
+        }
+
+        // --- Loop Closure Detection (driven by FinishedSubmapEvents) ---
+        detect_loop_closure(z_sparse, finished_events);
 
         // --- Determine Best Hypothesis & Best Pose ---
         std::map<size_t, double> hypothesis_weights;
@@ -881,23 +899,19 @@ public:
     }
 
     /// Step 3: Detect and Inject Loop Closure candidates (per hypothesis)
-    void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse) {
-        if (z_sparse.empty()) return;
+    void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse, const std::vector<FinishedSubmapEvent>& finished_events) {
+        if (z_sparse.empty() || finished_events.empty()) return;
 
-        // We iterate over a copy of hypotheses_ because we may add new hypotheses during iteration
-        auto hypotheses_snapshot = hypotheses_;
-
-        for (auto& hypothesis : hypotheses_snapshot) {
-            // Per-hypothesis cooldown ticks down every scan
-            if (hypothesis->loop_closure_cooldown > 0) {
-                hypothesis->loop_closure_cooldown--;
+        // Iterate over the events of submaps that just finished
+        for (const auto& event : finished_events) {
+            std::shared_ptr<Hypothesis> hypothesis = nullptr;
+            for (auto& h : hypotheses_) {
+                if (h->id == event.hypothesis_id) {
+                    hypothesis = h;
+                    break;
+                }
             }
-
-            // OPTIMIZATION: Only search for loop closures precisely when a submap finishes.
-            // This prevents redundant intra-submap checks and ensures the constraint links full submaps.
-            if (hypothesis->submaps.active_submap != nullptr) {
-                continue;
-            }
+            if (!hypothesis) continue; // Hypothesis was killed
 
             // If cooldown is still active, wait until it finishes
             if (hypothesis->loop_closure_cooldown > 0) {
