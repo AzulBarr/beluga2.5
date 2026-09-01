@@ -373,21 +373,26 @@ public:
                 submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
             } else {
                 submaps.make_active_unique();
+                
+                // Check if the robot drove outside the physical bounds of the current submap
+                auto T_w_s = submaps.active_submap->global_pose();
+                auto T_s_r = T_w_s.inverse() * best_pose;
+                int gx0, gy0, dummy_idx;
+                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, *(submaps.active_submap->grid()))) {
+                    // Force finish the submap early and immediately spawn a new one so we don't drop the current scan!
+                    submaps.finish_active_submap();
+                    submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
+                }
             }
 
-            auto& lo_grid = *submaps.active_submap->grid();
-
+            auto& lo_grid = *(submaps.active_submap->grid());
+            
             // 3. Compute the robot's pose relative to the active submap (Local SLAM)
             auto T_w_s = submaps.active_submap->global_pose();
             auto T_s_r = T_w_s.inverse() * best_pose;
 
             int gx0, gy0, dummy_idx;
-            if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid)) {
-                // The robot drove outside the physical bounds of the submap before reaching 50 insertions!
-                // Force finish the submap early so a new one is created at the new position on the next frame.
-                submaps.finish_active_submap();
-                continue;
-            }
+            world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid);
             
             clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
 
