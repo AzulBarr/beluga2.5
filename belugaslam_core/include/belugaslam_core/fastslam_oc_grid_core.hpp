@@ -884,33 +884,57 @@ public:
                               << ": Candidato por PROXIMIDAD! Submapa " << i 
                               << " detectado a " << distance << "m. Iniciando escaneo correlativo..." << std::endl;
 
-                    // 3. Fast Correlative Scan Matching (FCSM)
+                    // 3. Fast Correlative Scan Matching (FCSM) - Coarse Search
                     double best_score = -std::numeric_limits<double>::infinity();
                     state_type best_match = representative_pose;
+                    double best_sx = 0, best_sy = 0, best_stheta = 0;
 
+                    auto evaluate_pose = [&](double sx, double sy, double stheta) {
+                        state_type candidate{
+                            Sophus::SO2d{representative_pose.so2().log() + stheta},
+                            Eigen::Vector2d{representative_pose.translation().x() + sx, representative_pose.translation().y() + sy}
+                        };
+                        Sophus::SE2d T_submap_robot = old_submap->global_pose().inverse() * candidate;
+                        double score = 0.0;
+                        for (const auto& pt : z_sparse) {
+                            auto hit = T_submap_robot * Eigen::Vector2d(pt.first, pt.second);
+                            int gx, gy, hit_idx;
+                            if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, *(old_submap->grid()))) {
+                                score += old_submap->grid()->at(hit_idx);
+                            }
+                        }
+                        if (score > best_score) {
+                            best_score = score;
+                            best_match = candidate;
+                            best_sx = sx; best_sy = sy; best_stheta = stheta;
+                        }
+                    };
+
+                    // COARSE: 25cm, 5.7 deg
                     for (double sx = -3.0; sx <= 3.0; sx += 0.25) {
                         for (double sy = -3.0; sy <= 3.0; sy += 0.25) {
                             for (double stheta = -0.5; stheta <= 0.5; stheta += 0.1) {
-                                
-                                state_type candidate{
-                                    Sophus::SO2d{representative_pose.so2().log() + stheta},
-                                    Eigen::Vector2d{representative_pose.translation().x() + sx, representative_pose.translation().y() + sy}
-                                };
+                                evaluate_pose(sx, sy, stheta);
+                            }
+                        }
+                    }
 
-                                Sophus::SE2d T_submap_robot = old_submap->global_pose().inverse() * candidate;
-                                double score = 0.0;
-                                for (const auto& pt : z_sparse) {
-                                    auto hit = T_submap_robot * Eigen::Vector2d(pt.first, pt.second);
-                                    int gx, gy, hit_idx;
-                                    if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, *(old_submap->grid()))) {
-                                        score += old_submap->grid()->at(hit_idx);
-                                    }
-                                }
+                    // FINE: 5cm, 1.1 deg (around best coarse)
+                    double c_sx = best_sx, c_sy = best_sy, c_stheta = best_stheta;
+                    for (double sx = c_sx - 0.25; sx <= c_sx + 0.25; sx += 0.05) {
+                        for (double sy = c_sy - 0.25; sy <= c_sy + 0.25; sy += 0.05) {
+                            for (double stheta = c_stheta - 0.1; stheta <= c_stheta + 0.1; stheta += 0.02) {
+                                evaluate_pose(sx, sy, stheta);
+                            }
+                        }
+                    }
 
-                                if (score > best_score) {
-                                    best_score = score;
-                                    best_match = candidate;
-                                }
+                    // SUPER FINE: 1cm, 0.2 deg (around best fine)
+                    c_sx = best_sx; c_sy = best_sy; c_stheta = best_stheta;
+                    for (double sx = c_sx - 0.05; sx <= c_sx + 0.05; sx += 0.01) {
+                        for (double sy = c_sy - 0.05; sy <= c_sy + 0.05; sy += 0.01) {
+                            for (double stheta = c_stheta - 0.02; stheta <= c_stheta + 0.02; stheta += 0.005) {
+                                evaluate_pose(sx, sy, stheta);
                             }
                         }
                     }
