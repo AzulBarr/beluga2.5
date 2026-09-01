@@ -387,12 +387,17 @@ public:
             } else {
                 submaps.make_active_unique();
                 
-                // Check if the robot drove outside the physical bounds of the current submap
+                // Gracefully finish the submap if the robot moves too far from the center (e.g., 70-80% to the edge).
+                // For a 12x12m submap (6m radius), a 4.5m threshold prevents long laser rays from clipping the bounding box.
+                double max_displacement = 4.5;
+                
                 auto T_w_s = submaps.active_submap->global_pose();
                 auto T_s_r = T_w_s.inverse() * best_pose;
                 int gx0, gy0, dummy_idx;
-                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, *(submaps.active_submap->grid()))) {
-                    // Force finish the submap early and immediately spawn a new one so we don't drop the current scan!
+                bool out_of_bounds = !world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, *(submaps.active_submap->grid()));
+                
+                if (T_s_r.translation().norm() > max_displacement || out_of_bounds) {
+                    // Force finish the submap gracefully and spawn a new one so tracking overlap remains perfect
                     submaps.finish_active_submap();
                     finished_this_step = true;
                     submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
