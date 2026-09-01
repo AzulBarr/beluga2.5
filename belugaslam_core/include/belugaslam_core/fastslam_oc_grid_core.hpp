@@ -248,7 +248,16 @@ public:
         // 1. Composite local map ONCE PER HYPOTHESIS and cache it
         std::map<size_t, GridTypeLO> hypothesis_lo_cache;
         for (auto& hypothesis : hypotheses_) {
-            composite_submaps(hypothesis->submaps, local_lo_grid_, true);
+            // Find a representative pose for this hypothesis to select nearby submaps
+            state_type rep_pose;
+            for (const auto& p : particles_) {
+                if (std::get<2>(p)->id == hypothesis->id) {
+                    rep_pose = std::get<0>(p);
+                    break;
+                }
+            }
+
+            compose_tracking_view(hypothesis, rep_pose, local_lo_grid_);
             hypothesis_lo_cache[hypothesis->id] = local_lo_grid_;
         }
 
@@ -475,7 +484,7 @@ public:
         }
 
         // Composite full global map from the best particle's hypothesis for RViz
-        composite_submaps(best_hypothesis->submaps, best_lo_grid_, false);
+        compose_publication_view(best_hypothesis, best_lo_grid_);
         sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
 
         // RESET WEIGHTS: After all mapping and decision logic is done, reset weights 
@@ -789,49 +798,84 @@ public:
         return best_lo_grid_;
     }
 
-    /// Composites the history of submaps and active submap into a global LogOddsGrid.
-    /// \param only_local If true, only draws the active submap and the most recent frozen submap.
-    void composite_submaps(const SubmapList& submaps, GridTypeLO& global_lo, bool only_local = false) {
-        std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
+    void draw_submap_into_grid(const std::shared_ptr<Submap>& sm, GridTypeLO& target_lo) const {
+        if (!sm) return;
+        const auto& local_lo = *sm->grid();
+        for (int ly = 0; ly < local_lo.height(); ++ly) {
+            for (int lx = 0; lx < local_lo.width(); ++lx) {
+                float val = local_lo.at(lx, ly);
+                if (val == 0.0f) continue;
 
-        auto draw_submap = [&](const std::shared_ptr<Submap>& sm) {
-            if (!sm) return;
-            const auto& local_lo = *sm->grid();
-            for (int ly = 0; ly < local_lo.height(); ++ly) {
-                for (int lx = 0; lx < local_lo.width(); ++lx) {
-                    float val = local_lo.at(lx, ly);
-                    if (val == 0.0f) continue;
+                // Convert local cell index to local coordinates
+                double local_x = local_lo.origin_x() + (lx + 0.5) * local_lo.resolution();
+                double local_y = local_lo.origin_y() + (ly + 0.5) * local_lo.resolution();
 
-                    // Convert local cell index to local coordinates
-                    double local_x = local_lo.origin_x() + (lx + 0.5) * local_lo.resolution();
-                    double local_y = local_lo.origin_y() + (ly + 0.5) * local_lo.resolution();
+                // Convert local coordinates to global coordinates using the submap's global pose
+                auto global_pt = sm->global_pose() * Eigen::Vector2d(local_x, local_y);
 
-                    // Convert local coordinates to global coordinates using the submap's global pose
-                    auto global_pt = sm->global_pose() * Eigen::Vector2d(local_x, local_y);
-
-                    int gx, gy, g_idx;
-                    if (world_to_index(global_pt.x(), global_pt.y(), gx, gy, g_idx, global_lo)) {
-                        global_lo.at(g_idx) += val;
-                    }
+                int gx, gy, g_idx;
+                if (world_to_index(global_pt.x(), global_pt.y(), gx, gy, g_idx, target_lo)) {
+                    target_lo.at(g_idx) += val;
                 }
             }
-        };
-
-        if (only_local) {
-            // Draw only the most recent frozen submap and the active one
-            if (!submaps.history.empty()) {
-                draw_submap(submaps.history.back());
-            }
-        } else {
-            // Draw full history
-            for (const auto& sm : submaps.history) {
-                draw_submap(sm);
-            }
         }
+    }
+
+    /// Composites the full history of submaps for RViz publication
+    void compose_publication_view(const std::shared_ptr<Hypothesis>& hypothesis, GridTypeLO& global_lo) const {
+        std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
         
-        draw_submap(submaps.active_submap);
+        for (const auto& sm : hypothesis->submaps.history) {
+            draw_submap_into_grid(sm, global_lo);
+        }
+        draw_submap_into_grid(hypothesis->submaps.active_submap, global_lo);
 
         for (auto& val : global_lo.data()) {
+            val = std::clamp(val, -5.0f, 5.0f);
+        }
+    }
+
+    /// Composites the local tracking context for the scan matcher, incorporating nearby historical submaps
+    void compose_tracking_view(const std::shared_ptr<Hypothesis>& hypothesis, const state_type& representative_pose, GridTypeLO& tracking_lo) const {
+        std::fill(tracking_lo.data().begin(), tracking_lo.data().end(), 0.0f);
+        
+        // 1. Draw active submap
+        draw_submap_into_grid(hypothesis->submaps.active_submap, tracking_lo);
+
+        // 2. Draw previous frozen submap
+        if (!hypothesis->submaps.history.empty()) {
+            draw_submap_into_grid(hypothesis->submaps.history.back(), tracking_lo);
+        }
+
+        // 3. Draw top_k nearby historical submaps
+        size_t k = 5;
+        double radius = 10.0;
+        
+        std::vector<std::pair<double, std::shared_ptr<Submap>>> nearby;
+        size_t hist_size = hypothesis->submaps.history.size();
+        
+        if (hist_size > 1) { // We need at least one submap strictly before back()
+            for (size_t i = 0; i + 1 < hist_size; ++i) {
+                auto sm = hypothesis->submaps.history[i];
+                double dx = representative_pose.translation().x() - sm->global_pose().translation().x();
+                double dy = representative_pose.translation().y() - sm->global_pose().translation().y();
+                double dist = std::sqrt(dx*dx + dy*dy);
+                
+                if (dist <= radius) {
+                    nearby.push_back({dist, sm});
+                }
+            }
+
+            // Sort by proximity
+            std::sort(nearby.begin(), nearby.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            // Draw up to K closest submaps
+            for (size_t i = 0; i < std::min(k, nearby.size()); ++i) {
+                draw_submap_into_grid(nearby[i].second, tracking_lo);
+            }
+        }
+
+        for (auto& val : tracking_lo.data()) {
             val = std::clamp(val, -5.0f, 5.0f);
         }
     }
