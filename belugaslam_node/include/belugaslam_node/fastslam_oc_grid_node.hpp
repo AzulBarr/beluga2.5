@@ -104,6 +104,9 @@ private:
     /// Publishes persistent markers at loop closure detection poses
     void publish_loop_closure_markers(const rclcpp::Time& stamp);
 
+    /// Publishes persistent red markers at spatial cluster split poses
+    void publish_spatial_split_markers(const rclcpp::Time& stamp);
+
     std::unique_ptr<BelugaSLAM> slam_; // Pointer to the BelugaSLAM core implementation.
     
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -117,6 +120,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr entropy_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr uncertainty_map_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr loop_closure_markers_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr spatial_split_markers_pub_;
 
     state_type last_odom_;
     bool first_odom_received_ = false;

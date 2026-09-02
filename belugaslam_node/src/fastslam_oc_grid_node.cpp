@@ -39,6 +39,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     uncertainty_map_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/map_uncertainty", 1);
     trajectory_pub_ = this->create_publisher<nav_msgs::msg::Path>("/trajectory", 10);
     loop_closure_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/loop_closure_markers", rclcpp::QoS(1).transient_local());
+    spatial_split_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/spatial_split_markers", rclcpp::QoS(1).transient_local());
     trajectory_msg_.header.frame_id = "map";
     
     RCLCPP_INFO(this->get_logger(), "BelugaSLAM Node initialized and waiting for data...");
@@ -137,6 +138,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
 
         publish_map();
         publish_loop_closure_markers(msg->header.stamp);
+        publish_spatial_split_markers(msg->header.stamp);
         if (it % uncertainty_map_publish_interval == 0) {
             publish_uncertainty_map();
         }
@@ -444,4 +446,46 @@ void BelugaSLAMNode::publish_loop_closure_markers(const rclcpp::Time& stamp) {
     }
 
     loop_closure_markers_pub_->publish(marker_array);
+}
+
+void BelugaSLAMNode::publish_spatial_split_markers(const rclcpp::Time& stamp) {
+    const auto& split_poses = slam_->spatial_split_poses();
+    if (split_poses.empty()) return;
+
+    visualization_msgs::msg::MarkerArray marker_array;
+
+    for (size_t i = 0; i < split_poses.size(); ++i) {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "map";
+        marker.header.stamp = stamp;
+        marker.ns = "spatial_splits";
+        marker.id = static_cast<int>(i);
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+
+        marker.pose.position.x = split_poses[i].translation().x();
+        marker.pose.position.y = split_poses[i].translation().y();
+        marker.pose.position.z = 0.35; // Slightly offset above ground plane
+
+        tf2::Quaternion q;
+        q.setRPY(0, 0, split_poses[i].so2().log());
+        marker.pose.orientation = tf2::toMsg(q);
+
+        marker.scale.x = 0.5;
+        marker.scale.y = 0.5;
+        marker.scale.z = 0.5;
+
+        // Bright red, fully opaque
+        marker.color.r = 1.0;
+        marker.color.g = 0.0;
+        marker.color.b = 0.0;
+        marker.color.a = 1.0;
+
+        // Never expire
+        marker.lifetime = rclcpp::Duration::from_seconds(0);
+
+        marker_array.markers.push_back(marker);
+    }
+
+    spatial_split_markers_pub_->publish(marker_array);
 }

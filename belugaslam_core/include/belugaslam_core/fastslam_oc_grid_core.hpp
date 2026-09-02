@@ -203,6 +203,9 @@ public:
     /// Returns all detected loop closure poses (persistent, for RViz visualization)
     [[nodiscard]] const std::vector<Sophus::SE2d>& loop_closure_poses() const { return loop_closure_poses_; }
 
+    /// Returns all spatial cluster split poses (persistent, for RViz visualization)
+    [[nodiscard]] const std::vector<Sophus::SE2d>& spatial_split_poses() const { return spatial_split_poses_; }
+
     /// Samples from the motion distribution to propagate particle states.
     /**
      * This function computes a motion sampler based on the provided control action 
@@ -857,9 +860,20 @@ public:
                     target_hypothesis->loop_closure_cooldown = hypothesis->loop_closure_cooldown;
                     target_hypothesis->optimized_loops_count = hypothesis->optimized_loops_count;
                     hypotheses_.push_back(target_hypothesis);
+
+                    // Find representative pose of the diverged cluster
+                    double best_c_weight = -1.0;
+                    state_type split_pose = c_states[s_cluster_to_indices[scid].front()];
+                    for (size_t local_idx : s_cluster_to_indices[scid]) {
+                        if (c_weights[local_idx] > best_c_weight) {
+                            best_c_weight = c_weights[local_idx];
+                            split_pose = c_states[local_idx];
+                        }
+                    }
+                    spatial_split_poses_.push_back(split_pose);
                     
-                    std::cout << "\n[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id 
-                              << " se bifurco en la hipotesis " << target_hypothesis->id << std::endl;
+                    std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id 
+                              << " se bifurco en la hipotesis " << target_hypothesis->id << "\033[0m" << std::endl;
                 }
                 is_first_spatial_cluster = false;
 
@@ -1105,9 +1119,12 @@ public:
             }
             if (query_points.empty()) continue;
 
-            bool loop_found = false;
-            for (size_t i = 0; i < history.size() && !loop_found; ++i) {
-                if (i + 5 >= history.size()) continue;
+            constexpr size_t min_separation = 5;
+            std::vector<LoopCandidate> candidates;
+
+            // 1. Evaluate ALL potential historical submaps within proximity
+            for (size_t i = 0; i < history.size(); ++i) {
+                if (i + min_separation >= event.query_idx) continue;
 
                 auto old_submap = history[i];
                 
@@ -1120,7 +1137,7 @@ public:
                 if (distance < 7.0) {
                     std::cout << "\n[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                               << ": Candidato por PROXIMIDAD! Submapa " << i 
-                              << " detectado a " << distance << "m. Iniciando alineacion submapa-a-submapa..." << std::endl;
+                              << " detectado a " << distance << "m. Evaluando alineacion..." << std::endl;
 
                     double best_score = -std::numeric_limits<double>::infinity();
                     Sophus::SE2d best_match = T_ref_query_guess;
@@ -1149,7 +1166,6 @@ public:
                     };
 
                     // COARSE: 50cm, 11 deg. Enormous search space to catch large drifts!
-                    // dx, dy: [-7.0, 7.0], dtheta: [-0.8, 0.8] rad (~45 deg)
                     for (double sx = -7.0; sx <= 7.0; sx += 0.5) {
                         for (double sy = -7.0; sy <= 7.0; sy += 0.5) {
                             for (double stheta = -0.8; stheta <= 0.8; stheta += 0.2) {
@@ -1188,89 +1204,125 @@ public:
                         }
                     }
 
-                    // A good submap match should have a high normalized score (e.g. > 1.0)
                     if (best_score > 1.0) {
-                        std::cout << "\033[1;31m -> Match EXITOSO! Score normalizado: " << best_score << "\033[0m" << std::endl;
-                        
-                        // Record this pose permanently for RViz visualization
-                        loop_closure_poses_.push_back(representative_pose);
-                        // 3. Move worst 20% of particles from this hypothesis
-                        std::vector<size_t> h_indices;
-                        for (size_t pi = 0; pi < particles_.size(); ++pi) {
-                            if (std::get<2>(*(particles_.begin() + pi)) == hypothesis) {
-                                h_indices.push_back(pi);
-                            }
-                        }
-
-                        if (h_indices.size() > 5) {
-                            std::sort(h_indices.begin(), h_indices.end(), [&](size_t a, size_t b) {
-                                return std::get<1>(*(particles_.begin() + a)) < std::get<1>(*(particles_.begin() + b));
-                            });
-                            
-                            size_t to_move = h_indices.size() * 0.2;
-                            if (to_move > 0) {
-                                // 4. Create a NEW hypothesis (fork)
-                                auto new_hypothesis = std::make_shared<Hypothesis>();
-                                new_hypothesis->id = next_hypothesis_id_++;
-                                new_hypothesis->submaps = hypothesis->submaps;  // Copy the full history
-                                
-                                // Insert explicit loop constraint
-                                LoopConstraint constraint;
-                                constraint.id = new_hypothesis->submaps.loop_constraints.size();
-                                constraint.query_idx = new_hypothesis->submaps.history.size() - 1; // The latest finished submap
-                                constraint.reference_idx = i;
-                                
-                                // Direct submap-to-submap match result
-                                constraint.T_reference_query = best_match;
-                                constraint.information = Eigen::Matrix3d::Identity();
-                                new_hypothesis->submaps.loop_constraints.push_back(constraint);
-
-                                // Throw away the drifted active submaps because it overlaps with the old visited map!
-                                // The system will automatically create a fresh one at the corrected pose on the next scan.
-                                new_hypothesis->submaps.active_submaps.clear();
-                                
-                                hypotheses_.push_back(new_hypothesis);
-
-                                // Calculate average weight of the top 80% to give to the moved ones
-                                double sum_w_top = 0.0;
-                                for (size_t k = to_move; k < h_indices.size(); ++k) {
-                                    sum_w_top += static_cast<double>(std::get<1>(*(particles_.begin() + h_indices[k])));
-                                }
-                                double avg_w = sum_w_top / (h_indices.size() - to_move);
-
-                                for (size_t k = 0; k < to_move; ++k) {
-                                    auto it = particles_.begin() + h_indices[k];
-                                    // Assign to new hypothesis BEFORE PGO (so PGO will teleport them)
-                                    std::get<2>(*it) = new_hypothesis;
-                                    // Boost weight
-                                    std::get<1>(*it) = beluga::Weight(avg_w);
-                                }
-                                
-                                // INMEDIATELY run PGO on the new loop hypothesis so its map and particles become consistent!
-                                optimize_pose_graph(new_hypothesis);
-                                new_hypothesis->optimized_loops_count = new_hypothesis->submaps.loop_constraints.size();
-
-                                // Set cooldown for BOTH to avoid rapid re-triggering while ambiguity resolves
-                                hypothesis->loop_closure_cooldown = 200;
-                                new_hypothesis->loop_closure_cooldown = 200;
-
-                                // Renormalize all weights across all particles
-                                double global_sum = 0.0;
-                                for (const auto& p : particles_) global_sum += static_cast<double>(std::get<1>(p));
-                                if (global_sum > 0.0) {
-                                    for (auto&& p : particles_) {
-                                        std::get<1>(p) = beluga::Weight(static_cast<double>(std::get<1>(p)) / global_sum);
-                                    }
-                                }
-                                loop_found = true;
-                                break; // Only process one loop closure per hypothesis per step
-                            }
-                        }
+                        candidates.push_back({i, best_score, best_match});
                     } else {
                         std::cout << "[LOOP CLOSURE] Hipotesis " << hypothesis->id 
-                                  << ": Falsa alarma (Score bajo: " << best_score << ")" << std::endl;
+                                  << ": Falsa alarma en submapa " << i << " (Score bajo: " << best_score << ")" << std::endl;
                     }
                 }
+            }
+
+            if (candidates.empty()) continue;
+
+            // 2. Sort candidates descending by score (best match first)
+            std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+                return a.score > b.score;
+            });
+
+            // 3. Keep only the best candidates that are sufficiently different in history (NMS)
+            std::vector<LoopCandidate> distinct_candidates;
+            for (const auto& cand : candidates) {
+                bool is_distinct = true;
+                for (const auto& accepted : distinct_candidates) {
+                    if (std::abs(static_cast<int>(cand.ref_idx) - static_cast<int>(accepted.ref_idx)) < static_cast<int>(min_separation)) {
+                        is_distinct = false;
+                        break;
+                    }
+                }
+                if (is_distinct) {
+                    distinct_candidates.push_back(cand);
+                }
+            }
+
+            // 4. Generate hypotheses for the best distinct candidate(s)
+            size_t forks_created = 0;
+            constexpr size_t max_forks_per_event = 2;
+
+            for (const auto& cand : distinct_candidates) {
+                if (forks_created >= max_forks_per_event) break;
+                if (hypotheses_.size() >= 4) {
+                    std::cout << "[LOOP CLOSURE] Limite global de hipotesis (4) alcanzado. Omitiendo candidato adicional." << std::endl;
+                    break;
+                }
+
+                std::cout << "\033[1;31m -> Match EXITOSO Seleccionado! Submapa Ref: " << cand.ref_idx 
+                          << ", Score normalizado: " << cand.score << "\033[0m" << std::endl;
+                
+                // Record this pose permanently for RViz visualization
+                loop_closure_poses_.push_back(representative_pose);
+
+                // Find particles in THIS hypothesis
+                std::vector<size_t> h_indices;
+                for (size_t pi = 0; pi < particles_.size(); ++pi) {
+                    if (std::get<2>(*(particles_.begin() + pi)) == hypothesis) {
+                        h_indices.push_back(pi);
+                    }
+                }
+
+                if (h_indices.size() <= 5) break;
+
+                std::sort(h_indices.begin(), h_indices.end(), [&](size_t a, size_t b) {
+                    return std::get<1>(*(particles_.begin() + a)) < std::get<1>(*(particles_.begin() + b));
+                });
+                
+                size_t to_move = h_indices.size() * 0.2;
+                if (to_move == 0) break;
+
+                // Create a NEW hypothesis (fork)
+                auto new_hypothesis = std::make_shared<Hypothesis>();
+                new_hypothesis->id = next_hypothesis_id_++;
+                new_hypothesis->submaps = hypothesis->submaps;  // Copy the full history
+                
+                // Insert explicit loop constraint
+                LoopConstraint constraint;
+                constraint.id = new_hypothesis->submaps.loop_constraints.size();
+                constraint.query_idx = event.query_idx;
+                constraint.reference_idx = cand.ref_idx;
+                
+                // Direct submap-to-submap match result
+                constraint.T_reference_query = cand.best_match;
+                constraint.information = Eigen::Matrix3d::Identity();
+                new_hypothesis->submaps.loop_constraints.push_back(constraint);
+
+                // Throw away drifted active submaps in new hypothesis
+                new_hypothesis->submaps.active_submaps.clear();
+                
+                hypotheses_.push_back(new_hypothesis);
+
+                // Calculate average weight of the top 80% to give to the moved ones
+                double sum_w_top = 0.0;
+                for (size_t k = to_move; k < h_indices.size(); ++k) {
+                    sum_w_top += static_cast<double>(std::get<1>(*(particles_.begin() + h_indices[k])));
+                }
+                double avg_w = sum_w_top / (h_indices.size() - to_move);
+
+                for (size_t k = 0; k < to_move; ++k) {
+                    auto it = particles_.begin() + h_indices[k];
+                    // Assign to new hypothesis BEFORE PGO (so PGO will teleport them)
+                    std::get<2>(*it) = new_hypothesis;
+                    // Boost weight
+                    std::get<1>(*it) = beluga::Weight(avg_w);
+                }
+                
+                // INMEDIATELY run PGO on the new loop hypothesis so its map and particles become consistent!
+                optimize_pose_graph(new_hypothesis);
+                new_hypothesis->optimized_loops_count = new_hypothesis->submaps.loop_constraints.size();
+
+                // Set cooldown for BOTH to avoid rapid re-triggering while ambiguity resolves
+                hypothesis->loop_closure_cooldown = 200;
+                new_hypothesis->loop_closure_cooldown = 200;
+
+                // Renormalize all weights across all particles
+                double global_sum = 0.0;
+                for (const auto& p : particles_) global_sum += static_cast<double>(std::get<1>(p));
+                if (global_sum > 0.0) {
+                    for (auto&& p : particles_) {
+                        std::get<1>(p) = beluga::Weight(static_cast<double>(std::get<1>(p)) / global_sum);
+                    }
+                }
+
+                forks_created++;
             }
         }
     }
@@ -1401,6 +1453,9 @@ private:
 
     /// Persistent record of all loop closure detection poses for RViz visualization
     std::vector<Sophus::SE2d> loop_closure_poses_;
+
+    /// Persistent record of all spatial divergence split poses for RViz visualization
+    std::vector<Sophus::SE2d> spatial_split_poses_;
 
     std::mt19937 rng_ = std::mt19937(std::random_device{}());
 };  
