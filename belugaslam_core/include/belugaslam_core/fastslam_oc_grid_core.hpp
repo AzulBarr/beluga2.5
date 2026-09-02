@@ -1205,13 +1205,6 @@ public:
                                 constraint.information = Eigen::Matrix3d::Identity();
                                 new_hypothesis->submaps.loop_constraints.push_back(constraint);
 
-                                // The true global pose of the query submap is now known
-                                auto query_submap = new_hypothesis->submaps.history.back();
-                                Sophus::SE2d true_query_pose = old_submap->global_pose() * best_match;
-                                
-                                // Calculate the rigid correction delta that snaps the drifted map to the true aligned pose
-                                Sophus::SE2d correction_delta = true_query_pose * query_submap->global_pose().inverse();
-
                                 // Throw away the drifted active submaps because it overlaps with the old visited map!
                                 // The system will automatically create a fresh one at the corrected pose on the next scan.
                                 new_hypothesis->submaps.active_submaps.clear();
@@ -1227,13 +1220,15 @@ public:
 
                                 for (size_t k = 0; k < to_move; ++k) {
                                     auto it = particles_.begin() + h_indices[k];
-                                    // Teleport particle using the global correction delta
-                                    std::get<0>(*it) = correction_delta * std::get<0>(*it);
-                                    // Assign to new hypothesis
+                                    // Assign to new hypothesis BEFORE PGO (so PGO will teleport them)
                                     std::get<2>(*it) = new_hypothesis;
                                     // Boost weight
                                     std::get<1>(*it) = beluga::Weight(avg_w);
                                 }
+                                
+                                // INMEDIATELY run PGO on the new loop hypothesis so its map and particles become consistent!
+                                optimize_pose_graph(new_hypothesis);
+                                new_hypothesis->optimized_loops_count = new_hypothesis->submaps.loop_constraints.size();
 
                                 // Set cooldown for BOTH to avoid rapid re-triggering while ambiguity resolves
                                 hypothesis->loop_closure_cooldown = 200;
