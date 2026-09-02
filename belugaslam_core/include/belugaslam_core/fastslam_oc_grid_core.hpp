@@ -1252,7 +1252,7 @@ public:
                         }
                     } else {
                         std::cout << "[LOOP CLOSURE] Hipotesis " << hypothesis->id 
-                                  << ": Falsa alarma (Score bajo: " << avg_score << ")" << std::endl;
+                                  << ": Falsa alarma (Score bajo: " << best_score << ")" << std::endl;
                     }
                 }
             }
