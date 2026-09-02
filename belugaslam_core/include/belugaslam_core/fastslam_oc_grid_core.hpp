@@ -245,6 +245,12 @@ public:
         auto dxys2 = {-0.05, 0.0, 0.05};
         auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180};
 
+        auto dxys3 = {-0.02, -0.01, 0.0, 0.01, 0.02};
+        std::vector<double> dthetas3;
+        for (int i = -5; i <= 5; ++i) {
+            dthetas3.push_back((i * 0.2) * Sophus::Constants<double>::pi() / 180);
+        }
+
         // 1. Composite local map ONCE PER HYPOTHESIS and cache it
         std::map<size_t, GridTypeLO> hypothesis_lo_cache;
         for (auto& hypothesis : hypotheses_) {
@@ -310,6 +316,24 @@ public:
                         auto candidate_pose = state_type{
                             Sophus::SO2d{best_pose.so2().log() + dtheta}, 
                             Eigen::Vector2d{best_pose.translation().x() + dx, best_pose.translation().y() + dy}
+                        };
+                        double score = score_fn(candidate_pose);
+                        if (score > best_log_score) {
+                            best_log_score = score;
+                            best_pose = candidate_pose;
+                        }
+                    }
+                }
+            }
+            
+            auto best_pose_st2 = best_pose;
+
+            for (double dx : dxys3) {
+                for (double dy : dxys3) {
+                    for (double dtheta : dthetas3) {
+                        auto candidate_pose = state_type{
+                            Sophus::SO2d{best_pose_st2.so2().log() + dtheta}, 
+                            Eigen::Vector2d{best_pose_st2.translation().x() + dx, best_pose_st2.translation().y() + dy}
                         };
                         double score = score_fn(candidate_pose);
                         if (score > best_log_score) {
