@@ -191,31 +191,7 @@ struct SubmapList {
         auto finished_submap = *it;
         finished_submap->finish();
 
-        // Check if this submap is redundant (represents a revisit to a known authoritative area)
-        bool is_redundant = false;
-        for (size_t i = 0; i < history.size(); ++i) {
-          const auto& old_submap = history[i];
-          if (old_submap->role() != SubmapRole::kAuthoritative) continue;
-          
-          // We only consider it a redundant revisit if it overlaps with an older area (e.g., > 3 submaps ago).
-          if (history.size() - i <= 3) continue;
-
-          double dx = old_submap->global_pose().translation().x() - finished_submap->global_pose().translation().x();
-          double dy = old_submap->global_pose().translation().y() - finished_submap->global_pose().translation().y();
-          double dist = std::sqrt(dx*dx + dy*dy);
-          
-          // MVP overlap check: origins are within 3.0 meters of each other
-          if (dist < 3.0) {
-            is_redundant = true;
-            break;
-          }
-        }
-
-        if (is_redundant) {
-          finished_submap->set_role(SubmapRole::kRedundant);
-        } else {
-          finished_submap->set_role(SubmapRole::kAuthoritative);
-        }
+        finished_submap->set_role(SubmapRole::kAuthoritative);
 
         history.push_back(finished_submap);
 

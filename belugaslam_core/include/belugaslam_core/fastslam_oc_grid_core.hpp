@@ -252,15 +252,19 @@ public:
         std::map<size_t, GridTypeLO> hypothesis_lo_cache;
         for (auto& hypothesis : hypotheses_) {
             // Find a representative pose for this hypothesis to select nearby submaps
-            state_type rep_pose;
+            state_type representative_pose;
+            double max_w = -1.0;
             for (const auto& p : particles_) {
                 if (std::get<2>(p)->id == hypothesis->id) {
-                    rep_pose = std::get<0>(p);
-                    break;
+                    double w = static_cast<double>(std::get<1>(p));
+                    if (w > max_w) {
+                        max_w = w;
+                        representative_pose = std::get<0>(p);
+                    }
                 }
             }
 
-            compose_tracking_view(hypothesis, rep_pose, local_lo_grid_);
+            compose_tracking_view(hypothesis, representative_pose, local_lo_grid_);
             hypothesis_lo_cache[hypothesis->id] = local_lo_grid_;
         }
 
@@ -1010,8 +1014,12 @@ public:
         }
 
         // 3. Draw top_k nearby historical submaps
-        size_t k = 5;
-        double radius = 10.0;
+        size_t k = 1;
+        // The submap's geometry spans up to lidar_range from its center.
+        // The robot's current view spans up to lidar_range from its pose.
+        // Intersection happens if dist <= 2 * lidar_range.
+        // Assuming a max lidar range of ~15m, a radius of 30.0m guarantees we don't miss intersecting submaps.
+        double radius = 30.0; 
         
         std::vector<std::pair<double, std::shared_ptr<Submap>>> nearby;
         size_t hist_size = hypothesis->submaps.history.size();
@@ -1019,9 +1027,6 @@ public:
         if (hist_size > 1) { // We need at least one submap strictly before back()
             for (size_t i = 0; i + 1 < hist_size; ++i) {
                 auto sm = hypothesis->submaps.history[i];
-                
-                // Track only against the authoritative spine of the map, ignore redundant ghosts
-                if (sm->role() == SubmapRole::kRedundant) continue;
                 double dx = representative_pose.translation().x() - sm->global_pose().translation().x();
                 double dy = representative_pose.translation().y() - sm->global_pose().translation().y();
                 double dist = std::sqrt(dx*dx + dy*dy);
@@ -1084,7 +1089,6 @@ public:
                 if (i + 5 >= history.size()) continue;
 
                 auto old_submap = history[i];
-                if (old_submap->role() == SubmapRole::kRedundant) continue;
                 
                 auto query_submap = history[event.query_idx];
                 Sophus::SE2d T_ref_query_guess = old_submap->global_pose().inverse() * query_submap->global_pose();
