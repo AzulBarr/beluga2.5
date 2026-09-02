@@ -7,6 +7,12 @@
 #include <sophus/se2.hpp>
 #include "belugaslam_core/particle.hpp"
 
+enum class SubmapRole {
+  kAuthoritative,
+  kRedundant,
+  kProvisional
+};
+
 /**
  * \brief Represents a local map patch (Submap).
  * 
@@ -26,7 +32,8 @@ public:
   Submap(const Sophus::SE2d& global_pose, int width, int height, double resolution)
       : global_pose_(global_pose),
         num_insertions_(0),
-        is_finished_(false) {
+        is_finished_(false),
+        role_(SubmapRole::kProvisional) {
     
     // The grid's origin is now strictly in the local frame of the submap.
     // We center it so the submap's origin (0,0) is precisely in the middle of the grid matrix.
@@ -49,6 +56,12 @@ public:
 
   /// Set the global pose of this submap (used during Pose Graph Optimization).
   void set_global_pose(const Sophus::SE2d& pose) { global_pose_ = pose; }
+
+  /// Get the role of this submap
+  SubmapRole role() const { return role_; }
+
+  /// Set the role of this submap
+  void set_role(SubmapRole role) { role_ = role; }
 
   /// Number of scans inserted into this submap.
   int num_insertions() const { return num_insertions_; }
@@ -123,6 +136,7 @@ private:
   std::shared_ptr<LogOddsGrid> grid_;
   int num_insertions_;
   bool is_finished_;
+  SubmapRole role_;
   std::vector<double> radial_signature_;
 };
 
@@ -167,6 +181,28 @@ struct SubmapList {
     if (!active_submap) return;
     
     active_submap->finish();
+
+    // Check if this submap is redundant (represents a revisit to a known authoritative area)
+    bool is_redundant = false;
+    for (const auto& old_submap : history) {
+      if (old_submap->role() != SubmapRole::kAuthoritative) continue;
+      
+      double dx = old_submap->global_pose().translation().x() - active_submap->global_pose().translation().x();
+      double dy = old_submap->global_pose().translation().y() - active_submap->global_pose().translation().y();
+      double dist = std::sqrt(dx*dx + dy*dy);
+      
+      // MVP overlap check: origins are within 3.0 meters of each other
+      if (dist < 3.0) {
+        is_redundant = true;
+        break;
+      }
+    }
+
+    if (is_redundant) {
+      active_submap->set_role(SubmapRole::kRedundant);
+    } else {
+      active_submap->set_role(SubmapRole::kAuthoritative);
+    }
 
     if (!history.empty()) {
         SequentialConstraint odom;

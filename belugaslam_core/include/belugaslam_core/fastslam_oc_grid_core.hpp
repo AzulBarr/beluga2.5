@@ -844,6 +844,8 @@ public:
         std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
         
         for (const auto& sm : hypothesis->submaps.history) {
+            // Exclude redundant submaps from global publication to prevent thick/double walls
+            if (sm->role() == SubmapRole::kRedundant) continue;
             draw_submap_into_grid(sm, global_lo);
         }
         draw_submap_into_grid(hypothesis->submaps.active_submap, global_lo);
@@ -860,7 +862,7 @@ public:
         // 1. Draw active submap
         draw_submap_into_grid(hypothesis->submaps.active_submap, tracking_lo);
 
-        // 2. Draw previous frozen submap
+        // 2. Draw previous frozen submap (whether authoritative or redundant, it's our immediate tracking past)
         if (!hypothesis->submaps.history.empty()) {
             draw_submap_into_grid(hypothesis->submaps.history.back(), tracking_lo);
         }
@@ -875,6 +877,9 @@ public:
         if (hist_size > 1) { // We need at least one submap strictly before back()
             for (size_t i = 0; i + 1 < hist_size; ++i) {
                 auto sm = hypothesis->submaps.history[i];
+                
+                // Track only against the authoritative spine of the map, ignore redundant ghosts
+                if (sm->role() == SubmapRole::kRedundant) continue;
                 double dx = representative_pose.translation().x() - sm->global_pose().translation().x();
                 double dy = representative_pose.translation().y() - sm->global_pose().translation().y();
                 double dist = std::sqrt(dx*dx + dy*dy);
@@ -931,12 +936,13 @@ public:
             }
             if (best_w < 0) continue;  // Dead hypothesis
 
-            // 2. Search THIS hypothesis's history for proximity matches
+            // 2. Search THIS hypothesis's history for proximity matches against Authoritative spine
             const auto& history = hypothesis->submaps.history;
             for (size_t i = 0; i < history.size(); ++i) {
                 if (i + 5 >= history.size()) continue;
 
                 auto old_submap = history[i];
+                if (old_submap->role() == SubmapRole::kRedundant) continue;
                 
                 double dx = representative_pose.translation().x() - old_submap->global_pose().translation().x();
                 double dy = representative_pose.translation().y() - old_submap->global_pose().translation().y();
