@@ -200,6 +200,9 @@ public:
         return hypotheses_.empty() ? 0 : hypotheses_.front()->submaps.history.size(); 
     }
 
+    /// Returns all detected loop closure poses (persistent, for RViz visualization)
+    [[nodiscard]] const std::vector<Sophus::SE2d>& loop_closure_poses() const { return loop_closure_poses_; }
+
     /// Samples from the motion distribution to propagate particle states.
     /**
      * This function computes a motion sampler based on the provided control action 
@@ -1189,6 +1192,8 @@ public:
                     if (best_score > 1.0) {
                         std::cout << " -> Match EXITOSO! Score normalizado: " << best_score << std::endl;
                         
+                        // Record this pose permanently for RViz visualization
+                        loop_closure_poses_.push_back(representative_pose);
                         // 3. Move worst 20% of particles from this hypothesis
                         std::vector<size_t> h_indices;
                         for (size_t pi = 0; pi < particles_.size(); ++pi) {
@@ -1393,6 +1398,9 @@ private:
     GridTypeOC local_oc_grid_;
     GridTypeLO local_lo_grid_;
     state_type best_pose_;
+
+    /// Persistent record of all loop closure detection poses for RViz visualization
+    std::vector<Sophus::SE2d> loop_closure_poses_;
 
     std::mt19937 rng_ = std::mt19937(std::random_device{}());
 };  

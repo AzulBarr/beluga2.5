@@ -21,6 +21,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include "belugaslam_core/fastslam_oc_grid_core.hpp"
 
@@ -100,6 +101,9 @@ private:
 
     void publish_uncertainty_map();
 
+    /// Publishes persistent markers at loop closure detection poses
+    void publish_loop_closure_markers(const rclcpp::Time& stamp);
+
     std::unique_ptr<BelugaSLAM> slam_; // Pointer to the BelugaSLAM core implementation.
     
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -112,6 +116,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr entropy_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr uncertainty_map_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr loop_closure_markers_pub_;
 
     state_type last_odom_;
     bool first_odom_received_ = false;
