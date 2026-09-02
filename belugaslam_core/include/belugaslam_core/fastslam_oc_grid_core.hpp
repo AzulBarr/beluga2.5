@@ -232,7 +232,7 @@ public:
     void measurement_model_map(const measurement_type& z) {
         /// Subsample the scan to improve performance         
         measurement_type z_sparse;
-        constexpr size_t kStep = 2;
+        constexpr size_t kStep = 4;
         z_sparse.reserve(z.size() / kStep + 1);
         for (size_t i = 0; i < z.size(); i += kStep) {
             z_sparse.push_back(z[i]);
@@ -245,11 +245,8 @@ public:
         auto dxys2 = {-0.05, 0.0, 0.05};
         auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180};
 
-        auto dxys3 = {-0.02, -0.01, 0.0, 0.01, 0.02};
-        std::vector<double> dthetas3;
-        for (int i = -5; i <= 5; ++i) {
-            dthetas3.push_back((i * 0.2) * Sophus::Constants<double>::pi() / 180);
-        }
+        auto dxys3 = {-0.02, 0.0, 0.02};
+        auto dthetas3 = {-1.0 * Sophus::Constants<double>::pi() / 180, 0.0, 1.0 * Sophus::Constants<double>::pi() / 180};
 
         // 1. Composite local map ONCE PER HYPOTHESIS and cache it
         std::map<size_t, GridTypeLO> hypothesis_lo_cache;
