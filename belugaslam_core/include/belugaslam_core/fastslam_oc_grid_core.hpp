@@ -504,13 +504,6 @@ public:
         // Composite full global map from the best particle's hypothesis for RViz
         compose_publication_view(best_hypothesis, best_lo_grid_);
         sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
-
-        // RESET WEIGHTS: After all mapping and decision logic is done, reset weights 
-        // to uniform (1/N) so the filter is ready for the next motion update.
-        double uniform_weight = 1.0 / particles_.size();
-        for (auto&& w : beluga::views::weights(particles_)) {
-            w = beluga::Weight(uniform_weight);
-        }
     }
 
     /// Multinomial resampling based on the current importance weights.
@@ -658,6 +651,13 @@ public:
                     return true;
                 }),
             hypotheses_.end());
+
+        // RESET WEIGHTS: After resampling, reset weights to a uniform distribution 
+        // so they are fresh for the next sample/measurement step.
+        double uniform_weight = 1.0 / particles_.size();
+        for (auto&& w : beluga::views::weights(particles_)) {
+            w = beluga::Weight(uniform_weight);
+        }
     }
 
     void detect_and_split_modes(const std::vector<double>& weights_view) {
