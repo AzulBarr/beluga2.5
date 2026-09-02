@@ -1190,7 +1190,7 @@ public:
 
                     // A good submap match should have a high normalized score (e.g. > 1.0)
                     if (best_score > 1.0) {
-                        std::cout << " -> Match EXITOSO! Score normalizado: " << best_score << std::endl;
+                        std::cout << "\033[1;31m -> Match EXITOSO! Score normalizado: " << best_score << "\033[0m" << std::endl;
                         
                         // Record this pose permanently for RViz visualization
                         loop_closure_poses_.push_back(representative_pose);
