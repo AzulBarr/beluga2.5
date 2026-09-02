@@ -1009,8 +1009,7 @@ public:
             draw_submap_into_grid(hypothesis->submaps.history.back(), tracking_lo);
         }
 
-        // 3. Draw top_k nearby historical submaps (DISABLED TO TEST DEFORMATION)
-        /*
+        // 3. Draw top_k nearby historical submaps
         size_t k = 5;
         double radius = 10.0;
         
@@ -1040,7 +1039,6 @@ public:
                 draw_submap_into_grid(nearby[i].second, tracking_lo);
             }
         }
-        */
 
         for (auto& val : tracking_lo.data()) {
             val = std::clamp(val, -5.0f, 5.0f);
@@ -1095,20 +1093,23 @@ public:
                 double dy = T_ref_query_guess.translation().y();
                 double distance = std::sqrt(dx*dx + dy*dy);
 
-                if (distance < 5.0) {
+                if (distance < 7.0) {
                     std::cout << "\n[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                               << ": Candidato por PROXIMIDAD! Submapa " << i 
                               << " detectado a " << distance << "m. Iniciando alineacion submapa-a-submapa..." << std::endl;
 
-                    // Extract point cloud from the query submap
+                    // Extract point cloud from the query submap (Subsampled for speed)
                     std::vector<Eigen::Vector2d> query_points;
                     const auto& q_grid = query_submap->grid();
+                    int pt_count = 0;
                     for (int y = 0; y < q_grid.height(); ++y) {
                         for (int x = 0; x < q_grid.width(); ++x) {
                             if (q_grid.at(x, y) > 0.5f) {
-                                double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
-                                double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
-                                query_points.push_back({local_x, local_y});
+                                if (pt_count++ % 4 == 0) { // Take 1 out of every 4 occupied cells
+                                    double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
+                                    double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
+                                    query_points.push_back({local_x, local_y});
+                                }
                             }
                         }
                     }
@@ -1141,10 +1142,21 @@ public:
                         }
                     };
 
-                    // COARSE: 25cm, 5.7 deg
-                    for (double sx = -3.0; sx <= 3.0; sx += 0.25) {
-                        for (double sy = -3.0; sy <= 3.0; sy += 0.25) {
-                            for (double stheta = -0.5; stheta <= 0.5; stheta += 0.1) {
+                    // COARSE: 50cm, 11 deg. Enormous search space to catch large drifts!
+                    // dx, dy: [-7.0, 7.0], dtheta: [-0.8, 0.8] rad (~45 deg)
+                    for (double sx = -7.0; sx <= 7.0; sx += 0.5) {
+                        for (double sy = -7.0; sy <= 7.0; sy += 0.5) {
+                            for (double stheta = -0.8; stheta <= 0.8; stheta += 0.2) {
+                                evaluate_pose(sx, sy, stheta);
+                            }
+                        }
+                    }
+
+                    // MEDIUM: 15cm, 3 deg (around best coarse)
+                    double m_sx = best_sx, m_sy = best_sy, m_stheta = best_stheta;
+                    for (double sx = m_sx - 0.5; sx <= m_sx + 0.5; sx += 0.15) {
+                        for (double sy = m_sy - 0.5; sy <= m_sy + 0.5; sy += 0.15) {
+                            for (double stheta = m_stheta - 0.2; stheta <= m_stheta + 0.2; stheta += 0.05) {
                                 evaluate_pose(sx, sy, stheta);
                             }
                         }
