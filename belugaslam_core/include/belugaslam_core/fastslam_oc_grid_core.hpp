@@ -986,8 +986,6 @@ public:
         std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
         
         for (const auto& sm : hypothesis->submaps.history) {
-            // Exclude redundant submaps from global publication to prevent thick/double walls
-            if (sm->role() == SubmapRole::kRedundant) continue;
             draw_submap_into_grid(sm, global_lo);
         }
         for (const auto& active_submap : hypothesis->submaps.active_submaps) {
@@ -1083,14 +1081,33 @@ public:
             }
             if (best_w < 0) continue;  // Dead hypothesis
 
-            // 2. Search THIS hypothesis's history for proximity matches against Authoritative spine
+            // 2. Search THIS hypothesis's history for proximity matches
             const auto& history = hypothesis->submaps.history;
-            for (size_t i = 0; i < history.size(); ++i) {
+            
+            // Pre-extract the query submap's point cloud ONCE (it doesn't change per candidate)
+            auto query_submap = history[event.query_idx];
+            std::vector<Eigen::Vector2d> query_points;
+            const auto& q_grid = query_submap->grid();
+            int pt_count = 0;
+            for (int y = 0; y < q_grid.height(); ++y) {
+                for (int x = 0; x < q_grid.width(); ++x) {
+                    if (q_grid.at(x, y) > 0.5f) {
+                        if (pt_count++ % 4 == 0) { // Take 1 out of every 4 occupied cells
+                            double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
+                            double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
+                            query_points.push_back({local_x, local_y});
+                        }
+                    }
+                }
+            }
+            if (query_points.empty()) continue;
+
+            bool loop_found = false;
+            for (size_t i = 0; i < history.size() && !loop_found; ++i) {
                 if (i + 5 >= history.size()) continue;
 
                 auto old_submap = history[i];
                 
-                auto query_submap = history[event.query_idx];
                 Sophus::SE2d T_ref_query_guess = old_submap->global_pose().inverse() * query_submap->global_pose();
                 
                 double dx = T_ref_query_guess.translation().x();
@@ -1101,24 +1118,6 @@ public:
                     std::cout << "\n[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                               << ": Candidato por PROXIMIDAD! Submapa " << i 
                               << " detectado a " << distance << "m. Iniciando alineacion submapa-a-submapa..." << std::endl;
-
-                    // Extract point cloud from the query submap (Subsampled for speed)
-                    std::vector<Eigen::Vector2d> query_points;
-                    const auto& q_grid = query_submap->grid();
-                    int pt_count = 0;
-                    for (int y = 0; y < q_grid.height(); ++y) {
-                        for (int x = 0; x < q_grid.width(); ++x) {
-                            if (q_grid.at(x, y) > 0.5f) {
-                                if (pt_count++ % 4 == 0) { // Take 1 out of every 4 occupied cells
-                                    double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
-                                    double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
-                                    query_points.push_back({local_x, local_y});
-                                }
-                            }
-                        }
-                    }
-
-                    if (query_points.empty()) continue;
 
                     double best_score = -std::numeric_limits<double>::infinity();
                     Sophus::SE2d best_match = T_ref_query_guess;
@@ -1258,6 +1257,7 @@ public:
                                         std::get<1>(p) = beluga::Weight(static_cast<double>(std::get<1>(p)) / global_sum);
                                     }
                                 }
+                                loop_found = true;
                                 break; // Only process one loop closure per hypothesis per step
                             }
                         }
@@ -1369,9 +1369,6 @@ public:
                 std::get<0>(p) = delta_tf * std::get<0>(p);
             }
         }
-
-        // Correct the global best pose if it was moved
-        best_pose_ = delta_tf * best_pose_;
 
         std::cout << "[PGO] Ceres Optimization Finalizada. Particulas y submapas corregidos." << std::endl;
     }
