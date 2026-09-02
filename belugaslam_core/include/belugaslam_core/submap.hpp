@@ -184,9 +184,14 @@ struct SubmapList {
 
     // Check if this submap is redundant (represents a revisit to a known authoritative area)
     bool is_redundant = false;
-    for (const auto& old_submap : history) {
+    for (size_t i = 0; i < history.size(); ++i) {
+      const auto& old_submap = history[i];
       if (old_submap->role() != SubmapRole::kAuthoritative) continue;
       
+      // If the old submap was created very recently, this is continuous exploration, NOT a revisit.
+      // We only consider it a redundant revisit if it overlaps with an older area (e.g., > 3 submaps ago).
+      if (history.size() - i <= 3) continue;
+
       double dx = old_submap->global_pose().translation().x() - active_submap->global_pose().translation().x();
       double dy = old_submap->global_pose().translation().y() - active_submap->global_pose().translation().y();
       double dist = std::sqrt(dx*dx + dy*dy);
