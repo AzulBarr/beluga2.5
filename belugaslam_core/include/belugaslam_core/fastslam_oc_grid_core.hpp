@@ -416,15 +416,13 @@ public:
 
             // 3. Insert scan into ALL active submaps (interlocking)
             for (auto& active_submap : submaps.active_submaps) {
-                // Check if the robot drove outside the physical bounds of this submap
+                // Get the robot's coordinates in the submap's local frame.
+                // It is perfectly safe for the robot to be physically outside the submap's bounding box; 
+                // Bresenham will just clip the rays to the map boundaries.
                 auto T_w_s = active_submap->global_pose();
                 auto T_s_r = T_w_s.inverse() * best_pose;
                 int gx0, gy0, dummy_idx;
-                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, active_submap->grid())) {
-                    // Force finish the submap early so we don't drop the current scan or crash
-                    active_submap->force_finish();
-                    continue;
-                }
+                world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, active_submap->grid());
 
                 auto& lo_grid = active_submap->mutable_grid();
                 

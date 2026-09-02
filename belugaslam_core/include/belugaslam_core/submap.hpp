@@ -29,8 +29,8 @@ public:
    * \param height Height of the submap grid in cells.
    * \param resolution Resolution of the grid in meters/cell.
    */
-  Submap(const Sophus::SE2d& global_pose, int width, int height, double resolution)
-      : global_pose_(global_pose),
+  Submap(const Sophus::SE2d& pose, int width, int height, double resolution)
+      : global_pose_(pose),
         num_insertions_(0),
         is_finished_(false),
         role_(SubmapRole::kProvisional) {
