@@ -867,7 +867,8 @@ public:
             draw_submap_into_grid(hypothesis->submaps.history.back(), tracking_lo);
         }
 
-        // 3. Draw top_k nearby historical submaps
+        // 3. Draw top_k nearby historical submaps (DISABLED TO TEST DEFORMATION)
+        /*
         size_t k = 5;
         double radius = 10.0;
         
@@ -897,6 +898,7 @@ public:
                 draw_submap_into_grid(nearby[i].second, tracking_lo);
             }
         }
+        */
 
         for (auto& val : tracking_lo.data()) {
             val = std::clamp(val, -5.0f, 5.0f);
