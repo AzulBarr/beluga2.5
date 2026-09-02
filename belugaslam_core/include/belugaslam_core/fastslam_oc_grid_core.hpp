@@ -1065,6 +1065,12 @@ public:
         }
     }
 
+    struct LoopCandidate {
+        size_t ref_idx;
+        double score;
+        Sophus::SE2d best_match;
+    };
+
     /// Step 3: Detect and Inject Loop Closure candidates (per hypothesis)
     void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse, const std::vector<FinishedSubmapEvent>& finished_events) {
         if (z_sparse.empty() || finished_events.empty()) return;
