@@ -126,24 +126,9 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
 
         compute_se2_covariance();
 
-        // 3. Publish Odometry TF (Base Link to Odom)
-        auto base_link_to_odom = slam_->get_best_pose();
-        geometry_msgs::msg::TransformStamped tf_msg;
-        tf_msg.header.stamp = msg->header.stamp;
-        tf_msg.header.frame_id = map_frame_id_;
-        tf_msg.child_frame_id = odom_frame_id_;
-        tf_msg.transform.translation.x = base_link_to_odom.translation().x();
-        tf_msg.transform.translation.y = base_link_to_odom.translation().y();
-        tf_msg.transform.translation.z = 0.0;
-        tf_msg.transform.rotation.w = base_link_to_odom.so2().unit_complex().x();
-        tf_msg.transform.rotation.z = base_link_to_odom.so2().unit_complex().y();
-        tf_broadcaster_->sendTransform(tf_msg);
-
-        auto t5 = std::chrono::high_resolution_clock::now();
-
         publish_particles(msg->header.stamp);
         RCLCPP_INFO(this->get_logger(), "Particles published");
-        auto t6 = std::chrono::high_resolution_clock::now();
+        auto t5 = std::chrono::high_resolution_clock::now();
         
         compute_entropy();
         publish_best_pose(msg->header.stamp);
@@ -155,6 +140,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         }
         it ++;
         RCLCPP_INFO(this->get_logger(), "Map published");
+        auto t6 = std::chrono::high_resolution_clock::now();
 
         broadcast_map_to_odom(msg->header.stamp, current_odom);
         RCLCPP_INFO(this->get_logger(), "Map to odom TF published");
