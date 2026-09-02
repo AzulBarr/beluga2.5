@@ -219,15 +219,7 @@ struct SubmapList {
 
         history.push_back(finished_submap);
 
-        if (history.size() >= 2) {
-            SequentialConstraint odom;
-            odom.from_idx = history.size() - 2;
-            odom.to_idx = history.size() - 1;
-            auto pose_a = history[odom.from_idx]->global_pose();
-            auto pose_b = history[odom.to_idx]->global_pose();
-            odom.relative_pose = pose_a.inverse() * pose_b;
-            odometry_constraints.push_back(odom);
-        }
+
 
         finished_indices.push_back(history.size() - 1);
         it = active_submaps.erase(it);

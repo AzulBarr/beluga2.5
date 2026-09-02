@@ -275,7 +275,7 @@ public:
 
             auto& cached_grid = hypothesis_lo_cache[hypothesis->id];
 
-            // Fast Endpoint-Score Model (Cartographer style)
+            // Fast Endpoint-Score Model with Out-of-Bounds Penalty
             auto score_fn = [&](const state_type& candidate_pose) {
                 double log_prob_sum = 0.0;
                 for (const auto& local_point : z_sparse) {
@@ -283,6 +283,11 @@ public:
                     int gx, gy, hit_idx;
                     if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, cached_grid)) {
                         log_prob_sum += cached_grid.at(hit_idx);
+                    } else {
+                        // Heavily penalize out-of-bounds endpoints (equivalent to hitting solidly confirmed free space)
+                        // This prevents the filter from trying to eject the scan into unknown space
+                        // to avoid slight negative scores from noise in known space.
+                        log_prob_sum -= 5.0; 
                     }
                 }
                 return log_prob_sum;
@@ -380,6 +385,83 @@ public:
         
     }
 
+    /// Aligns two submaps (query and reference) to find the MLE relative transform T_ref_query.
+    Sophus::SE2d align_submaps(const std::shared_ptr<Submap>& query, const std::shared_ptr<Submap>& reference, const Sophus::SE2d& initial_relative_pose) const {
+        std::vector<Eigen::Vector2d> query_points;
+        const auto& q_grid = query->grid();
+        for (int y = 0; y < q_grid.height(); ++y) {
+            for (int x = 0; x < q_grid.width(); ++x) {
+                if (q_grid.at(x, y) > 0.5f) { // Only align occupied cells
+                    double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
+                    double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
+                    query_points.push_back({local_x, local_y});
+                }
+            }
+        }
+
+        if (query_points.empty()) {
+            return initial_relative_pose;
+        }
+
+        const auto& ref_grid = reference->grid();
+        auto score_fn = [&](const Sophus::SE2d& T_ref_query) {
+            double score = 0.0;
+            for (const auto& pt : query_points) {
+                Eigen::Vector2d pt_in_ref = T_ref_query * pt;
+                int gx, gy, idx;
+                if (world_to_index(pt_in_ref.x(), pt_in_ref.y(), gx, gy, idx, ref_grid)) {
+                    score += ref_grid.at(idx);
+                } else {
+                    score -= 5.0; // Out-of-bounds penalty
+                }
+            }
+            return score;
+        };
+
+        // 1. Local search (cm-level, fraction of degree)
+        auto dxs = {-0.04, -0.02, 0.0, 0.02, 0.04};
+        auto dys = {-0.04, -0.02, 0.0, 0.02, 0.04};
+        auto dthetas = {-0.5 * Sophus::Constants<double>::pi()/180, 0.0, 0.5 * Sophus::Constants<double>::pi()/180};
+        
+        double best_score = -1e9;
+        Sophus::SE2d best_pose = initial_relative_pose;
+        
+        for (double dx : dxs) {
+            for (double dy : dys) {
+                for (double dt : dthetas) {
+                    Sophus::SE2d candidate = initial_relative_pose * Sophus::SE2d(Sophus::SO2d{dt}, Eigen::Vector2d{dx, dy});
+                    double score = score_fn(candidate);
+                    if (score > best_score) {
+                        best_score = score;
+                        best_pose = candidate;
+                    }
+                }
+            }
+        }
+
+        // 2. Sub-centimeter refinement
+        auto dxs2 = {-0.01, 0.0, 0.01};
+        auto dys2 = {-0.01, 0.0, 0.01};
+        auto dts2 = {-0.2 * Sophus::Constants<double>::pi()/180, 0.0, 0.2 * Sophus::Constants<double>::pi()/180};
+        
+        Sophus::SE2d refined_pose = best_pose;
+        double refined_score = best_score;
+        for (double dx : dxs2) {
+            for (double dy : dys2) {
+                for (double dt : dts2) {
+                    Sophus::SE2d candidate = best_pose * Sophus::SE2d(Sophus::SO2d{dt}, Eigen::Vector2d{dx, dy});
+                    double score = score_fn(candidate);
+                    if (score > refined_score) {
+                        refined_score = score;
+                        refined_pose = candidate;
+                    }
+                }
+            }
+        }
+        
+        return refined_pose;
+    }
+
     /// Update the occupancy grid map of each hypothesis based on the transformed measurement.
     std::vector<FinishedSubmapEvent> update_occupancy_grid(const measurement_type& z) {
         std::vector<FinishedSubmapEvent> finished_events;
@@ -448,8 +530,24 @@ public:
 
             // 4. Finish ready submaps (>= 50 insertions) and generate events
             auto finished_indices = submaps.finish_ready_submaps();
-            for (size_t idx : finished_indices) {
-                finished_events.push_back({hypothesis->id, idx});
+            for (size_t f_idx : finished_indices) {
+                // Generate a highly accurate sequential constraint by aligning the overlapping submaps
+                if (f_idx > 0) {
+                    SequentialConstraint constraint;
+                    constraint.from_idx = f_idx - 1;
+                    constraint.to_idx = f_idx;
+                    
+                    auto pose_a = submaps.history[constraint.from_idx]->global_pose();
+                    auto pose_b = submaps.history[constraint.to_idx]->global_pose();
+                    Sophus::SE2d initial_relative = pose_a.inverse() * pose_b;
+                    
+                    
+                    constraint.relative_pose = align_submaps(submaps.history[constraint.to_idx], submaps.history[constraint.from_idx], initial_relative);
+                    
+                    submaps.odometry_constraints.push_back(constraint);
+                }
+
+                finished_events.push_back({hypothesis->id, f_idx});
                 finished_this_step = true; // Still used for logging if needed
             }
         }
@@ -553,6 +651,25 @@ public:
             }
         }
 
+        // Gather surviving hypotheses
+        std::vector<std::pair<size_t, double>> surviving_hypotheses;
+        for (auto& h : hypotheses_) {
+            if (!dead_hypotheses.count(h->id)) {
+                surviving_hypotheses.push_back({h->id, hypothesis_total_weight[h->id]});
+            }
+        }
+
+        // Sort descending by weight
+        std::sort(surviving_hypotheses.begin(), surviving_hypotheses.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        // Enforce maximum of 4 hypotheses to protect the budget
+        size_t max_hypotheses = 4;
+        while (surviving_hypotheses.size() > max_hypotheses) {
+            dead_hypotheses.insert(surviving_hypotheses.back().first);
+            surviving_hypotheses.pop_back();
+        }
+
         // 3. Calculate Global ESS
         double sum_sq = 0.0;
         for (double w : weights_view) {
@@ -574,31 +691,19 @@ public:
             hypothesis_particle_indices[std::get<2>(*(particles_.begin() + i))->id].push_back(i);
         }
 
-        // Gather surviving hypotheses and normalize their weights
-        std::vector<std::pair<size_t, double>> surviving_hypotheses;
         double surviving_weight_sum = 0.0;
-        for (auto& h : hypotheses_) {
-            if (!dead_hypotheses.count(h->id)) {
-                double w = hypothesis_total_weight[h->id];
-                surviving_hypotheses.push_back({h->id, w});
-                surviving_weight_sum += w;
-            }
-        }
-
-        // Sort descending by weight
-        std::sort(surviving_hypotheses.begin(), surviving_hypotheses.end(),
-                  [](const auto& a, const auto& b) { return a.second > b.second; });
-
-        // Enforce maximum of 4 hypotheses to protect the budget
-        size_t max_hypotheses = 4;
-        while (surviving_hypotheses.size() > max_hypotheses) {
-            dead_hypotheses.insert(surviving_hypotheses.back().first);
-            surviving_weight_sum -= surviving_hypotheses.back().second;
-            surviving_hypotheses.pop_back();
+        for (const auto& sh : surviving_hypotheses) {
+            surviving_weight_sum += sh.second;
         }
 
         size_t K = surviving_hypotheses.size();
-        if (K == 0) return; // Should never happen unless weights are all exactly zero
+        if (K == 0) {
+            // If all hypotheses are dead, fallback to keeping the best one
+            K = 1;
+            surviving_hypotheses.push_back({hypotheses_.front()->id, 1.0});
+            surviving_weight_sum = 1.0;
+            dead_hypotheses.erase(hypotheses_.front()->id);
+        }
 
         size_t N_budget = (K == 1) ? params_.min_particles : params_.max_particles;
         size_t N_min = 12;
@@ -674,7 +779,7 @@ public:
         }
     }
 
-    void detect_and_split_modes(const std::vector<double>& weights_view) {
+    void detect_and_split_modes(std::vector<double>& weights_view) {
         auto hypotheses_snapshot = hypotheses_;
         
         std::map<size_t, std::vector<size_t>> hypothesis_particle_indices;
@@ -720,7 +825,15 @@ public:
             bool is_first_spatial_cluster = true;
             for (const auto& [scid, scweight] : sorted_s_clusters) {
                 // Only preserve valid spatial sub-hypotheses (e.g. > 5% weight of the local hypothesis)
-                if (scweight / s_total_weight < 0.05) continue;
+                if (scweight / s_total_weight < 0.05) {
+                    // Kill particles in small modes to avoid polluting the main hypothesis
+                    for (size_t local_idx : s_cluster_to_indices[scid]) {
+                        size_t global_idx = indices[local_idx];
+                        std::get<1>(*(particles_.begin() + global_idx)) = beluga::Weight(0.0);
+                        weights_view[global_idx] = 0.0;
+                    }
+                    continue;
+                }
 
                 std::shared_ptr<Hypothesis> target_hypothesis = hypothesis;
 
