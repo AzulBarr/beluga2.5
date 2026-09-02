@@ -69,6 +69,9 @@ public:
   /// Increment the insertion count.
   void add_insertion() { num_insertions_++; }
 
+  /// Force finish this submap (e.g., if robot drives out of bounds)
+  void force_finish() { num_insertions_ = 50; }
+
   /// Check if the submap is finished (frozen).
   bool is_finished() const { return is_finished_; }
 
@@ -167,60 +170,73 @@ struct SubmapList {
   std::vector<std::shared_ptr<Submap>> history;
   std::vector<SequentialConstraint> odometry_constraints;
   std::vector<LoopConstraint> loop_constraints;
-  std::shared_ptr<Submap> active_submap;
+  std::vector<std::shared_ptr<Submap>> active_submaps; // Overlapping active submaps
 
-  // Make sure active_submap is independent if shared
+  // Make sure active submaps are independent if shared
   void make_active_unique() {
-    if (active_submap && active_submap.use_count() > 1) {
-      active_submap = active_submap->clone();
+    for (auto& active_submap : active_submaps) {
+      if (active_submap && active_submap.use_count() > 1) {
+        active_submap = active_submap->clone();
+      }
     }
   }
 
-  // Finishes the active submap, generates the immutable odometry constraint, and archives it.
-  void finish_active_submap() {
-    if (!active_submap) return;
+  // Finishes any submap that reached 50 insertions, generates odometry constraints, and archives it.
+  std::vector<size_t> finish_ready_submaps() {
+    std::vector<size_t> finished_indices;
+    auto it = active_submaps.begin();
     
-    active_submap->finish();
+    while (it != active_submaps.end()) {
+      if ((*it)->num_insertions() >= 50) {
+        auto finished_submap = *it;
+        finished_submap->finish();
 
-    // Check if this submap is redundant (represents a revisit to a known authoritative area)
-    bool is_redundant = false;
-    for (size_t i = 0; i < history.size(); ++i) {
-      const auto& old_submap = history[i];
-      if (old_submap->role() != SubmapRole::kAuthoritative) continue;
-      
-      // If the old submap was created very recently, this is continuous exploration, NOT a revisit.
-      // We only consider it a redundant revisit if it overlaps with an older area (e.g., > 3 submaps ago).
-      if (history.size() - i <= 3) continue;
+        // Check if this submap is redundant (represents a revisit to a known authoritative area)
+        bool is_redundant = false;
+        for (size_t i = 0; i < history.size(); ++i) {
+          const auto& old_submap = history[i];
+          if (old_submap->role() != SubmapRole::kAuthoritative) continue;
+          
+          // We only consider it a redundant revisit if it overlaps with an older area (e.g., > 3 submaps ago).
+          if (history.size() - i <= 3) continue;
 
-      double dx = old_submap->global_pose().translation().x() - active_submap->global_pose().translation().x();
-      double dy = old_submap->global_pose().translation().y() - active_submap->global_pose().translation().y();
-      double dist = std::sqrt(dx*dx + dy*dy);
-      
-      // MVP overlap check: origins are within 3.0 meters of each other
-      if (dist < 3.0) {
-        is_redundant = true;
-        break;
+          double dx = old_submap->global_pose().translation().x() - finished_submap->global_pose().translation().x();
+          double dy = old_submap->global_pose().translation().y() - finished_submap->global_pose().translation().y();
+          double dist = std::sqrt(dx*dx + dy*dy);
+          
+          // MVP overlap check: origins are within 3.0 meters of each other
+          if (dist < 3.0) {
+            is_redundant = true;
+            break;
+          }
+        }
+
+        if (is_redundant) {
+          finished_submap->set_role(SubmapRole::kRedundant);
+        } else {
+          finished_submap->set_role(SubmapRole::kAuthoritative);
+        }
+
+        history.push_back(finished_submap);
+
+        if (history.size() >= 2) {
+            SequentialConstraint odom;
+            odom.from_idx = history.size() - 2;
+            odom.to_idx = history.size() - 1;
+            auto pose_a = history[odom.from_idx]->global_pose();
+            auto pose_b = history[odom.to_idx]->global_pose();
+            odom.relative_pose = pose_a.inverse() * pose_b;
+            odometry_constraints.push_back(odom);
+        }
+
+        finished_indices.push_back(history.size() - 1);
+        it = active_submaps.erase(it);
+      } else {
+        ++it;
       }
     }
-
-    if (is_redundant) {
-      active_submap->set_role(SubmapRole::kRedundant);
-    } else {
-      active_submap->set_role(SubmapRole::kAuthoritative);
-    }
-
-    if (!history.empty()) {
-        SequentialConstraint odom;
-        odom.from_idx = history.size() - 1;
-        odom.to_idx = history.size();
-        auto pose_a = history.back()->global_pose();
-        auto pose_b = active_submap->global_pose();
-        odom.relative_pose = pose_a.inverse() * pose_b;
-        odometry_constraints.push_back(odom);
-    }
-
-    history.push_back(active_submap);
-    active_submap = nullptr;
+    
+    return finished_indices;
   }
 };
 

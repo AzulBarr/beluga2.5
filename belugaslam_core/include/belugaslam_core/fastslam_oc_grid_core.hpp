@@ -382,61 +382,56 @@ public:
             if (best_w < 0) continue;  // Dead hypothesis (no particles)
 
             // 2. Ensure we have an active submap, and enforce Copy-On-Write if shared
-            if (!submaps.active_submap) {
-                submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
-            } else {
-                submaps.make_active_unique();
-                
-                // Check if the robot drove outside the physical bounds of the current submap
-                auto T_w_s = submaps.active_submap->global_pose();
+            submaps.make_active_unique();
+            
+            // Spawn new submap if needed (either empty, or the newest submap has 25 insertions)
+            if (submaps.active_submaps.empty() || 
+                submaps.active_submaps.back()->num_insertions() >= 25) {
+                submaps.active_submaps.push_back(std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION));
+            }
+
+            // 3. Insert scan into ALL active submaps (interlocking)
+            for (auto& active_submap : submaps.active_submaps) {
+                // Check if the robot drove outside the physical bounds of this submap
+                auto T_w_s = active_submap->global_pose();
                 auto T_s_r = T_w_s.inverse() * best_pose;
                 int gx0, gy0, dummy_idx;
-                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, submaps.active_submap->grid())) {
-                    // Force finish the submap early and immediately spawn a new one so we don't drop the current scan!
-                    submaps.finish_active_submap();
-                    finished_this_step = true;
-                    submaps.active_submap = std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION);
+                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, active_submap->grid())) {
+                    // Force finish the submap early so we don't drop the current scan or crash
+                    active_submap->force_finish();
+                    continue;
                 }
+
+                auto& lo_grid = active_submap->mutable_grid();
+                
+                clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
+
+                for (const auto& local_point : z) {
+                    auto hit_in_submap = T_s_r * Eigen::Vector2d(local_point.first, local_point.second);
+
+                    int gx1, gy1, hit_idx;
+                    bool impact_in_map = world_to_index(hit_in_submap.x(), hit_in_submap.y(), gx1, gy1, hit_idx, lo_grid);
+
+                    auto points_in_line = bresenham(gx0, gy0, gx1, gy1, lo_grid.width(), lo_grid.height());
+                    for (const auto& cell : points_in_line) {
+                        if (cell.first == gx0 && cell.second == gy0) continue;
+                        
+                        const int idx = cell.second * lo_grid.width() + cell.first;
+                        lo_grid.at(idx) = std::max(lo_grid.at(idx) + l_free_, -5.0f);
+                    }
+                    if (impact_in_map) {
+                        lo_grid.at(hit_idx) = std::min(lo_grid.at(hit_idx) + l_occ_, 5.0f);
+                    }
+                }
+                
+                active_submap->add_insertion();
             }
 
-            auto& lo_grid = submaps.active_submap->mutable_grid();
-            
-            // 3. Compute the robot's pose relative to the active submap (Local SLAM)
-            auto T_w_s = submaps.active_submap->global_pose();
-            auto T_s_r = T_w_s.inverse() * best_pose;
-
-            int gx0, gy0, dummy_idx;
-            world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, lo_grid);
-            
-            clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
-
-            for (const auto& local_point : z) {
-                auto hit_in_submap = T_s_r * Eigen::Vector2d(local_point.first, local_point.second);
-
-                int gx1, gy1, hit_idx;
-                bool impact_in_map = world_to_index(hit_in_submap.x(), hit_in_submap.y(), gx1, gy1, hit_idx, lo_grid);
-
-                auto points_in_line = bresenham(gx0, gy0, gx1, gy1, lo_grid.width(), lo_grid.height());
-                for (const auto& cell : points_in_line) {
-                    if (cell.first == gx0 && cell.second == gy0) continue;
-                    
-                    const int idx = cell.second * lo_grid.width() + cell.first;
-                    lo_grid.at(idx) = std::max(lo_grid.at(idx) + l_free_, -5.0f);
-                }
-                if (impact_in_map) {
-                    lo_grid.at(hit_idx) = std::min(lo_grid.at(hit_idx) + l_occ_, 5.0f);
-                }
-            }
-
-            submaps.active_submap->add_insertion();
-            // Freeze submap after a certain number of insertions
-            if (submaps.active_submap->num_insertions() >= 50 && !finished_this_step) {
-                submaps.finish_active_submap();
-                finished_this_step = true;
-            }
-
-            if (finished_this_step && !submaps.history.empty()) {
-                finished_events.push_back({hypothesis->id, submaps.history.size() - 1});
+            // 4. Finish ready submaps (>= 50 insertions) and generate events
+            auto finished_indices = submaps.finish_ready_submaps();
+            for (size_t idx : finished_indices) {
+                finished_events.push_back({hypothesis->id, idx});
+                finished_this_step = true; // Still used for logging if needed
             }
         }
         return finished_events;
@@ -848,7 +843,9 @@ public:
             if (sm->role() == SubmapRole::kRedundant) continue;
             draw_submap_into_grid(sm, global_lo);
         }
-        draw_submap_into_grid(hypothesis->submaps.active_submap, global_lo);
+        for (const auto& active_submap : hypothesis->submaps.active_submaps) {
+            draw_submap_into_grid(active_submap, global_lo);
+        }
 
         for (auto& val : global_lo.data()) {
             val = std::clamp(val, -5.0f, 5.0f);
@@ -859,8 +856,10 @@ public:
     void compose_tracking_view(const std::shared_ptr<Hypothesis>& hypothesis, const state_type& representative_pose, GridTypeLO& tracking_lo) const {
         std::fill(tracking_lo.data().begin(), tracking_lo.data().end(), 0.0f);
         
-        // 1. Draw active submap
-        draw_submap_into_grid(hypothesis->submaps.active_submap, tracking_lo);
+        // 1. Draw ALL active submaps (interlocking)
+        for (const auto& active_submap : hypothesis->submaps.active_submaps) {
+            draw_submap_into_grid(active_submap, tracking_lo);
+        }
 
         // 2. Draw previous frozen submap (whether authoritative or redundant, it's our immediate tracking past)
         if (!hypothesis->submaps.history.empty()) {
@@ -1187,10 +1186,10 @@ public:
         auto new_last_pose = hist.back()->global_pose();
         auto delta_tf = new_last_pose * old_last_pose.inverse();
 
-        // 7. Apply correction delta to the active submap to preserve relative anchoring
-        if (submap_list.active_submap) {
-            submap_list.make_active_unique();
-            submap_list.active_submap->set_global_pose(delta_tf * submap_list.active_submap->global_pose());
+        // 7. Apply correction delta to the active submaps to preserve relative anchoring
+        submap_list.make_active_unique();
+        for (auto& active_submap : submap_list.active_submaps) {
+            active_submap->set_global_pose(delta_tf * active_submap->global_pose());
         }
 
         // 8. Apply correction delta to all particles in THIS hypothesis
