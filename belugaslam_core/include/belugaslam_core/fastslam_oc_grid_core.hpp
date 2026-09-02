@@ -734,9 +734,13 @@ public:
                     target_hypothesis = std::make_shared<Hypothesis>(*hypothesis); // Copy history & properties
                     target_hypothesis->id = next_hypothesis_id_++;
                     
-                    // The new hypothesis explicitly SHARES the exact same active submap.
+                    // The new hypothesis explicitly SHARES the exact same active submaps.
                     // Copy-on-Write (COW) is enforced right before inserting the scan in update_occupancy_grid.
-                    target_hypothesis->submaps.active_submap = hypothesis->submaps.active_submap;
+                    target_hypothesis->submaps.odometry_constraints = hypothesis->submaps.odometry_constraints;
+                    target_hypothesis->submaps.loop_constraints = hypothesis->submaps.loop_constraints;
+                    target_hypothesis->submaps.active_submaps = hypothesis->submaps.active_submaps;
+                    target_hypothesis->loop_closure_cooldown = hypothesis->loop_closure_cooldown;
+                    target_hypothesis->optimized_loops_count = hypothesis->optimized_loops_count;
                     hypotheses_.push_back(target_hypothesis);
                     
                     std::cout << "\n[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id 
@@ -1076,9 +1080,9 @@ public:
                                 constraint.information = Eigen::Matrix3d::Identity();
                                 new_hypothesis->submaps.loop_constraints.push_back(constraint);
 
-                                // Throw away the drifted active submap because it overlaps with the old visited map!
+                                // Throw away the drifted active submaps because it overlaps with the old visited map!
                                 // The system will automatically create a fresh one at the corrected pose on the next scan.
-                                new_hypothesis->submaps.active_submap = nullptr;
+                                new_hypothesis->submaps.active_submaps.clear();
                                 
                                 hypotheses_.push_back(new_hypothesis);
 
