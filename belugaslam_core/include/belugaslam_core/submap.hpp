@@ -35,9 +35,14 @@ public:
     grid_ = std::make_shared<LogOddsGrid>(width, height, resolution, grid_local_origin);
   }
 
-  /// Get the local LogOddsGrid.
-  std::shared_ptr<LogOddsGrid> grid() { return grid_; }
-  std::shared_ptr<const LogOddsGrid> grid() const { return grid_; }
+  /// Get the mutable grid (only if not finished).
+  LogOddsGrid& mutable_grid() {
+    if (is_finished_) throw std::runtime_error("Attempted to mutate a finished submap grid");
+    return *grid_;
+  }
+
+  /// Get the immutable grid.
+  const LogOddsGrid& grid() const { return *grid_; }
 
   /// Get the global pose of this submap.
   const Sophus::SE2d& global_pose() const { return global_pose_; }
@@ -63,7 +68,12 @@ public:
   /// Deep copy the submap (used for copy-on-write in particle filter)
   std::shared_ptr<Submap> clone() const {
     auto new_submap = std::make_shared<Submap>(*this);
-    new_submap->grid_ = std::make_shared<LogOddsGrid>(*this->grid_);
+    if (!is_finished_) {
+        // Deep copy the active grid so divergent hypotheses don't clobber each other
+        new_submap->grid_ = std::make_shared<LogOddsGrid>(*this->grid_);
+    }
+    // If finished, grid_ is implicitly shallow-copied by default copy constructor,
+    // safely sharing the immutable frozen grid geometry across all cloned hypotheses.
     return new_submap;
   }
 

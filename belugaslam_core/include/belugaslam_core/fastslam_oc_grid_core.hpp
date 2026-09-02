@@ -391,7 +391,7 @@ public:
                 auto T_w_s = submaps.active_submap->global_pose();
                 auto T_s_r = T_w_s.inverse() * best_pose;
                 int gx0, gy0, dummy_idx;
-                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, *(submaps.active_submap->grid()))) {
+                if (!world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, submaps.active_submap->grid())) {
                     // Force finish the submap early and immediately spawn a new one so we don't drop the current scan!
                     submaps.finish_active_submap();
                     finished_this_step = true;
@@ -399,7 +399,7 @@ public:
                 }
             }
 
-            auto& lo_grid = *(submaps.active_submap->grid());
+            auto& lo_grid = submaps.active_submap->mutable_grid();
             
             // 3. Compute the robot's pose relative to the active submap (Local SLAM)
             auto T_w_s = submaps.active_submap->global_pose();
@@ -818,7 +818,7 @@ public:
 
     void draw_submap_into_grid(const std::shared_ptr<Submap>& sm, GridTypeLO& target_lo) const {
         if (!sm) return;
-        const auto& local_lo = *sm->grid();
+        const auto& local_lo = sm->grid();
         for (int ly = 0; ly < local_lo.height(); ++ly) {
             for (int lx = 0; lx < local_lo.width(); ++lx) {
                 float val = local_lo.at(lx, ly);
@@ -962,8 +962,8 @@ public:
                         for (const auto& pt : z_sparse) {
                             auto hit = T_submap_robot * Eigen::Vector2d(pt.first, pt.second);
                             int gx, gy, hit_idx;
-                            if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, *(old_submap->grid()))) {
-                                score += old_submap->grid()->at(hit_idx);
+                            if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, old_submap->grid())) {
+                                score += old_submap->grid().at(hit_idx);
                             }
                         }
                         if (score > best_score) {
