@@ -1088,34 +1088,52 @@ public:
                 auto old_submap = history[i];
                 if (old_submap->role() == SubmapRole::kRedundant) continue;
                 
-                double dx = representative_pose.translation().x() - old_submap->global_pose().translation().x();
-                double dy = representative_pose.translation().y() - old_submap->global_pose().translation().y();
+                auto query_submap = history[event.query_idx];
+                Sophus::SE2d T_ref_query_guess = old_submap->global_pose().inverse() * query_submap->global_pose();
+                
+                double dx = T_ref_query_guess.translation().x();
+                double dy = T_ref_query_guess.translation().y();
                 double distance = std::sqrt(dx*dx + dy*dy);
 
                 if (distance < 5.0) {
                     std::cout << "\n[LOOP CLOSURE] Hipotesis " << hypothesis->id 
                               << ": Candidato por PROXIMIDAD! Submapa " << i 
-                              << " detectado a " << distance << "m. Iniciando escaneo correlativo..." << std::endl;
+                              << " detectado a " << distance << "m. Iniciando alineacion submapa-a-submapa..." << std::endl;
 
-                    // 3. Fast Correlative Scan Matching (FCSM) - Coarse Search
+                    // Extract point cloud from the query submap
+                    std::vector<Eigen::Vector2d> query_points;
+                    const auto& q_grid = query_submap->grid();
+                    for (int y = 0; y < q_grid.height(); ++y) {
+                        for (int x = 0; x < q_grid.width(); ++x) {
+                            if (q_grid.at(x, y) > 0.5f) {
+                                double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
+                                double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
+                                query_points.push_back({local_x, local_y});
+                            }
+                        }
+                    }
+
+                    if (query_points.empty()) continue;
+
                     double best_score = -std::numeric_limits<double>::infinity();
-                    state_type best_match = representative_pose;
+                    Sophus::SE2d best_match = T_ref_query_guess;
                     double best_sx = 0, best_sy = 0, best_stheta = 0;
 
                     auto evaluate_pose = [&](double sx, double sy, double stheta) {
-                        state_type candidate{
-                            Sophus::SO2d{representative_pose.so2().log() + stheta},
-                            Eigen::Vector2d{representative_pose.translation().x() + sx, representative_pose.translation().y() + sy}
-                        };
-                        Sophus::SE2d T_submap_robot = old_submap->global_pose().inverse() * candidate;
+                        Sophus::SE2d candidate = T_ref_query_guess * Sophus::SE2d{Sophus::SO2d{stheta}, Eigen::Vector2d{sx, sy}};
                         double score = 0.0;
-                        for (const auto& pt : z_sparse) {
-                            auto hit = T_submap_robot * Eigen::Vector2d(pt.first, pt.second);
+                        for (const auto& pt : query_points) {
+                            Eigen::Vector2d hit = candidate * pt;
                             int gx, gy, hit_idx;
                             if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, old_submap->grid())) {
                                 score += old_submap->grid().at(hit_idx);
+                            } else {
+                                score -= 5.0; // Out-of-bounds penalty
                             }
                         }
+                        // Normalize by number of points so score is stable across different submaps
+                        score = score / query_points.size();
+
                         if (score > best_score) {
                             best_score = score;
                             best_match = candidate;
@@ -1152,12 +1170,10 @@ public:
                         }
                     }
 
-                    double avg_score = best_score / z_sparse.size();
-                    if (avg_score > 0.5) {
-                        std::cout << "[LOOP CLOSURE] Hipotesis " << hypothesis->id 
-                                  << ": ALINEACION EXITOSA! Score: " << avg_score 
-                                  << ". Creando nueva hipotesis bifurcada..." << std::endl;
-
+                    // A good submap match should have a high normalized score (e.g. > 1.0)
+                    if (best_score > 1.0) {
+                        std::cout << " -> Match EXITOSO! Score normalizado: " << best_score << std::endl;
+                        
                         // 3. Move worst 20% of particles from this hypothesis
                         std::vector<size_t> h_indices;
                         for (size_t pi = 0; pi < particles_.size(); ++pi) {
@@ -1183,17 +1199,18 @@ public:
                                 constraint.id = new_hypothesis->submaps.loop_constraints.size();
                                 constraint.query_idx = new_hypothesis->submaps.history.size() - 1; // The latest finished submap
                                 constraint.reference_idx = i;
-                                // Calculate the rigid correction delta that snaps the drifted robot to the true aligned pose
-                                auto correction_delta = best_match * representative_pose.inverse();
                                 
-                                // The query submap suffered the same drift as the robot. Apply the delta to find its true pose.
-                                auto query_submap = new_hypothesis->submaps.history.back();
-                                auto true_query_pose = correction_delta * query_submap->global_pose();
-
-                                // The relative transform constraint is from the reference submap to the true query submap
-                                constraint.T_reference_query = old_submap->global_pose().inverse() * true_query_pose;
+                                // Direct submap-to-submap match result
+                                constraint.T_reference_query = best_match;
                                 constraint.information = Eigen::Matrix3d::Identity();
                                 new_hypothesis->submaps.loop_constraints.push_back(constraint);
+
+                                // The true global pose of the query submap is now known
+                                auto query_submap = new_hypothesis->submaps.history.back();
+                                Sophus::SE2d true_query_pose = old_submap->global_pose() * best_match;
+                                
+                                // Calculate the rigid correction delta that snaps the drifted map to the true aligned pose
+                                Sophus::SE2d correction_delta = true_query_pose * query_submap->global_pose().inverse();
 
                                 // Throw away the drifted active submaps because it overlaps with the old visited map!
                                 // The system will automatically create a fresh one at the corrected pose on the next scan.
@@ -1210,8 +1227,8 @@ public:
 
                                 for (size_t k = 0; k < to_move; ++k) {
                                     auto it = particles_.begin() + h_indices[k];
-                                    // Teleport particle
-                                    std::get<0>(*it) = best_match * representative_pose.inverse() * std::get<0>(*it);
+                                    // Teleport particle using the global correction delta
+                                    std::get<0>(*it) = correction_delta * std::get<0>(*it);
                                     // Assign to new hypothesis
                                     std::get<2>(*it) = new_hypothesis;
                                     // Boost weight
