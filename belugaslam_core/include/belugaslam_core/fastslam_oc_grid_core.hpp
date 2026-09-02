@@ -856,7 +856,14 @@ public:
 
                 int gx, gy, g_idx;
                 if (world_to_index(global_pt.x(), global_pt.y(), gx, gy, g_idx, target_lo)) {
-                    target_lo.at(g_idx) += val;
+                    float current = target_lo.at(g_idx);
+                    if (val > 0.0f) {
+                        // Maximize occupied space confidence
+                        target_lo.at(g_idx) = std::max(current, val);
+                    } else if (val < 0.0f && current <= 0.0f) {
+                        // Maximize free space confidence (negative direction), but don't overwrite walls
+                        target_lo.at(g_idx) = std::min(current, val);
+                    }
                 }
             }
         }
