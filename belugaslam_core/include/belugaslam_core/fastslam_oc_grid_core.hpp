@@ -134,19 +134,14 @@ struct FastSLAMParams {
     /// \brief Scaling factor for the endpoint score to tune particle filter confidence.
     double likelihood_scaling_factor = 0.05;
 
-    /// Cartographer-like overlapping submap lifecycle.
-    int submap_num_range_data = 30;
-    int submap_overlap_range_data = 15;
-
-    /// \brief Spatial guard for fixed-size submaps.
-    /// Cartographer grows its grids on demand; ours are a fixed SUBMAP_COLS x SUBMAP_ROWS
-    /// box, so the insertion counters alone do not bound how far the robot travels inside
-    /// one submap. A new submap starts once the robot leaves `submap_creation_distance`
-    /// around the newest active submap origin, and an active submap is frozen once the
-    /// robot leaves `submap_abandon_distance`, beyond which its grid can no longer receive
-    /// useful range data. Defaults are 40% and 100% of the submap half-extent.
-    double submap_creation_distance = 0.4 * (SUBMAP_COLS * GRID_RESOLUTION / 2.0);
-    double submap_abandon_distance = SUBMAP_COLS * GRID_RESOLUTION / 2.0;
+    /// \brief Cartographer's overlapping submap lifecycle, driven by one number.
+    /// A submap is created, and once it has received `submap_num_range_data` scans the
+    /// next one is created; from then on both receive every scan. The older one is
+    /// finished when it reaches twice that count, at which point the newer one has
+    /// reached the count itself and starts the next submap. Every finished submap has
+    /// therefore seen 2 * submap_num_range_data scans, and consecutive submaps overlap
+    /// by exactly half.
+    int submap_num_range_data = 15;
 
     /// Motion filter for retaining graph scan nodes (not every processed scan).
     double keyframe_min_translation = 0.15;
@@ -205,14 +200,7 @@ public:
                       params.spatial_resolution_theta},
           params_(params){
 
-      params_.submap_num_range_data = std::max(2, params_.submap_num_range_data);
-      params_.submap_overlap_range_data = std::clamp(
-          params_.submap_overlap_range_data, 1, params_.submap_num_range_data - 1);
-      // A creation radius below the node's motion gate would spawn a submap per scan.
-      params_.submap_creation_distance = std::max(0.5, params_.submap_creation_distance);
-      // Abandoning must always happen strictly after creating, or the two thrash.
-      params_.submap_abandon_distance = std::max(
-          1.5 * params_.submap_creation_distance, params_.submap_abandon_distance);
+      params_.submap_num_range_data = std::max(1, params_.submap_num_range_data);
       params_.max_points_per_scan_node =
           std::max<std::size_t>(1, params_.max_points_per_scan_node);
       params_.loop_max_candidates =
@@ -232,10 +220,11 @@ public:
         std::get<1>(p) = beluga::Weight(1.0);
         std::get<2>(p) = initial_hypothesis;  // All particles share the same hypothesis
       }
-      best_oc_grid_ = GridTypeOC();
+      // Start at the configured default extent, so the first publications before any
+      // submap exists look exactly as they did before the views became dynamic.
       best_lo_grid_ = GridTypeLO();
-      local_oc_grid_ = GridTypeOC();
       local_lo_grid_ = GridTypeLO();
+      sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
       best_pose_ = state_type{};
 
     }
@@ -608,21 +597,22 @@ public:
 
             submaps.make_active_unique();
 
-            // Overlapping active submaps, with half-submap staggering by default. The
-            // insertion counter is not enough on its own: it bounds how many scans a
-            // submap receives, not how far the robot travels while receiving them, so a
-            // fast robot could leave the fixed grid box long before reaching the count.
-            // The travelled distance is therefore a second, independent trigger.
-            bool needs_new_submap = submaps.active_submaps.empty();
-            if (!needs_new_submap) {
-                const auto& newest = submaps.active_submaps.back();
-                const double distance_from_origin =
-                    (best_pose.translation() - newest->global_pose().translation()).norm();
-                needs_new_submap =
-                    newest->num_insertions() >= params_.submap_overlap_range_data ||
-                    distance_from_origin >= params_.submap_creation_distance;
-            }
+            // Cartographer's lifecycle, driven only by the scan count: the next submap
+            // starts once the newest one has received submap_num_range_data scans, and
+            // both then receive every scan until the older reaches twice the count and
+            // is finished below. Grids grow to fit the scan, so nothing about the
+            // lifecycle depends on how far the robot travelled.
+            const bool needs_new_submap =
+                submaps.active_submaps.empty() ||
+                submaps.active_submaps.back()->num_insertions() >=
+                    params_.submap_num_range_data;
             if (needs_new_submap) {
+                // Guard for the at-most-two-active invariant. The count-driven path
+                // never trips it: the front reaches twice the count and is finished on
+                // the scan before the newest reaches the count and starts the next one.
+                for (SubmapId id : submaps.make_room_for_new_submap(kMaxActiveSubmaps)) {
+                    finished_events.push_back({hypothesis->id, id});
+                }
                 submaps.active_submaps.push_back(std::make_shared<Submap>(
                     submaps.next_submap_id++, best_pose, SUBMAP_COLS, SUBMAP_ROWS,
                     GRID_RESOLUTION));
@@ -653,28 +643,17 @@ public:
                         5.0, 8.0, ConstraintTag::kIntraSubmap, 1.0, 1.0});
                 }
 
-                int gx0, gy0, dummy_idx;
-                world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, active_submap->grid());
                 auto& lo_grid = active_submap->mutable_grid();
-                clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
 
-                for (const auto& local_point : z) {
-                    auto hit_in_submap = T_s_r * Eigen::Vector2d(local_point.first, local_point.second);
+                // Grow, hits, misses, one touch per cell, hits win. See the helper.
+                ScanInsertionParams insertion_params;
+                insertion_params.l_occ = l_occ_;
+                insertion_params.l_free = l_free_;
+                insertion_params.clamp = 5.0f;
+                insertion_params.robot_radius = ROBOT_RADIUS;
+                insert_scan_into_submap_grid(
+                    lo_grid, T_s_r, z, insertion_params, scan_hit_cells_, scan_miss_cells_);
 
-                    int gx1, gy1, hit_idx;
-                    bool impact_in_map = world_to_index(hit_in_submap.x(), hit_in_submap.y(), gx1, gy1, hit_idx, lo_grid);
-
-                    auto points_in_line = bresenham(gx0, gy0, gx1, gy1, lo_grid.width(), lo_grid.height());
-                    for (const auto& cell : points_in_line) {
-                        if (cell.first == gx0 && cell.second == gy0) continue;
-                        
-                        const int idx = cell.second * lo_grid.width() + cell.first;
-                        lo_grid.at(idx) = std::max(lo_grid.at(idx) + l_free_, -5.0f);
-                    }
-                    if (impact_in_map) {
-                        lo_grid.at(hit_idx) = std::min(lo_grid.at(hit_idx) + l_occ_, 5.0f);
-                    }
-                }
                 active_submap->add_insertion();
             }
 
@@ -684,14 +663,10 @@ public:
                 submaps.has_last_keyframe_pose = true;
             }
 
-            for (SubmapId id : submaps.finish_ready_submaps(params_.submap_num_range_data)) {
-                finished_events.push_back({hypothesis->id, id});
-            }
-            // Without this the distance trigger alone would let active submaps pile up:
-            // a submap the robot has driven out of keeps its slot until it reaches
-            // submap_num_range_data, even though every raycast now falls outside it.
-            for (SubmapId id : submaps.finish_abandoned_submaps(
-                     best_pose.translation(), params_.submap_abandon_distance)) {
+            // A submap is finished after twice the count, which is exactly when the
+            // submap that started at its halfway point has itself reached the count.
+            for (SubmapId id :
+                 submaps.finish_ready_submaps(2 * params_.submap_num_range_data)) {
                 finished_events.push_back({hypothesis->id, id});
             }
         }
@@ -1032,27 +1007,6 @@ public:
         }
     }
 
-    /// Bresenham's 2D line drawing algorithm.
-    std::vector<std::pair<int, int>> bresenham(int x0, int y0, int x1, int y1, int max_x, int max_y) const {
-        std::vector<std::pair<int, int>> line;
-        int dx = std::abs(x1 - x0);
-        int dy = std::abs(y1 - y0);
-        int sx = (x0 < x1) ? 1 : -1;
-        int sy = (y0 < y1) ? 1 : -1;
-        int err = dx - dy;
-
-        while (true) {
-            if (x0 == x1 && y0 == y1) break;
-            if (x0 >= 0 && x0 < max_x && y0 >= 0 && y0 < max_y) {
-                line.push_back({x0, y0});
-            }
-            int e2 = 2 * err;
-            if (e2 > -dy) { err -= dy; x0 += sx; }
-            if (e2 < dx) { err += dx; y0 += sy; }
-        }
-        return line;
-    }
-
     /// Converts world coordinates to grid indices and linear index for map access.
     inline bool world_to_index(double wx, double wy, int &gx, int &gy, int &index, const GridTypeLO& grid) const {
         gx = static_cast<int>(std::floor((wx - grid.origin_x()) / grid.resolution()));
@@ -1065,11 +1019,18 @@ public:
     }
 
     /// Synchronizes the occupancy grid representation with the log-odds grid by applying a thresholding function.
-    void sync_log_odds_to_occupancy(const GridTypeLO& log_odds_grid, GridTypeOC& out_oc) {
-        auto& oc_data = out_oc.data();
+    void sync_log_odds_to_occupancy(const GridTypeLO& log_odds_grid,
+                                    DynamicOccupancyGrid& out_oc) {
         const auto& lo_data = log_odds_grid.data();
         constexpr float OCCUPIED_THRESH = 0.65f;
         constexpr float FREE_THRESH     = 0.35f; //0.196
+
+        // The occupancy view always adopts the extent of the log-odds view it mirrors, so
+        // the two can never disagree about which rectangle of the world they describe.
+        out_oc.reset(log_odds_grid.width(), log_odds_grid.height(),
+                     log_odds_grid.resolution(), log_odds_grid.origin(),
+                     static_cast<std::int8_t>(UNKNOWN));
+        auto& oc_data = out_oc.data();
 
         for (size_t i = 0; i < lo_data.size(); ++i) {
             if (std::abs(lo_data[i]) < 0.01f) {
@@ -1081,28 +1042,7 @@ public:
         }
     }
 
-    /// Clears the robot's footprint area in the log-odds grid to mitigate self-mapping noise.
-    void clear_robot_footprint(double radius, int rx, int ry, GridTypeLO& log_odds_grid){
-        int r_cells = static_cast<int>(radius / GRID_RESOLUTION);
-
-        for (int dx = -r_cells; dx <= r_cells; ++dx)
-        {
-            for (int dy = -r_cells; dy <= r_cells; ++dy)
-            {
-                int x = rx + dx;
-                int y = ry + dy;
-
-                if (x < 0 || x >= (int)log_odds_grid.width() ||
-                    y < 0 || y >= (int)log_odds_grid.height())
-                    continue;
-
-                int idx = y * log_odds_grid.width() + x;
-                log_odds_grid.at(idx) = -5.0f;
-            }
-        }
-    }
-
-    GridTypeOC best_occupancy_grid() const {
+    DynamicOccupancyGrid best_occupancy_grid() const {
         return best_oc_grid_;
     }
 
@@ -1144,10 +1084,37 @@ public:
         }
     }
 
-    /// Composites the full history of submaps for RViz publication
+    /// Composites the full history of submaps for RViz publication.
+    /**
+     * The view is sized to the hypothesis it is drawn from rather than to a fixed
+     * rectangle, so a trajectory that leaves the configured bounds is published whole
+     * instead of clipped. This is a derived view only: nothing here feeds back into the
+     * SLAM state, which lives entirely in the submaps and the pose graph.
+     */
     void compose_publication_view(const std::shared_ptr<Hypothesis>& hypothesis, GridTypeLO& global_lo) const {
-        std::fill(global_lo.data().begin(), global_lo.data().end(), 0.0f);
-        
+        /// Unknown border kept around the map so it does not end flush against a wall.
+        constexpr double kPublicationMargin = 1.0;
+        /// A diverged pose must not be able to request an unbounded allocation.
+        constexpr int kMaxCellsPerSide = 8000;
+
+        double min_x = 0.0, min_y = 0.0, max_x = 0.0, max_y = 0.0;
+        if (hypothesis->submaps.bounding_box(min_x, min_y, max_x, max_y)) {
+            const double resolution = global_lo.resolution();
+            min_x -= kPublicationMargin;
+            min_y -= kPublicationMargin;
+            max_x += kPublicationMargin;
+            max_y += kPublicationMargin;
+            const int width = std::min(kMaxCellsPerSide,
+                std::max(1, static_cast<int>(std::ceil((max_x - min_x) / resolution))));
+            const int height = std::min(kMaxCellsPerSide,
+                std::max(1, static_cast<int>(std::ceil((max_y - min_y) / resolution))));
+            global_lo.reset(width, height,
+                            Sophus::SE2d{Sophus::SO2d{0.0}, Eigen::Vector2d{min_x, min_y}});
+        } else {
+            // No submap yet: keep the current extent and just clear it.
+            global_lo.reset(global_lo.width(), global_lo.height(), global_lo.origin());
+        }
+
         for (const auto& sm : hypothesis->submaps.history) {
             draw_submap_into_grid(sm, global_lo);
         }
@@ -1494,15 +1461,24 @@ private:
     MeasurementModel measurement_model_;
     FastSLAMParams params_;
 
+    /// Cartographer's structural invariant: one submap being filled and one being
+    /// started, both receiving every accepted scan. Not a tuning knob.
+    static constexpr std::size_t kMaxActiveSubmaps = 2;
+
     /// Log-Odds constants for occupancy grid updates.
     const float l_occ_ = 1.2f;
     const float l_free_ = -0.2f;
 
+    /// Scratch for one scan insertion, reused so the per-scan cost is not allocation.
+    std::vector<int> scan_hit_cells_;
+    std::vector<int> scan_miss_cells_;
+
     beluga::spatial_hash<state_type> spatial_hasher_;
 
-    GridTypeOC best_oc_grid_;
+    /// Derived publication views. Both are rebuilt from the best hypothesis every scan
+    /// and sized to it; neither is part of the SLAM representation.
+    DynamicOccupancyGrid best_oc_grid_;
     GridTypeLO best_lo_grid_;
-    GridTypeOC local_oc_grid_;
     GridTypeLO local_lo_grid_;
     state_type best_pose_;
 

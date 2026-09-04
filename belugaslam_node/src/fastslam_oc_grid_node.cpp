@@ -23,10 +23,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("alpha4", 0.05);
     this->declare_parameter("alpha5", 0.1);
     this->declare_parameter("likelihood_scaling_factor", 0.05);
-    this->declare_parameter("submap_num_range_data", 50);
-    this->declare_parameter("submap_overlap_range_data", 25);
-    this->declare_parameter("submap_creation_distance", 2.4);
-    this->declare_parameter("submap_abandon_distance", 6.0);
+    this->declare_parameter("submap_num_range_data", 15);
     this->declare_parameter("keyframe_min_translation", 0.15);
     this->declare_parameter("keyframe_min_rotation", 5.0 * Sophus::Constants<double>::pi() / 180.0);
     this->declare_parameter("max_points_per_scan_node", 180);
@@ -58,7 +55,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     spatial_split_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/spatial_split_markers", rclcpp::QoS(1).transient_local());
     trajectory_msg_.header.frame_id = "map";
     
-    RCLCPP_INFO(this->get_logger(), "BelugaSLAM Node initialized and waiting for data...");
+    std::cout << "\033[1;32m[BelugaSLAM] Node initialized and waiting for data...\033[0m" << std::endl;
 }
 
 void BelugaSLAMNode::setup_slam() {
@@ -88,9 +85,6 @@ void BelugaSLAMNode::setup_slam() {
     params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
     params.likelihood_scaling_factor = get_parameter("likelihood_scaling_factor").as_double();
     params.submap_num_range_data = get_parameter("submap_num_range_data").as_int();
-    params.submap_overlap_range_data = get_parameter("submap_overlap_range_data").as_int();
-    params.submap_creation_distance = get_parameter("submap_creation_distance").as_double();
-    params.submap_abandon_distance = get_parameter("submap_abandon_distance").as_double();
     params.keyframe_min_translation = get_parameter("keyframe_min_translation").as_double();
     params.keyframe_min_rotation = get_parameter("keyframe_min_rotation").as_double();
     params.max_points_per_scan_node = static_cast<std::size_t>(get_parameter("max_points_per_scan_node").as_int());
@@ -110,7 +104,8 @@ void BelugaSLAMNode::setup_slam() {
     /// BelugaSLAM instance
     slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params);
 
-    RCLCPP_INFO(this->get_logger(), "SLAM setup completed with %zu - %zu particles", params.min_particles, params.max_particles); 
+    std::cout << "\033[1;32m[BelugaSLAM] SLAM setup completed with " << params.min_particles
+              << " - " << params.max_particles << " particles\033[0m" << std::endl;
 }
 
 void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {    
@@ -140,33 +135,33 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         const auto update_start_time = std::chrono::high_resolution_clock::now();
         auto t0 = std::chrono::high_resolution_clock::now();
         slam_->sample_motion_model(u);
-        RCLCPP_INFO(this->get_logger(), "Sample completed");
+        std::cout << "\033[2m  . Sample completed\033[0m" << std::endl;
         auto t1 = std::chrono::high_resolution_clock::now();
 
         slam_->measurement_model_map(z);
-        RCLCPP_INFO(this->get_logger(), "Weights calculated");
+        std::cout << "\033[2m  . Weights calculated\033[0m" << std::endl;
         auto t2 = std::chrono::high_resolution_clock::now();
 
         auto finished_events = slam_->update_occupancy_grid(z);
-        RCLCPP_INFO(this->get_logger(), "Occupancy grid updated");
+        std::cout << "\033[2m  . Occupancy grid updated\033[0m" << std::endl;
 
         slam_->post_update(z, finished_events);
-        RCLCPP_INFO(this->get_logger(), "Post update completed");
+        std::cout << "\033[2m  . Post update completed\033[0m" << std::endl;
         auto t3 = std::chrono::high_resolution_clock::now();
 
         slam_->resample();
-        RCLCPP_INFO(this->get_logger(), "Resample completed");
+        std::cout << "\033[2m  . Resample completed\033[0m" << std::endl;
         auto t4 = std::chrono::high_resolution_clock::now();
 
         compute_se2_covariance();
 
         publish_particles(msg->header.stamp);
-        RCLCPP_INFO(this->get_logger(), "Particles published");
+        std::cout << "\033[2m  . Particles published\033[0m" << std::endl;
         auto t5 = std::chrono::high_resolution_clock::now();
         
         compute_entropy();
         publish_best_pose(msg->header.stamp);
-        RCLCPP_INFO(this->get_logger(), "Best pose published");
+        std::cout << "\033[2m  . Best pose published\033[0m" << std::endl;
 
         publish_map();
         publish_loop_closure_markers(msg->header.stamp);
@@ -175,11 +170,11 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
             publish_uncertainty_map();
         }
         it ++;
-        RCLCPP_INFO(this->get_logger(), "Map published");
+        std::cout << "\033[2m  . Map published\033[0m" << std::endl;
         auto t6 = std::chrono::high_resolution_clock::now();
 
         broadcast_map_to_odom(msg->header.stamp, current_odom);
-        RCLCPP_INFO(this->get_logger(), "Map to odom TF published");
+        std::cout << "\033[2m  . Map to odom TF published\033[0m" << std::endl;
         auto t7 = std::chrono::high_resolution_clock::now();
 
         const auto update_stop_time = std::chrono::high_resolution_clock::now();
@@ -193,16 +188,20 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         auto d_particles = std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count();
         auto d_tf = std::chrono::duration_cast<std::chrono::milliseconds>(t7 - t6).count();
 
-        RCLCPP_INFO(this->get_logger(),
-            "Times [ms] | sample: %ld | weight: %ld | resample: %ld | map: %ld | pub_map: %ld | particles: %ld | tf: %ld",
-            d_sample, d_weight, d_resample, d_map, d_pub_map, d_particles, d_tf);
+        std::cout << "\033[1;36mTimes [ms] | sample: " << d_sample
+                  << " | weight: " << d_weight
+                  << " | resample: " << d_resample
+                  << " | map: " << d_map
+                  << " | pub_map: " << d_pub_map
+                  << " | particles: " << d_particles
+                  << " | tf: " << d_tf << "\033[0m" << std::endl;
 
-        RCLCPP_INFO(
-            get_logger(), "Particle filter update iteration stats: %ld particles | %ld active hypotheses | %ld submaps | %.3fms",
-            slam_->particles().size(),
-            slam_->get_active_hypotheses_count(),
-            slam_->get_submaps_count(),
-            std::chrono::duration<double, std::milli>(update_duration).count());
+        std::cout << "\033[1;36mUpdate stats | " << slam_->particles().size() << " particles | "
+                  << slam_->get_active_hypotheses_count() << " active hypotheses | "
+                  << slam_->get_submaps_count() << " submaps | " << std::fixed
+                  << std::setprecision(3)
+                  << std::chrono::duration<double, std::milli>(update_duration).count()
+                  << " ms\033[0m" << std::defaultfloat << std::endl;
 
     } catch (tf2::TransformException &ex) {
         RCLCPP_WARN(this->get_logger(), "TF Error: %s", ex.what());

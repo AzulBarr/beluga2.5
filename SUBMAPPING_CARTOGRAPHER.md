@@ -10,13 +10,23 @@ estructura inspirada en Cartographer:
 - Ceres optimiza conjuntamente las poses de nodos y submapas;
 - las aristas entre nodos consecutivos conservan el prior de la trayectoria local.
 
-Los submapas siguen solapándose: el siguiente comienza al llegar a
-`submap_overlap_range_data`, y el anterior se congela al llegar a
-`submap_num_range_data`.
+El ciclo de vida de los submapas es el de Cartographer y lo gobierna un solo número.
+Se crea un submapa; cuando recibió `submap_num_range_data` scans se crea el siguiente,
+y a partir de ahí los dos reciben todos los scans; el más viejo se congela al llegar al
+doble de esa cuenta, que es exactamente cuando el más nuevo llegó a la cuenta y arranca
+el que sigue. Cada submapa congelado vio `2 * submap_num_range_data` scans y el solape
+entre consecutivos es de la mitad.
+
+Las grillas de submapa crecen sobre demanda (`LogOddsGrid::grow_to_include`), así que el
+ciclo de vida no depende de ninguna extensión espacial: depende solo de la cuenta de
+scans, como en Cartographer. Cada hipótesis tiene como máximo dos submapas activos y
+todo scan aceptado se inserta en los dos.
 
 ## Controles de costo
 
-- El filtro de movimiento evita guardar todos los scans.
+- El filtro de movimiento acota el tamaño del grafo, no la calidad de las grillas:
+  todos los scans se insertan en los submapas activos, pero solo los keyframes crean
+  nodo de trayectoria y restricciones.
 - Cada scan node almacena como máximo `max_points_per_scan_node` endpoints.
 - Los datos del scan son inmutables y se comparten entre hipótesis.
 - Cuando un nodo ya no pertenece a ningún submapa activo se libera su point cloud;
@@ -32,8 +42,7 @@ Los submapas siguen solapándose: el siguiente comienza al llegar a
 
 | Parámetro | Valor inicial |
 |---|---:|
-| `submap_num_range_data` | 50 |
-| `submap_overlap_range_data` | 25 |
+| `submap_num_range_data` | 15 (congela a 30) |
 | `keyframe_min_translation` | 0.15 m |
 | `keyframe_min_rotation` | 0.0873 rad |
 | `max_points_per_scan_node` | 180 |

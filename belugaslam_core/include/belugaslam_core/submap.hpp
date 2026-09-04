@@ -18,6 +18,128 @@
 using SubmapId = std::uint64_t;
 using ScanNodeId = std::uint64_t;
 
+/** Log-odds increments and clamps applied by one scan insertion. */
+struct ScanInsertionParams {
+  float l_occ = 1.2F;
+  float l_free = -0.2F;
+  float clamp = 5.0F;
+  double robot_radius = 0.0;
+};
+
+/** Bresenham line from (x0,y0) toward (x1,y1), excluding the endpoint, clipped to the grid. */
+inline std::vector<std::pair<int, int>> bresenham_line(
+    int x0, int y0, int x1, int y1, int max_x, int max_y) {
+  std::vector<std::pair<int, int>> line;
+  const int dx = std::abs(x1 - x0);
+  const int dy = std::abs(y1 - y0);
+  const int sx = (x0 < x1) ? 1 : -1;
+  const int sy = (y0 < y1) ? 1 : -1;
+  int err = dx - dy;
+
+  while (true) {
+    if (x0 == x1 && y0 == y1) break;
+    if (x0 >= 0 && x0 < max_x && y0 >= 0 && y0 < max_y) line.push_back({x0, y0});
+    const int e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+  return line;
+}
+
+/**
+ * \brief Inserts one scan into a submap grid with Cartographer's update semantics.
+ *
+ * The sequence is: grow the grid to fit the whole scan, mark the returns as hits, ray
+ * cast the free space as misses, and touch every cell at most once. Nothing is written
+ * until the entire scan has been collected, because applying beam by beam is wrong twice
+ * over: a cell crossed by twenty beams would be counted free twenty times, and a cell
+ * that is a return for one beam but merely crossed by another would have its hit eroded
+ * by that beam's miss. Cartographer avoids both by marking each cell once per insertion
+ * and by deferring the end of the update, so hits are already in place when misses land.
+ *
+ * \param grid The submap's log-odds grid, in submap-local coordinates.
+ * \param T_submap_sensor Sensor pose in the submap frame.
+ * \param scan Range returns in the sensor frame.
+ * \param hit_scratch,miss_scratch Reused buffers, so the cost per scan is not allocation.
+ */
+inline void insert_scan_into_submap_grid(
+    LogOddsGrid& grid, const Sophus::SE2d& T_submap_sensor,
+    const std::vector<std::pair<double, double>>& scan,
+    const ScanInsertionParams& params, std::vector<int>& hit_scratch,
+    std::vector<int>& miss_scratch) {
+  if (scan.empty()) return;
+
+  // 1. Grow first, so that no return is silently clipped and every index below is final.
+  const Eigen::Vector2d sensor_origin = T_submap_sensor.translation();
+  double min_x = sensor_origin.x(), max_x = min_x;
+  double min_y = sensor_origin.y(), max_y = min_y;
+  for (const auto& point : scan) {
+    const Eigen::Vector2d hit = T_submap_sensor * Eigen::Vector2d{point.first, point.second};
+    min_x = std::min(min_x, hit.x());
+    max_x = std::max(max_x, hit.x());
+    min_y = std::min(min_y, hit.y());
+    max_y = std::max(max_y, hit.y());
+  }
+  grid.grow_to_include(min_x, min_y, max_x, max_y);
+
+  const auto to_cell = [&grid](double x, double y) {
+    return std::pair<int, int>{
+        static_cast<int>(std::floor((x - grid.origin_x()) / grid.resolution())),
+        static_cast<int>(std::floor((y - grid.origin_y()) / grid.resolution()))};
+  };
+  const auto inside = [&grid](int gx, int gy) {
+    return gx >= 0 && gx < grid.width() && gy >= 0 && gy < grid.height();
+  };
+
+  const auto [gx0, gy0] = to_cell(sensor_origin.x(), sensor_origin.y());
+
+  // The robot's own footprint is forced free before the scan, never after, so a return
+  // landing on it is not silently erased.
+  const int radius_cells = static_cast<int>(params.robot_radius / grid.resolution());
+  for (int dx = -radius_cells; dx <= radius_cells; ++dx) {
+    for (int dy = -radius_cells; dy <= radius_cells; ++dy) {
+      if (inside(gx0 + dx, gy0 + dy)) grid.at(gx0 + dx, gy0 + dy) = -params.clamp;
+    }
+  }
+
+  // 2. Collect the whole scan before writing anything.
+  hit_scratch.clear();
+  miss_scratch.clear();
+  const int origin_index = gy0 * grid.width() + gx0;
+
+  for (const auto& point : scan) {
+    const Eigen::Vector2d hit = T_submap_sensor * Eigen::Vector2d{point.first, point.second};
+    const auto [gx1, gy1] = to_cell(hit.x(), hit.y());
+    if (inside(gx1, gy1)) hit_scratch.push_back(gy1 * grid.width() + gx1);
+
+    // The endpoint is excluded by bresenham_line, so this is the free beam interior. A
+    // return that fell outside the grid still clears everything it crossed.
+    for (const auto& cell :
+         bresenham_line(gx0, gy0, gx1, gy1, grid.width(), grid.height())) {
+      const int index = cell.second * grid.width() + cell.first;
+      if (index == origin_index) continue;
+      miss_scratch.push_back(index);
+    }
+  }
+
+  const auto deduplicate = [](std::vector<int>& cells) {
+    std::sort(cells.begin(), cells.end());
+    cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
+  };
+  deduplicate(hit_scratch);
+  deduplicate(miss_scratch);
+
+  // 3. Hits first, once per cell.
+  for (const int index : hit_scratch) {
+    grid.at(index) = std::min(grid.at(index) + params.l_occ, params.clamp);
+  }
+  // 4. Then misses, once per cell, skipping every cell that was a return.
+  for (const int index : miss_scratch) {
+    if (std::binary_search(hit_scratch.begin(), hit_scratch.end(), index)) continue;
+    grid.at(index) = std::max(grid.at(index) + params.l_free, -params.clamp);
+  }
+}
+
 enum class SubmapRole { kAuthoritative, kRedundant, kProvisional };
 
 /** A local probability grid with a pose in the global map frame. */
@@ -48,8 +170,16 @@ public:
   void add_insertion() { ++num_insertions_; }
   [[nodiscard]] bool is_finished() const { return is_finished_; }
 
+  /// Slack kept around the observed box when cropping, so that a scan matcher query
+  /// just outside a wall still lands on a real cell instead of off the grid.
+  static constexpr int kCropMarginCells = 5;
+
+  /// The grid grows freely while the submap is active; it is cropped to what was
+  /// actually observed on the way to being frozen, and only then are the derived
+  /// structures built, so they are sized to the cropped grid.
   void finish() {
     if (is_finished_) return;
+    grid_->crop_to_known_cells(kCropMarginCells);
     is_finished_ = true;
     compute_radial_signature();
     compute_distance_field();
@@ -81,15 +211,16 @@ private:
     constexpr double kBinSize = 0.5;
     radial_signature_.assign(kNumBins, 0.0);
     const double resolution = grid_->resolution();
-    const double center_x = grid_->width() * resolution / 2.0;
-    const double center_y = grid_->height() * resolution / 2.0;
     int occupied_cells = 0;
 
+    // Radii are measured from the submap origin, which is local (0, 0). The grid is no
+    // longer necessarily centred on it: grow_to_include() expands whichever side the
+    // scan needs, so the centre of the cell array drifts away from the origin.
     for (int y = 0; y < grid_->height(); ++y) {
       for (int x = 0; x < grid_->width(); ++x) {
         if (grid_->at(x, y) <= 0.5F) continue;
-        const double dx = x * resolution - center_x;
-        const double dy = y * resolution - center_y;
+        const double dx = grid_->origin_x() + (x + 0.5) * resolution;
+        const double dy = grid_->origin_y() + (y + 0.5) * resolution;
         const int bin = static_cast<int>(std::hypot(dx, dy) / kBinSize);
         if (bin >= 0 && bin < kNumBins) {
           radial_signature_[bin] += 1.0;
@@ -249,29 +380,66 @@ struct SubmapList {
     return finished_ids;
   }
 
-  /** Freeze active submaps the robot has driven out of.
+  /** Frees a slot so that a new submap can be added without exceeding `max_active`.
    *
-   * Fixed-size grids cannot grow, so once the robot is farther than `max_distance`
-   * from a submap origin every raycast falls outside that grid and the submap only
-   * occupies an active slot. Submaps are ordered oldest first and their origins follow
-   * the trajectory, so only the front needs checking. The newest active submap is never
-   * abandoned: something has to receive the current scan.
+   * Cartographer keeps exactly two active submaps and erases the front -- already
+   * finished, because its counts line up by construction -- when a third would be
+   * added. Our distance trigger can start a submap before the counts line up, so the
+   * front is always finished here too, since the lifecycle is driven purely by the scan
+   * count. This is therefore a guard rather than a regular path: it is what makes "at
+   * most two active submaps per hypothesis" an invariant rather than a consequence. A
+   * submap that is no longer one of the two most recent can never receive another scan,
+   * so finishing it costs nothing even if its count fell short.
    */
-  std::vector<SubmapId> finish_abandoned_submaps(
-      const Eigen::Vector2d& robot_position, double max_distance) {
+  std::vector<SubmapId> make_room_for_new_submap(std::size_t max_active) {
     std::vector<SubmapId> finished_ids;
-    while (active_submaps.size() > 1) {
-      const auto& oldest = active_submaps.front();
-      const double distance =
-          (robot_position - oldest->global_pose().translation()).norm();
-      if (distance < max_distance) break;
-      oldest->finish();
-      oldest->set_role(SubmapRole::kAuthoritative);
-      history.push_back(oldest);
-      finished_ids.push_back(oldest->id());
+    while (!active_submaps.empty() && active_submaps.size() >= max_active) {
+      auto submap = active_submaps.front();
+      submap->finish();
+      submap->set_role(SubmapRole::kAuthoritative);
+      history.push_back(submap);
+      finished_ids.push_back(submap->id());
       active_submaps.erase(active_submaps.begin());
     }
     return finished_ids;
+  }
+
+  /** Global bounding box of every submap held, in metres.
+   *
+   * Each submap grid is a rectangle in its own frame and its submap carries a rotation,
+   * so all four corners have to be transformed: taking only two would clip the box
+   * whenever a submap is not axis aligned with the world.
+   *
+   * \return false when there is no submap yet, leaving the outputs untouched.
+   */
+  [[nodiscard]] bool bounding_box(
+      double& min_x, double& min_y, double& max_x, double& max_y) const {
+    bool any = false;
+    const auto accumulate = [&](const std::shared_ptr<Submap>& submap) {
+      if (!submap) return;
+      const auto& grid = submap->grid();
+      const double x0 = grid.origin_x();
+      const double y0 = grid.origin_y();
+      const double x1 = x0 + grid.width() * grid.resolution();
+      const double y1 = y0 + grid.height() * grid.resolution();
+      for (const auto& corner : {Eigen::Vector2d{x0, y0}, Eigen::Vector2d{x1, y0},
+                                 Eigen::Vector2d{x0, y1}, Eigen::Vector2d{x1, y1}}) {
+        const Eigen::Vector2d point = submap->global_pose() * corner;
+        if (!any) {
+          min_x = max_x = point.x();
+          min_y = max_y = point.y();
+          any = true;
+        } else {
+          min_x = std::min(min_x, point.x());
+          max_x = std::max(max_x, point.x());
+          min_y = std::min(min_y, point.y());
+          max_y = std::max(max_y, point.y());
+        }
+      }
+    };
+    for (const auto& submap : history) accumulate(submap);
+    for (const auto& submap : active_submaps) accumulate(submap);
+    return any;
   }
 
   [[nodiscard]] std::size_t inter_constraint_count() const {

@@ -1,6 +1,8 @@
 #ifndef __PARTICLE_H__
 #define __PARTICLE_H__
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <memory>
 #include <cstdint>
 #include <vector>
@@ -116,12 +118,188 @@ public:
   /// Get a reference to the underlying data storage
   [[nodiscard]] std::vector<float>& data() { return data_; }
 
+  /**
+   * \brief Re-sizes the grid to a new extent and clears it.
+   *
+   * Used to rebuild a derived view whose bounds are recomputed from scratch each time.
+   * When the extent is unchanged this is a plain clear, with no reallocation, which is
+   * the common case: the bounds of a map grow slowly.
+   */
+  void reset(int w, int h, const Sophus::SE2d& origin) {
+    const std::size_t cells = static_cast<std::size_t>(w) * h;
+    if (w != width_ || h != height_) {
+      data_.assign(cells, 0.0f);
+      width_ = w;
+      height_ = h;
+    } else {
+      std::fill(data_.begin(), data_.end(), 0.0f);
+    }
+    origin_pose_ = origin;
+  }
+
+  /**
+   * \brief Shrinks the grid to the cells that were actually observed.
+   *
+   * The counterpart of grow_to_include(): while a submap is active its grid expands to
+   * whatever the scans reach, which over a whole submap is far more than the sensor ever
+   * observed. Cartographer's Submap2D::Finish() calls ComputeCroppedGrid() for exactly
+   * this reason, right before marking the submap finished.
+   *
+   * Like growth, cropping only moves the origin: every retained cell keeps its
+   * coordinates in the grid frame, so poses and constraints measured against the owner
+   * of the grid stay valid. A cell counts as observed when its log-odds differ from 0,
+   * the same convention the rest of the code uses for "unknown"; `margin_cells` of slack
+   * is kept around the observed box so that queries just outside a wall still land on a
+   * real cell instead of falling off the grid.
+   *
+   * \param margin_cells Cells of unknown space to keep around the observed box.
+   * \return true if the grid was actually resized.
+   */
+  bool crop_to_known_cells(int margin_cells) {
+    int min_x = width_;
+    int max_x = -1;
+    int min_y = height_;
+    int max_y = -1;
+    for (int y = 0; y < height_; ++y) {
+      for (int x = 0; x < width_; ++x) {
+        if (data_[static_cast<std::size_t>(y) * width_ + x] == 0.0f) continue;
+        min_x = std::min(min_x, x);
+        max_x = std::max(max_x, x);
+        min_y = std::min(min_y, y);
+        max_y = std::max(max_y, y);
+      }
+    }
+    // Nothing was ever observed: leave the grid alone rather than produce an empty one.
+    if (max_x < 0) return false;
+
+    min_x = std::max(0, min_x - margin_cells);
+    min_y = std::max(0, min_y - margin_cells);
+    max_x = std::min(width_ - 1, max_x + margin_cells);
+    max_y = std::min(height_ - 1, max_y + margin_cells);
+    if (min_x == 0 && min_y == 0 && max_x == width_ - 1 && max_y == height_ - 1) return false;
+
+    const int new_width = max_x - min_x + 1;
+    const int new_height = max_y - min_y + 1;
+    std::vector<float> cropped(static_cast<std::size_t>(new_width) * new_height, 0.0f);
+    for (int y = 0; y < new_height; ++y) {
+      const auto row_begin =
+          data_.begin() + static_cast<std::size_t>(y + min_y) * width_ + min_x;
+      std::copy(row_begin, row_begin + new_width,
+                cropped.begin() + static_cast<std::size_t>(y) * new_width);
+    }
+
+    data_ = std::move(cropped);
+    width_ = new_width;
+    height_ = new_height;
+    /// Dropping cells from the low side moves the origin up, the mirror of growth.
+    origin_pose_.translation() +=
+        Eigen::Vector2d{min_x * resolution_, min_y * resolution_};
+    return true;
+  }
+
+  /**
+   * \brief Enlarges the grid so that an axis-aligned box fits inside it.
+   *
+   * Cartographer resizes a submap grid to contain the sensor origin and every scan
+   * endpoint before ray casting; this is the equivalent. Growth only ever prepends or
+   * appends cells, so every existing cell keeps its coordinates in the grid frame. What
+   * moves is the origin, by exactly the number of cells prepended. The pose of whatever
+   * owns the grid -- a submap's global_pose, for instance -- is not affected.
+   *
+   * \param min_x,min_y,max_x,max_y The box to include, in grid-frame coordinates.
+   * \return true if the grid was actually resized.
+   */
+  bool grow_to_include(double min_x, double min_y, double max_x, double max_y) {
+    /// Grow in blocks so that a slowly expanding scan does not reallocate every frame.
+    constexpr int kGrowthChunk = 32;
+    /// A diverged pose must not be able to request an unbounded allocation.
+    constexpr int kMaxCellsPerSide = 4000;
+
+    const auto cell = [this](double value, double origin) {
+      return static_cast<int>(std::floor((value - origin) / resolution_));
+    };
+    const int gx_min = cell(min_x, origin_x());
+    const int gx_max = cell(max_x, origin_x());
+    const int gy_min = cell(min_y, origin_y());
+    const int gy_max = cell(max_y, origin_y());
+
+    int pad_left = gx_min < 0 ? -gx_min : 0;
+    int pad_right = gx_max >= width_ ? gx_max - width_ + 1 : 0;
+    int pad_bottom = gy_min < 0 ? -gy_min : 0;
+    int pad_top = gy_max >= height_ ? gy_max - height_ + 1 : 0;
+    if (pad_left == 0 && pad_right == 0 && pad_bottom == 0 && pad_top == 0) return false;
+
+    const auto round_up = [](int pad) {
+      return pad > 0 ? ((pad + kGrowthChunk - 1) / kGrowthChunk) * kGrowthChunk : 0;
+    };
+    pad_left = round_up(pad_left);
+    pad_right = round_up(pad_right);
+    pad_bottom = round_up(pad_bottom);
+    pad_top = round_up(pad_top);
+
+    const int new_width = width_ + pad_left + pad_right;
+    const int new_height = height_ + pad_bottom + pad_top;
+    if (new_width > kMaxCellsPerSide || new_height > kMaxCellsPerSide) return false;
+
+    /// 0.0 is the log-odds of an unknown cell, so the new border starts unobserved.
+    std::vector<float> grown(static_cast<std::size_t>(new_width) * new_height, 0.0f);
+    for (int y = 0; y < height_; ++y) {
+      const auto row_begin = data_.begin() + static_cast<std::size_t>(y) * width_;
+      const auto destination = grown.begin() +
+          static_cast<std::size_t>(y + pad_bottom) * new_width + pad_left;
+      std::copy(row_begin, row_begin + width_, destination);
+    }
+
+    data_ = std::move(grown);
+    width_ = new_width;
+    height_ = new_height;
+    /// The grid frame is axis aligned in every use, so prepending cells is a pure shift.
+    origin_pose_.translation() -=
+        Eigen::Vector2d{pad_left * resolution_, pad_bottom * resolution_};
+    return true;
+  }
+
 private:
   int width_;
   int height_;
   double resolution_;
   Sophus::SE2d origin_pose_;
   std::vector<float> data_;
+};
+
+/**
+ * \brief Occupancy grid whose extent is decided at run time.
+ *
+ * StaticOccupancyGrid fixes its size at compile time, which suits a map of known bounds
+ * but not one derived from submaps that grow and move. This holds the same information
+ * with a run-time extent and exposes exactly the accessors a publisher needs.
+ */
+class DynamicOccupancyGrid {
+public:
+  DynamicOccupancyGrid() = default;
+
+  /// Re-sizes to match a reference extent and clears to `fill`.
+  void reset(int w, int h, double resolution, const Sophus::SE2d& origin, std::int8_t fill) {
+    data_.assign(static_cast<std::size_t>(w) * h, fill);
+    width_ = w;
+    height_ = h;
+    resolution_ = resolution;
+    origin_pose_ = origin;
+  }
+
+  [[nodiscard]] const std::vector<std::int8_t>& data() const { return data_; }
+  [[nodiscard]] std::vector<std::int8_t>& data() { return data_; }
+  [[nodiscard]] int width() const { return width_; }
+  [[nodiscard]] int height() const { return height_; }
+  [[nodiscard]] double resolution() const { return resolution_; }
+  [[nodiscard]] const Sophus::SE2d& origin() const { return origin_pose_; }
+
+private:
+  std::vector<std::int8_t> data_;
+  int width_ = 0;
+  int height_ = 0;
+  double resolution_ = GRID_RESOLUTION;
+  Sophus::SE2d origin_pose_{Sophus::SO2d{0.0}, Eigen::Vector2d{ORIGIN_X, ORIGIN_Y}};
 };
 
 /**

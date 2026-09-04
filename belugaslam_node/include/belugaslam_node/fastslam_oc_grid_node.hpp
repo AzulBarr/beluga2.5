@@ -2,6 +2,7 @@
 #define __BELUGASLAM_NODE_HPP__
 
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <vector>
 #include <string>

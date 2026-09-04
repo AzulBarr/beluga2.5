@@ -114,10 +114,7 @@ def generate_launch_description():
     declare_alpha4 = DeclareLaunchArgument('alpha4', default_value='0.05', description='Translation noise from rotation')
     declare_alpha5 = DeclareLaunchArgument('alpha5', default_value='0.1', description='Translation noise (extra)')
     declare_likelihood_scaling_factor = DeclareLaunchArgument('likelihood_scaling_factor', default_value='0.05', description='Scaling factor for scan matching likelihood')
-    declare_submap_num_range_data = DeclareLaunchArgument('submap_num_range_data', default_value='50', description='Keyframes inserted before freezing a submap')
-    declare_submap_overlap_range_data = DeclareLaunchArgument('submap_overlap_range_data', default_value='25', description='Keyframes before starting the next overlapping submap')
-    declare_submap_creation_distance = DeclareLaunchArgument('submap_creation_distance', default_value='2.4', description='Distance from the newest submap origin that also starts a new submap')
-    declare_submap_abandon_distance = DeclareLaunchArgument('submap_abandon_distance', default_value='6.0', description='Distance from a submap origin past which it is frozen')
+    declare_submap_num_range_data = DeclareLaunchArgument('submap_num_range_data', default_value='15', description='Scans before starting the next submap; a submap is frozen at twice this count')
     declare_keyframe_min_translation = DeclareLaunchArgument('keyframe_min_translation', default_value='0.15', description='Graph motion filter translation threshold')
     declare_keyframe_min_rotation = DeclareLaunchArgument('keyframe_min_rotation', default_value='0.0872665', description='Graph motion filter rotation threshold in radians')
     declare_max_points_per_scan_node = DeclareLaunchArgument('max_points_per_scan_node', default_value='180', description='Maximum stored endpoints per graph scan node')
@@ -160,9 +157,6 @@ def generate_launch_description():
             "alpha5": LaunchConfiguration('alpha5'),
             "likelihood_scaling_factor": LaunchConfiguration('likelihood_scaling_factor'),
             "submap_num_range_data": LaunchConfiguration('submap_num_range_data'),
-            "submap_overlap_range_data": LaunchConfiguration('submap_overlap_range_data'),
-            "submap_creation_distance": LaunchConfiguration('submap_creation_distance'),
-            "submap_abandon_distance": LaunchConfiguration('submap_abandon_distance'),
             "keyframe_min_translation": LaunchConfiguration('keyframe_min_translation'),
             "keyframe_min_rotation": LaunchConfiguration('keyframe_min_rotation'),
             "max_points_per_scan_node": LaunchConfiguration('max_points_per_scan_node'),
@@ -206,9 +200,6 @@ def generate_launch_description():
     declare_alpha5,
     declare_likelihood_scaling_factor,
     declare_submap_num_range_data,
-    declare_submap_overlap_range_data,
-    declare_submap_creation_distance,
-    declare_submap_abandon_distance,
     declare_keyframe_min_translation,
     declare_keyframe_min_rotation,
     declare_max_points_per_scan_node,
