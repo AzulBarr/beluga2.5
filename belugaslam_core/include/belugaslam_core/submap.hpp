@@ -467,10 +467,62 @@ struct SubmapList {
   }
 };
 
+/** Weighted mean of SE(2) poses.
+ *
+ * Translation is a plain weighted average; rotation is a circular mean, because angles
+ * wrap and averaging them arithmetically puts the mean of 179 and -179 degrees at zero
+ * instead of 180. Falls back to an unweighted mean when the weights sum to nothing, and
+ * to the identity when there is nothing to average.
+ */
+inline Sophus::SE2d weighted_mean_pose(
+    const std::vector<Sophus::SE2d>& poses, const std::vector<double>& weights) {
+  if (poses.empty()) return Sophus::SE2d{};
+  double total = 0.0;
+  for (std::size_t i = 0; i < poses.size() && i < weights.size(); ++i) total += weights[i];
+  const bool uniform = !(total > 0.0);
+
+  Eigen::Vector2d translation = Eigen::Vector2d::Zero();
+  double cos_sum = 0.0;
+  double sin_sum = 0.0;
+  double applied = 0.0;
+  for (std::size_t i = 0; i < poses.size(); ++i) {
+    const double weight = uniform ? 1.0 : (i < weights.size() ? weights[i] : 0.0);
+    translation += weight * poses[i].translation();
+    const double angle = poses[i].so2().log();
+    cos_sum += weight * std::cos(angle);
+    sin_sum += weight * std::sin(angle);
+    applied += weight;
+  }
+  if (!(applied > 0.0)) return poses.front();
+  translation /= applied;
+  // All poses exactly opposed: the circular mean is undefined, keep the first angle.
+  const double angle = (cos_sum == 0.0 && sin_sum == 0.0)
+      ? poses.front().so2().log() : std::atan2(sin_sum, cos_sum);
+  return Sophus::SE2d{Sophus::SO2d{angle}, translation};
+}
+
 struct Hypothesis {
   std::size_t id = 0;
   SubmapList submaps;
   std::size_t optimized_inter_constraints_count = 0;
+
+  /** Continuous local-SLAM pose of this hypothesis.
+   *
+   * The particles represent the posterior; this represents the trajectory the submaps
+   * are built along. They are deliberately different things. Taking the highest weight
+   * particle each scan means the trajectory can hop between particles that are each
+   * smooth but offset from one another, and that hop is indistinguishable from real
+   * motion at insertion time: the same wall lands in slightly different places on
+   * consecutive scans, and the resulting thick or doubled walls are baked into the
+   * occupancy grid where no later optimisation can undo them -- a pose graph can move a
+   * submap, never repair its interior.
+   *
+   * So this pose is seeded once when the hypothesis is born, from the weighted mean of
+   * its cluster, and from then on it only ever moves by odometry prediction followed by
+   * scan matching against this hypothesis's own map.
+   */
+  Sophus::SE2d local_pose;
+  bool has_local_pose = false;
 };
 
 #endif  // __BELUGASLAM_CORE_SUBMAP_HPP__

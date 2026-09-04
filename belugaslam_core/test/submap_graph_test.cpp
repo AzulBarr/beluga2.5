@@ -229,6 +229,62 @@ TEST(SubmapTest, GrowingAnActiveSubmapDoesNotMoveItsGlobalPose) {
   EXPECT_NEAR(submap->global_pose().so2().log(), pose.so2().log(), 1.0e-12);
 }
 
+// --- weighted mean pose, used to seed a hypothesis local pose ----------------------
+
+TEST(WeightedMeanPoseTest, AveragesTranslationByWeight) {
+  const std::vector<Sophus::SE2d> poses{
+      Sophus::SE2d{Sophus::SO2d{0.0}, Eigen::Vector2d{0.0, 0.0}},
+      Sophus::SE2d{Sophus::SO2d{0.0}, Eigen::Vector2d{4.0, 8.0}}};
+  const auto mean = weighted_mean_pose(poses, {3.0, 1.0});
+
+  EXPECT_NEAR(mean.translation().x(), 1.0, 1.0e-12);
+  EXPECT_NEAR(mean.translation().y(), 2.0, 1.0e-12);
+}
+
+// The reason theta needs a circular mean: the arithmetic mean of 179 and -179 degrees is
+// 0, pointing the hypothesis in exactly the opposite direction to every particle in it.
+TEST(WeightedMeanPoseTest, AveragesAngleCircularlyAcrossTheWrap) {
+  const double kPi = Sophus::Constants<double>::pi();
+  const std::vector<Sophus::SE2d> poses{
+      Sophus::SE2d{Sophus::SO2d{kPi - 0.02}, Eigen::Vector2d::Zero()},
+      Sophus::SE2d{Sophus::SO2d{-kPi + 0.02}, Eigen::Vector2d::Zero()}};
+  const auto mean = weighted_mean_pose(poses, {1.0, 1.0});
+
+  EXPECT_NEAR(std::abs(mean.so2().log()), kPi, 1.0e-9);
+}
+
+TEST(WeightedMeanPoseTest, FallsBackToAnUnweightedMeanWhenWeightsVanish) {
+  const std::vector<Sophus::SE2d> poses{
+      Sophus::SE2d{Sophus::SO2d{0.0}, Eigen::Vector2d{0.0, 0.0}},
+      Sophus::SE2d{Sophus::SO2d{0.0}, Eigen::Vector2d{2.0, 6.0}}};
+  const auto mean = weighted_mean_pose(poses, {0.0, 0.0});
+
+  EXPECT_NEAR(mean.translation().x(), 1.0, 1.0e-12);
+  EXPECT_NEAR(mean.translation().y(), 3.0, 1.0e-12);
+}
+
+TEST(WeightedMeanPoseTest, IsIdentityWithNoPoses) {
+  const auto mean = weighted_mean_pose({}, {});
+  EXPECT_TRUE(mean.translation().isApprox(Eigen::Vector2d::Zero()));
+  EXPECT_NEAR(mean.so2().log(), 0.0, 1.0e-12);
+}
+
+TEST(HypothesisTest, StartsWithoutALocalPoseSoItIsSeededOnce) {
+  Hypothesis hypothesis;
+  EXPECT_FALSE(hypothesis.has_local_pose);
+
+  hypothesis.local_pose = Sophus::SE2d{Sophus::SO2d{0.5}, Eigen::Vector2d{1.0, 2.0}};
+  hypothesis.has_local_pose = true;
+
+  // A fork copies the parent wholesale; a spatial split then clears the flag so the
+  // child re-seeds from its own cluster instead of inheriting this trajectory.
+  Hypothesis child = hypothesis;
+  EXPECT_TRUE(child.has_local_pose);
+  EXPECT_NEAR(child.local_pose.translation().x(), 1.0, 1.0e-12);
+  child.has_local_pose = false;
+  EXPECT_TRUE(hypothesis.has_local_pose);
+}
+
 // --- dynamically sized derived views -----------------------------------------------
 
 TEST(LogOddsGridTest, ResetChangesExtentAndClears) {

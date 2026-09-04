@@ -105,6 +105,19 @@ struct PoseGraphEdgeError {
     double weight_translation_, weight_rotation_;
 };
 
+/// \brief Temporary switch to evaluate submapping on its own.
+///
+/// Set to 1 to restore normal operation. While it is 0, loop closure detection and pose
+/// graph optimisation are both skipped: submap poses come only from the particle filter
+/// and are never corrected afterwards, so drift accumulates and revisited places will
+/// not close. That is expected under this switch and is exactly what makes the submap
+/// lifecycle -- creation, overlap, growth, cropping, freezing -- visible on its own.
+///
+/// Nothing is removed. The graph is still built (trajectory nodes, intra-submap
+/// constraints, the local trajectory prior) and every function below still compiles; it
+/// is only never invoked, so the whole thing comes back by flipping this to 1.
+#define BELUGASLAM_ENABLE_LOOP_CLOSURE 0
+
 /// Parameters to construct a BelugaSLAM instance.
 struct FastSLAMParams {
     /// Minimum number of particles for adaptive resampling.
@@ -255,6 +268,9 @@ public:
      * \param measurement Measurement data.
      */
     void sample_motion_model(const control_type& u) {
+        // Kept for the per-hypothesis local pose, which predicts with odometry and then
+        // scan matches, instead of being read off the highest weight particle.
+        last_odom_delta_ = std::get<1>(u).inverse() * std::get<0>(u);
         auto sampler = motion_model_(u);
 
         double max_weight =  0.0;
@@ -263,6 +279,90 @@ public:
             pose = sampler(pose, rng_);
             max_weight = std::max(max_weight, static_cast<double>(std::get<1>(p)));
         }
+    }
+
+    /// Endpoint score of a pose against a log-odds grid.
+    /**
+     * Sums the log-odds under every scan endpoint. Endpoints that fall outside the grid
+     * are penalised heavily, so the filter cannot improve its score by ejecting the scan
+     * into unobserved space.
+     */
+    [[nodiscard]] double endpoint_log_score(
+        const state_type& pose, const measurement_type& z_sparse,
+        const GridTypeLO& grid) const {
+        double log_prob_sum = 0.0;
+        for (const auto& local_point : z_sparse) {
+            const auto hit = pose * Eigen::Vector2d(local_point.first, local_point.second);
+            int gx, gy, hit_idx;
+            if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, grid)) {
+                log_prob_sum += grid.at(hit_idx);
+            } else {
+                log_prob_sum -= 5.0;
+            }
+        }
+        return log_prob_sum;
+    }
+
+    /// Three-level discrete scan matching around an initial pose.
+    /**
+     * Coarse to fine: +-0.1 m / +-5 deg, then +-0.05 m / +-2.5 deg around the winner,
+     * then +-0.02 m / +-1 deg. Used both to correct each particle and to advance the
+     * local pose of each hypothesis, so the trajectory the submaps are built along is
+     * refined by exactly the same matcher that scores the posterior.
+     */
+    [[nodiscard]] state_type refine_pose_on_grid(
+        const state_type& initial_pose, const measurement_type& z_sparse,
+        const GridTypeLO& grid, double& best_log_score) const {
+        static const auto dxys1 = {-0.1, 0.0, 0.1};
+        static const auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0,
+                                      5 * Sophus::Constants<double>::pi() / 180};
+        static const auto dxys2 = {-0.05, 0.0, 0.05};
+        static const auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0,
+                                      2.5 * Sophus::Constants<double>::pi() / 180};
+        static const auto dxys3 = {-0.02, 0.0, 0.02};
+        static const auto dthetas3 = {-1.0 * Sophus::Constants<double>::pi() / 180, 0.0,
+                                      1.0 * Sophus::Constants<double>::pi() / 180};
+
+        auto best_pose = initial_pose;
+        best_log_score = endpoint_log_score(initial_pose, z_sparse, grid);
+
+        const auto sweep = [&](const state_type& around, const auto& dxys, const auto& dthetas) {
+            for (double dx : dxys) {
+                for (double dy : dxys) {
+                    for (double dtheta : dthetas) {
+                        const auto candidate = state_type{
+                            Sophus::SO2d{around.so2().log() + dtheta},
+                            Eigen::Vector2d{around.translation().x() + dx,
+                                            around.translation().y() + dy}};
+                        const double score = endpoint_log_score(candidate, z_sparse, grid);
+                        if (score > best_log_score) {
+                            best_log_score = score;
+                            best_pose = candidate;
+                        }
+                    }
+                }
+            }
+        };
+
+        sweep(initial_pose, dxys1, dthetas1);
+        const auto after_level1 = best_pose;
+        sweep(after_level1, dxys2, dthetas2);
+        const auto after_level2 = best_pose;
+        sweep(after_level2, dxys3, dthetas3);
+        return best_pose;
+    }
+
+    /// Weighted mean of the particles currently assigned to a hypothesis.
+    [[nodiscard]] state_type hypothesis_mean_pose(
+        const std::shared_ptr<Hypothesis>& hypothesis) const {
+        std::vector<state_type> poses;
+        std::vector<double> weights;
+        for (const auto& p : particles_) {
+            if (std::get<2>(p)->id != hypothesis->id) continue;
+            poses.push_back(std::get<0>(p));
+            weights.push_back(static_cast<double>(std::get<1>(p)));
+        }
+        return weighted_mean_pose(poses, weights);
     }
 
     /// Updates particle weights based on the measurement model and the received measurement.
@@ -283,119 +383,43 @@ public:
             z_sparse.push_back(z[i]);
         }
         
-        /// Scan matching search grids
-        auto dxys1 = {-0.1, 0.0, 0.1};
-        auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0, 5 * Sophus::Constants<double>::pi() / 180};
-
-        auto dxys2 = {-0.05, 0.0, 0.05};
-        auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0, 2.5 * Sophus::Constants<double>::pi() / 180};
-
-        auto dxys3 = {-0.02, 0.0, 0.02};
-        auto dthetas3 = {-1.0 * Sophus::Constants<double>::pi() / 180, 0.0, 1.0 * Sophus::Constants<double>::pi() / 180};
-
-        // 1. Composite local map ONCE PER HYPOTHESIS and cache it
+        // 1. Composite local map ONCE PER HYPOTHESIS, then advance that hypothesis's own
+        //    continuous local pose: predict with odometry, correct by scan matching. This
+        //    pose, not the highest weight particle, is what the submaps are built along.
         std::map<size_t, GridTypeLO> hypothesis_lo_cache;
         for (auto& hypothesis : hypotheses_) {
-            // Find a representative pose for this hypothesis to select nearby submaps
-            state_type representative_pose;
-            double max_w = -1.0;
-            for (const auto& p : particles_) {
-                if (std::get<2>(p)->id == hypothesis->id) {
-                    double w = static_cast<double>(std::get<1>(p));
-                    if (w > max_w) {
-                        max_w = w;
-                        representative_pose = std::get<0>(p);
-                    }
-                }
+            state_type initial_pose;
+            if (hypothesis->has_local_pose) {
+                initial_pose = hypothesis->local_pose * last_odom_delta_;
+            } else {
+                // Born this scan. Its particles have already been propagated by the
+                // motion model, so their weighted mean is the current estimate and must
+                // not be predicted forward again.
+                initial_pose = hypothesis_mean_pose(hypothesis);
+                hypothesis->has_local_pose = true;
             }
 
-            compose_tracking_view(hypothesis, representative_pose, local_lo_grid_);
+            compose_tracking_view(hypothesis, initial_pose, local_lo_grid_);
             hypothesis_lo_cache[hypothesis->id] = local_lo_grid_;
+
+            double local_score = 0.0;
+            hypothesis->local_pose = refine_pose_on_grid(
+                initial_pose, z_sparse, hypothesis_lo_cache[hypothesis->id], local_score);
         }
 
         std::vector<double> log_scores;
         log_scores.reserve(particles_.size());
 
-        // 2. Score each particle against ITS hypothesis's cached map
+        // 2. Score each particle against ITS hypothesis's cached map. The particles are
+        //    untouched by the change above: they still each carry their own pose, get
+        //    corrected by the same matcher, and keep representing the posterior.
         for (auto&& p : particles_) {
             auto& pose_pred = std::get<0>(p);
-            auto& weight = std::get<1>(p);
             auto& hypothesis = std::get<2>(p);
+            const auto& cached_grid = hypothesis_lo_cache[hypothesis->id];
 
-            auto& cached_grid = hypothesis_lo_cache[hypothesis->id];
-
-            // Fast Endpoint-Score Model with Out-of-Bounds Penalty
-            auto score_fn = [&](const state_type& candidate_pose) {
-                double log_prob_sum = 0.0;
-                for (const auto& local_point : z_sparse) {
-                    auto hit = candidate_pose * Eigen::Vector2d(local_point.first, local_point.second);
-                    int gx, gy, hit_idx;
-                    if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, cached_grid)) {
-                        log_prob_sum += cached_grid.at(hit_idx);
-                    } else {
-                        // Heavily penalize out-of-bounds endpoints (equivalent to hitting solidly confirmed free space)
-                        // This prevents the filter from trying to eject the scan into unknown space
-                        // to avoid slight negative scores from noise in known space.
-                        log_prob_sum -= 5.0; 
-                    }
-                }
-                return log_prob_sum;
-            };
-
-            auto best_pose = pose_pred;
-            double best_log_score = score_fn(pose_pred);
-
-            for (double dx : dxys1) {
-                for (double dy : dxys1) {
-                    for (double dtheta : dthetas1) {
-                        auto candidate_pose = state_type{
-                            Sophus::SO2d{pose_pred.so2().log() + dtheta}, 
-                            Eigen::Vector2d{pose_pred.translation().x() + dx, pose_pred.translation().y() + dy}
-                        };
-                        double score = score_fn(candidate_pose);
-                        if (score > best_log_score) {
-                            best_log_score = score;
-                            best_pose = candidate_pose;
-                        }
-                    }
-                }
-            }
-
-            for (double dx : dxys2) {
-                for (double dy : dxys2) {
-                    for (double dtheta : dthetas2) {
-                        auto candidate_pose = state_type{
-                            Sophus::SO2d{best_pose.so2().log() + dtheta}, 
-                            Eigen::Vector2d{best_pose.translation().x() + dx, best_pose.translation().y() + dy}
-                        };
-                        double score = score_fn(candidate_pose);
-                        if (score > best_log_score) {
-                            best_log_score = score;
-                            best_pose = candidate_pose;
-                        }
-                    }
-                }
-            }
-            
-            auto best_pose_st2 = best_pose;
-
-            for (double dx : dxys3) {
-                for (double dy : dxys3) {
-                    for (double dtheta : dthetas3) {
-                        auto candidate_pose = state_type{
-                            Sophus::SO2d{best_pose_st2.so2().log() + dtheta}, 
-                            Eigen::Vector2d{best_pose_st2.translation().x() + dx, best_pose_st2.translation().y() + dy}
-                        };
-                        double score = score_fn(candidate_pose);
-                        if (score > best_log_score) {
-                            best_log_score = score;
-                            best_pose = candidate_pose;
-                        }
-                    }
-                }
-            }
-
-            pose_pred = best_pose;
+            double best_log_score = 0.0;
+            pose_pred = refine_pose_on_grid(pose_pred, z_sparse, cached_grid, best_log_score);
             log_scores.push_back(best_log_score);
         }
 
@@ -571,24 +595,18 @@ public:
         for (auto& hypothesis : hypotheses_) {
             auto& submaps = hypothesis->submaps;
 
-            // The graph receives one representative local-SLAM pose per hypothesis.
-            double best_w = -1.0;
-            state_type best_pose;
-            for (const auto& p : particles_) {
-                if (std::get<2>(p)->id == hypothesis->id) {
-                    double w = static_cast<double>(std::get<1>(p));
-                    if (w > best_w) {
-                        best_w = w;
-                        best_pose = std::get<0>(p);
-                    }
-                }
-            }
-            if (best_w < 0) continue;
+            // The continuous local-SLAM pose of this hypothesis. Reading the highest
+            // weight particle here instead would let the trajectory hop between offset
+            // particles, and that hop would be inserted into the grid as if it were
+            // motion. Everything below -- keyframe decision, submap lifecycle, node and
+            // constraint poses, ray casting -- uses this one pose.
+            if (!hypothesis->has_local_pose) continue;
+            const state_type tracking_pose = hypothesis->local_pose;
 
             // Cartographer-style motion filter: it bounds the size of the pose graph
             // only. Every scan is still inserted into the active submaps, so grid
             // quality does not depend on the keyframe rate.
-            const bool create_graph_node = should_create_scan_node(submaps, best_pose);
+            const bool create_graph_node = should_create_scan_node(submaps, tracking_pose);
             if (create_graph_node && !shared_scan_data) {
                 shared_scan_data = make_scan_node_data(z);
             }
@@ -614,7 +632,7 @@ public:
                     finished_events.push_back({hypothesis->id, id});
                 }
                 submaps.active_submaps.push_back(std::make_shared<Submap>(
-                    submaps.next_submap_id++, best_pose, SUBMAP_COLS, SUBMAP_ROWS,
+                    submaps.next_submap_id++, tracking_pose, SUBMAP_COLS, SUBMAP_ROWS,
                     GRID_RESOLUTION));
             }
 
@@ -622,7 +640,7 @@ public:
             if (retain_node) {
                 node.id = submaps.next_node_id++;
                 node.constant_data = shared_scan_data;
-                node.global_pose = best_pose;
+                node.global_pose = tracking_pose;
 
                 if (!submaps.trajectory_nodes.empty()) {
                     const auto& previous = submaps.trajectory_nodes.back();
@@ -636,7 +654,7 @@ public:
             // Every scan is inserted into every overlapping active submap. Intra-submap
             // constraints are measured before insertion, but only for retained nodes.
             for (auto& active_submap : submaps.active_submaps) {
-                const auto T_s_r = active_submap->global_pose().inverse() * best_pose;
+                const auto T_s_r = active_submap->global_pose().inverse() * tracking_pose;
                 if (retain_node) {
                     submaps.node_submap_constraints.push_back({
                         active_submap->id(), node.id, T_s_r,
@@ -659,7 +677,7 @@ public:
 
             if (retain_node) {
                 submaps.trajectory_nodes.push_back(std::move(node));
-                submaps.last_keyframe_pose = best_pose;
+                submaps.last_keyframe_pose = tracking_pose;
                 submaps.has_last_keyframe_pose = true;
             }
 
@@ -677,7 +695,9 @@ public:
     void post_update(const measurement_type& z, const std::vector<FinishedSubmapEvent>& finished_events) {
         // --- Loop Closure Detection (driven by FinishedSubmapEvents) ---
         (void)z;
+#if BELUGASLAM_ENABLE_LOOP_CLOSURE
         detect_loop_closure(finished_events);
+#endif
         if (!finished_events.empty()) {
             for (auto& hypothesis : hypotheses_) {
                 hypothesis->submaps.trim_scan_data_outside_active_submaps();
@@ -707,33 +727,35 @@ public:
             }
         }
 
+        // Publish the pose the map was actually drawn in. Publishing the highest weight
+        // particle instead would make the robot visibly slide against its own map by the
+        // very offsets this local pose exists to remove.
         double best_particle_weight = -1.0;
-        for (const auto& p : particles_) {
-            if (std::get<2>(p)->id == best_hypothesis_id) {
-                double w = static_cast<double>(std::get<1>(p));
-                if (w > best_particle_weight) {
-                    best_particle_weight = w;
-                    best_pose_ = std::get<0>(p);
+        if (best_hypothesis && best_hypothesis->has_local_pose) {
+            best_pose_ = best_hypothesis->local_pose;
+        } else {
+            for (const auto& p : particles_) {
+                if (std::get<2>(p)->id == best_hypothesis_id) {
+                    double w = static_cast<double>(std::get<1>(p));
+                    if (w > best_particle_weight) {
+                        best_particle_weight = w;
+                        best_pose_ = std::get<0>(p);
+                    }
                 }
             }
         }
 
         // --- PGO Trigger (for the winning hypothesis) ---
+#if BELUGASLAM_ENABLE_LOOP_CLOSURE
         if (best_hypothesis->submaps.inter_constraint_count() >
             best_hypothesis->optimized_inter_constraints_count) {
             optimize_pose_graph(best_hypothesis);
             best_hypothesis->optimized_inter_constraints_count =
                 best_hypothesis->submaps.inter_constraint_count();
-            best_particle_weight = -1.0;
-            for (const auto& p : particles_) {
-                if (std::get<2>(p) != best_hypothesis) continue;
-                const double weight = static_cast<double>(std::get<1>(p));
-                if (weight > best_particle_weight) {
-                    best_particle_weight = weight;
-                    best_pose_ = std::get<0>(p);
-                }
-            }
+            best_pose_ = best_hypothesis->local_pose;
+            (void)best_particle_weight;
         }
+#endif
 
         // Composite full global map from the best particle's hypothesis for RViz
         compose_publication_view(best_hypothesis, best_lo_grid_);
@@ -980,6 +1002,11 @@ public:
                     target_hypothesis->submaps.active_submaps = hypothesis->submaps.active_submaps;
                     target_hypothesis->optimized_inter_constraints_count =
                         hypothesis->optimized_inter_constraints_count;
+                    // The child stands for a different spatial cluster, so it must not
+                    // inherit the parent's trajectory. Clearing the flag makes the next
+                    // measurement step seed it from the weighted mean of its own
+                    // particles, which are assigned just below.
+                    target_hypothesis->has_local_pose = false;
                     hypotheses_.push_back(target_hypothesis);
 
                     // Find representative pose of the diverged cluster
@@ -1166,6 +1193,8 @@ public:
      * Candidate retrieval is bounded; geometric verification uses a distance field
      * and beam refinement rather than exhaustive submap-to-submap raster matching.
      */
+    /// \note Not called while BELUGASLAM_ENABLE_LOOP_CLOSURE is 0. Kept compiled so it
+    /// cannot rot while submapping is evaluated on its own.
     void detect_loop_closure(const std::vector<FinishedSubmapEvent>& finished_events) {
         for (const auto& event : finished_events) {
             auto hypothesis_it = std::find_if(
@@ -1345,6 +1374,7 @@ public:
 
     /// Step 4: joint scan-node/submap Pose Graph Optimization.
 
+    /// \note Not called while BELUGASLAM_ENABLE_LOOP_CLOSURE is 0. See that switch.
     void optimize_pose_graph(const std::shared_ptr<Hypothesis>& hypothesis) {
         auto& graph = hypothesis->submaps;
         if (graph.trajectory_nodes.empty() || graph.node_submap_constraints.empty()) return;
@@ -1444,6 +1474,10 @@ public:
             }
         }
         graph.last_keyframe_pose = correction * graph.last_keyframe_pose;
+        // The local pose is the trajectory the submaps are built along, so it has to
+        // follow the same correction as the particles or the next scan would be inserted
+        // relative to a map that has moved underneath it.
+        hypothesis->local_pose = correction * hypothesis->local_pose;
 
         std::cout << "[PGO] H" << hypothesis->id << ": "
                   << submap_poses.size() << " submaps, " << node_poses.size()
@@ -1460,6 +1494,10 @@ private:
     MotionModel motion_model_;
     MeasurementModel measurement_model_;
     FastSLAMParams params_;
+
+    /// Odometry increment of the current scan, in the robot frame. The per-hypothesis
+    /// local pose predicts with this before scan matching.
+    state_type last_odom_delta_{};
 
     /// Cartographer's structural invariant: one submap being filled and one being
     /// started, both receiving every accepted scan. Not a tuning knob.
