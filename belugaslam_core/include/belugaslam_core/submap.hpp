@@ -1,225 +1,308 @@
 #ifndef __BELUGASLAM_CORE_SUBMAP_HPP__
 #define __BELUGASLAM_CORE_SUBMAP_HPP__
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
-#include <vector>
 #include <set>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 #include <sophus/se2.hpp>
+
 #include "belugaslam_core/particle.hpp"
 
-enum class SubmapRole {
-  kAuthoritative,
-  kRedundant,
-  kProvisional
-};
+using SubmapId = std::uint64_t;
+using ScanNodeId = std::uint64_t;
 
-/**
- * \brief Represents a local map patch (Submap).
- * 
- * Instead of maintaining a single monolithic grid, the SLAM system
- * maintains a sequence of submaps. Each submap has its own local
- * LogOddsGrid and a global pose that anchors it to the world frame.
- */
+enum class SubmapRole { kAuthoritative, kRedundant, kProvisional };
+
+/** A local probability grid with a pose in the global map frame. */
 class Submap {
 public:
-  /**
-   * \brief Construct a new Submap at a given global pose.
-   * \param global_pose The origin of this submap in the global frame.
-   * \param width Width of the submap grid in cells.
-   * \param height Height of the submap grid in cells.
-   * \param resolution Resolution of the grid in meters/cell.
-   */
-  Submap(const Sophus::SE2d& pose, int width, int height, double resolution)
-      : global_pose_(pose),
-        num_insertions_(0),
-        is_finished_(false),
+  Submap(SubmapId id, const Sophus::SE2d& pose, int width, int height, double resolution)
+      : id_(id), global_pose_(pose), num_insertions_(0), is_finished_(false),
         role_(SubmapRole::kProvisional) {
-    
-    // The grid's origin is now strictly in the local frame of the submap.
-    // We center it so the submap's origin (0,0) is precisely in the middle of the grid matrix.
-    Sophus::SE2d grid_local_origin{Sophus::SO2d{0.0}, Eigen::Vector2d{- (width * resolution) / 2.0, - (height * resolution) / 2.0}};
-
+    const Sophus::SE2d grid_local_origin{
+        Sophus::SO2d{0.0},
+        Eigen::Vector2d{-(width * resolution) / 2.0, -(height * resolution) / 2.0}};
     grid_ = std::make_shared<LogOddsGrid>(width, height, resolution, grid_local_origin);
   }
 
-  /// Get the mutable grid (only if not finished).
+  [[nodiscard]] SubmapId id() const { return id_; }
+
   LogOddsGrid& mutable_grid() {
     if (is_finished_) throw std::runtime_error("Attempted to mutate a finished submap grid");
     return *grid_;
   }
 
-  /// Get the immutable grid.
-  const LogOddsGrid& grid() const { return *grid_; }
-
-  /// Get the global pose of this submap.
-  const Sophus::SE2d& global_pose() const { return global_pose_; }
-
-  /// Set the global pose of this submap (used during Pose Graph Optimization).
+  [[nodiscard]] const LogOddsGrid& grid() const { return *grid_; }
+  [[nodiscard]] const Sophus::SE2d& global_pose() const { return global_pose_; }
   void set_global_pose(const Sophus::SE2d& pose) { global_pose_ = pose; }
-
-  /// Get the role of this submap
-  SubmapRole role() const { return role_; }
-
-  /// Set the role of this submap
+  [[nodiscard]] SubmapRole role() const { return role_; }
   void set_role(SubmapRole role) { role_ = role; }
+  [[nodiscard]] int num_insertions() const { return num_insertions_; }
+  void add_insertion() { ++num_insertions_; }
+  [[nodiscard]] bool is_finished() const { return is_finished_; }
 
-  /// Number of scans inserted into this submap.
-  int num_insertions() const { return num_insertions_; }
-
-  /// Increment the insertion count.
-  void add_insertion() { num_insertions_++; }
-
-  /// Force finish this submap (e.g., if robot drives out of bounds)
-  void force_finish() { num_insertions_ = 50; }
-
-  /// Check if the submap is finished (frozen).
-  bool is_finished() const { return is_finished_; }
-
-  /// Mark the submap as finished and compute its radial signature.
-  void finish() { 
-    is_finished_ = true; 
+  void finish() {
+    if (is_finished_) return;
+    is_finished_ = true;
     compute_radial_signature();
+    compute_distance_field();
   }
 
-  /// Deep copy the submap (used for copy-on-write in particle filter)
-  std::shared_ptr<Submap> clone() const {
-    auto new_submap = std::make_shared<Submap>(*this);
-    if (!is_finished_) {
-        // Deep copy the active grid so divergent hypotheses don't clobber each other
-        new_submap->grid_ = std::make_shared<LogOddsGrid>(*this->grid_);
+  /** Distance to the closest occupied cell in local submap coordinates. */
+  [[nodiscard]] float distance_at(double local_x, double local_y) const {
+    if (!distance_field_) return std::numeric_limits<float>::infinity();
+    const int gx = static_cast<int>(std::floor((local_x - grid_->origin_x()) / grid_->resolution()));
+    const int gy = static_cast<int>(std::floor((local_y - grid_->origin_y()) / grid_->resolution()));
+    if (gx < 0 || gx >= grid_->width() || gy < 0 || gy >= grid_->height()) {
+      return std::numeric_limits<float>::infinity();
     }
-    // If finished, grid_ is implicitly shallow-copied by default copy constructor,
-    // safely sharing the immutable frozen grid geometry across all cloned hypotheses.
-    return new_submap;
+    return (*distance_field_)[static_cast<std::size_t>(gy * grid_->width() + gx)];
   }
 
-  /// Get the computed radial signature (histogram of occupied cell distances)
-  const std::vector<double>& radial_signature() const { return radial_signature_; }
+  /** Frozen grid and distance field remain shared; active grids are copied. */
+  [[nodiscard]] std::shared_ptr<Submap> clone() const {
+    auto clone = std::make_shared<Submap>(*this);
+    if (!is_finished_) clone->grid_ = std::make_shared<LogOddsGrid>(*grid_);
+    return clone;
+  }
+
+  [[nodiscard]] const std::vector<double>& radial_signature() const { return radial_signature_; }
 
 private:
   void compute_radial_signature() {
-    // 50 bins of 0.5 meters = up to 25 meters radius
-    const int NUM_BINS = 50;
-    const double BIN_SIZE = 0.5;
-    radial_signature_.assign(NUM_BINS, 0.0);
-
-    double res = grid_->resolution();
-    double cx = grid_->width() * res / 2.0;
-    double cy = grid_->height() * res / 2.0;
-
-    int valid_cells = 0;
+    constexpr int kNumBins = 50;
+    constexpr double kBinSize = 0.5;
+    radial_signature_.assign(kNumBins, 0.0);
+    const double resolution = grid_->resolution();
+    const double center_x = grid_->width() * resolution / 2.0;
+    const double center_y = grid_->height() * resolution / 2.0;
+    int occupied_cells = 0;
 
     for (int y = 0; y < grid_->height(); ++y) {
       for (int x = 0; x < grid_->width(); ++x) {
-        // Only consider highly occupied cells
-        if (grid_->at(x, y) > 0.5) {
-          // Distance from the submap's center (0,0) in local coordinates
-          double dx = (x * res) - cx;
-          double dy = (y * res) - cy;
-          double dist = std::sqrt(dx*dx + dy*dy);
-
-          int bin = static_cast<int>(dist / BIN_SIZE);
-          if (bin >= 0 && bin < NUM_BINS) {
-            radial_signature_[bin] += 1.0;
-            valid_cells++;
-          }
+        if (grid_->at(x, y) <= 0.5F) continue;
+        const double dx = x * resolution - center_x;
+        const double dy = y * resolution - center_y;
+        const int bin = static_cast<int>(std::hypot(dx, dy) / kBinSize);
+        if (bin >= 0 && bin < kNumBins) {
+          radial_signature_[bin] += 1.0;
+          ++occupied_cells;
         }
       }
     }
-
-    // Normalize the histogram to make it robust to different densities
-    if (valid_cells > 0) {
-      for (int i = 0; i < NUM_BINS; ++i) {
-        radial_signature_[i] /= valid_cells;
-      }
+    if (occupied_cells > 0) {
+      for (double& value : radial_signature_) value /= occupied_cells;
     }
   }
 
+  /** Linear-time chamfer distance transform used by the loop scan matcher. */
+  void compute_distance_field() {
+    const int width = grid_->width();
+    const int height = grid_->height();
+    constexpr float kInfinity = 1.0e6F;
+    constexpr float kDiagonal = 1.41421356237F;
+    auto field = std::make_shared<std::vector<float>>(
+        static_cast<std::size_t>(width * height), kInfinity);
+    auto at = [width, &field](int x, int y) -> float& {
+      return (*field)[static_cast<std::size_t>(y * width + x)];
+    };
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        if (grid_->at(x, y) > 0.5F) at(x, y) = 0.0F;
+      }
+    }
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        float value = at(x, y);
+        if (x > 0) value = std::min(value, at(x - 1, y) + 1.0F);
+        if (y > 0) value = std::min(value, at(x, y - 1) + 1.0F);
+        if (x > 0 && y > 0) value = std::min(value, at(x - 1, y - 1) + kDiagonal);
+        if (x + 1 < width && y > 0) value = std::min(value, at(x + 1, y - 1) + kDiagonal);
+        at(x, y) = value;
+      }
+    }
+    for (int y = height - 1; y >= 0; --y) {
+      for (int x = width - 1; x >= 0; --x) {
+        float value = at(x, y);
+        if (x + 1 < width) value = std::min(value, at(x + 1, y) + 1.0F);
+        if (y + 1 < height) value = std::min(value, at(x, y + 1) + 1.0F);
+        if (x + 1 < width && y + 1 < height) value = std::min(value, at(x + 1, y + 1) + kDiagonal);
+        if (x > 0 && y + 1 < height) value = std::min(value, at(x - 1, y + 1) + kDiagonal);
+        at(x, y) = value;
+      }
+    }
+    const float resolution = static_cast<float>(grid_->resolution());
+    for (float& value : *field) value *= resolution;
+    distance_field_ = std::move(field);
+  }
+
+  SubmapId id_;
   Sophus::SE2d global_pose_;
   std::shared_ptr<LogOddsGrid> grid_;
   int num_insertions_;
   bool is_finished_;
   SubmapRole role_;
   std::vector<double> radial_signature_;
+  std::shared_ptr<const std::vector<float>> distance_field_;
 };
 
-struct SequentialConstraint {
-  size_t from_idx;
-  size_t to_idx;
-  Sophus::SE2d relative_pose;
+/** Immutable keyframe range data shared between graph hypotheses. */
+struct ScanNodeData {
+  std::vector<std::pair<double, double>> returns;
+  std::uint64_t sequence = 0;
 };
 
-struct LoopConstraint {
-  size_t id;
-  size_t query_idx;
-  size_t reference_idx;
+struct TrajectoryNode {
+  ScanNodeId id = 0;
+  std::shared_ptr<const ScanNodeData> constant_data;
+  Sophus::SE2d global_pose;
+};
 
-  Sophus::SE2d T_reference_query;
-  Eigen::Matrix3d information;
+enum class ConstraintTag { kIntraSubmap, kInterSubmap };
+
+/** Cartographer-style bipartite edge between one scan node and one submap. */
+struct NodeSubmapConstraint {
+  SubmapId submap_id = 0;
+  ScanNodeId node_id = 0;
+  Sophus::SE2d T_submap_node;
+  double translation_weight = 1.0;
+  double rotation_weight = 1.0;
+  ConstraintTag tag = ConstraintTag::kIntraSubmap;
+  double score = 1.0;
+  double overlap = 1.0;
+};
+
+/** Local trajectory prior between consecutive retained scan nodes. */
+struct NodeNodeConstraint {
+  ScanNodeId from_node_id = 0;
+  ScanNodeId to_node_id = 0;
+  Sophus::SE2d T_from_to;
+  double translation_weight = 1.0;
+  double rotation_weight = 1.0;
 };
 
 struct FinishedSubmapEvent {
-  size_t hypothesis_id;
-  size_t query_idx; // The history index of the submap that just finished
+  std::size_t hypothesis_id = 0;
+  SubmapId query_submap_id = 0;
 };
 
-/**
- * \brief A list of submaps maintained by each particle.
- */
 struct SubmapList {
   std::vector<std::shared_ptr<Submap>> history;
-  std::vector<SequentialConstraint> odometry_constraints;
-  std::vector<LoopConstraint> loop_constraints;
-  std::vector<std::shared_ptr<Submap>> active_submaps; // Overlapping active submaps
+  std::vector<std::shared_ptr<Submap>> active_submaps;
+  std::vector<TrajectoryNode> trajectory_nodes;
+  std::vector<NodeSubmapConstraint> node_submap_constraints;
+  std::vector<NodeNodeConstraint> local_trajectory_constraints;
+  SubmapId next_submap_id = 0;
+  ScanNodeId next_node_id = 0;
+  bool has_last_keyframe_pose = false;
+  Sophus::SE2d last_keyframe_pose;
 
-  // Make sure active submaps are independent if shared
   void make_active_unique() {
-    for (auto& active_submap : active_submaps) {
-      if (active_submap && active_submap.use_count() > 1) {
-        active_submap = active_submap->clone();
-      }
+    for (auto& submap : active_submaps) {
+      if (submap && submap.use_count() > 1) submap = submap->clone();
     }
   }
 
-  // Finishes any submap that reached 50 insertions, generates odometry constraints, and archives it.
-  std::vector<size_t> finish_ready_submaps() {
-    std::vector<size_t> finished_indices;
+  [[nodiscard]] std::shared_ptr<Submap> find_submap(SubmapId id) const {
+    for (const auto& submap : history) if (submap->id() == id) return submap;
+    for (const auto& submap : active_submaps) if (submap->id() == id) return submap;
+    return nullptr;
+  }
+
+  [[nodiscard]] const TrajectoryNode* find_node(ScanNodeId id) const {
+    for (const auto& node : trajectory_nodes) if (node.id == id) return &node;
+    return nullptr;
+  }
+
+  [[nodiscard]] std::vector<ScanNodeId> insertion_nodes(SubmapId submap_id) const {
+    std::vector<ScanNodeId> result;
+    for (const auto& constraint : node_submap_constraints) {
+      if (constraint.tag == ConstraintTag::kIntraSubmap && constraint.submap_id == submap_id) {
+        result.push_back(constraint.node_id);
+      }
+    }
+    return result;
+  }
+
+  std::vector<SubmapId> finish_ready_submaps(int max_insertions) {
+    std::vector<SubmapId> finished_ids;
     auto it = active_submaps.begin();
-    
     while (it != active_submaps.end()) {
-      if ((*it)->num_insertions() >= 50) {
-        auto finished_submap = *it;
-        finished_submap->finish();
-
-        finished_submap->set_role(SubmapRole::kAuthoritative);
-
-        history.push_back(finished_submap);
-
-
-
-        finished_indices.push_back(history.size() - 1);
+      if ((*it)->num_insertions() >= max_insertions) {
+        auto submap = *it;
+        submap->finish();
+        submap->set_role(SubmapRole::kAuthoritative);
+        history.push_back(submap);
+        finished_ids.push_back(submap->id());
         it = active_submaps.erase(it);
       } else {
         ++it;
       }
     }
-    
-    return finished_indices;
+    return finished_ids;
+  }
+
+  /** Freeze active submaps the robot has driven out of.
+   *
+   * Fixed-size grids cannot grow, so once the robot is farther than `max_distance`
+   * from a submap origin every raycast falls outside that grid and the submap only
+   * occupies an active slot. Submaps are ordered oldest first and their origins follow
+   * the trajectory, so only the front needs checking. The newest active submap is never
+   * abandoned: something has to receive the current scan.
+   */
+  std::vector<SubmapId> finish_abandoned_submaps(
+      const Eigen::Vector2d& robot_position, double max_distance) {
+    std::vector<SubmapId> finished_ids;
+    while (active_submaps.size() > 1) {
+      const auto& oldest = active_submaps.front();
+      const double distance =
+          (robot_position - oldest->global_pose().translation()).norm();
+      if (distance < max_distance) break;
+      oldest->finish();
+      oldest->set_role(SubmapRole::kAuthoritative);
+      history.push_back(oldest);
+      finished_ids.push_back(oldest->id());
+      active_submaps.erase(active_submaps.begin());
+    }
+    return finished_ids;
+  }
+
+  [[nodiscard]] std::size_t inter_constraint_count() const {
+    return static_cast<std::size_t>(std::count_if(
+        node_submap_constraints.begin(), node_submap_constraints.end(),
+        [](const NodeSubmapConstraint& constraint) {
+          return constraint.tag == ConstraintTag::kInterSubmap;
+        }));
+  }
+
+  /** Release point clouds once their nodes no longer belong to an active submap. */
+  void trim_scan_data_outside_active_submaps() {
+    std::set<SubmapId> active_ids;
+    for (const auto& submap : active_submaps) active_ids.insert(submap->id());
+    std::set<ScanNodeId> retained_nodes;
+    for (const auto& constraint : node_submap_constraints) {
+      if (constraint.tag == ConstraintTag::kIntraSubmap &&
+          active_ids.count(constraint.submap_id) != 0) {
+        retained_nodes.insert(constraint.node_id);
+      }
+    }
+    for (auto& node : trajectory_nodes) {
+      if (retained_nodes.count(node.id) == 0) node.constant_data.reset();
+    }
   }
 };
 
-/**
- * \brief Represents a global hypothesis in the multi-hypothesis SLAM system.
- * 
- * Each hypothesis owns a shared submap history that all its member particles reference.
- * Particles within a hypothesis handle local pose refinement; the hypothesis handles
- * the global map, loop closure detection, and pose graph optimization.
- */
 struct Hypothesis {
-  size_t id = 0;
-  SubmapList submaps;                                    // Shared submap history
-  int loop_closure_cooldown = 0;                         // Per-hypothesis cooldown
-  size_t optimized_loops_count = 0;                      // Number of optimized loop constraints
+  std::size_t id = 0;
+  SubmapList submaps;
+  std::size_t optimized_inter_constraints_count = 0;
 };
 
-#endif // __BELUGASLAM_CORE_SUBMAP_HPP__
+#endif  // __BELUGASLAM_CORE_SUBMAP_HPP__

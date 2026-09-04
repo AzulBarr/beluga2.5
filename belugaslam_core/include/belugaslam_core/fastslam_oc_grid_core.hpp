@@ -11,6 +11,10 @@
 #include <iomanip>
 #include <chrono>
 #include <numeric>
+#include <array>
+#include <limits>
+#include <set>
+#include <unordered_map>
 #include <ceres/ceres.h>
 
 #include <range/v3/view/take.hpp>
@@ -129,6 +133,36 @@ struct FastSLAMParams {
 
     /// \brief Scaling factor for the endpoint score to tune particle filter confidence.
     double likelihood_scaling_factor = 0.05;
+
+    /// Cartographer-like overlapping submap lifecycle.
+    int submap_num_range_data = 30;
+    int submap_overlap_range_data = 15;
+
+    /// \brief Spatial guard for fixed-size submaps.
+    /// Cartographer grows its grids on demand; ours are a fixed SUBMAP_COLS x SUBMAP_ROWS
+    /// box, so the insertion counters alone do not bound how far the robot travels inside
+    /// one submap. A new submap starts once the robot leaves `submap_creation_distance`
+    /// around the newest active submap origin, and an active submap is frozen once the
+    /// robot leaves `submap_abandon_distance`, beyond which its grid can no longer receive
+    /// useful range data. Defaults are 40% and 100% of the submap half-extent.
+    double submap_creation_distance = 0.4 * (SUBMAP_COLS * GRID_RESOLUTION / 2.0);
+    double submap_abandon_distance = SUBMAP_COLS * GRID_RESOLUTION / 2.0;
+
+    /// Motion filter for retaining graph scan nodes (not every processed scan).
+    double keyframe_min_translation = 0.15;
+    double keyframe_min_rotation = 5.0 * Sophus::Constants<double>::pi() / 180.0;
+    std::size_t max_points_per_scan_node = 180;
+
+    /// Bounded loop-constraint search and branching.
+    std::size_t loop_recent_submaps = 5;
+    std::size_t loop_max_candidates = 6;
+    std::size_t loop_max_branches = 2;
+    std::size_t max_hypotheses = 4;
+    double loop_candidate_distance = 10.0;
+    double loop_search_translation = 3.0;
+    double loop_search_rotation = 0.7;
+    double loop_min_score = 0.55;
+    double loop_min_overlap = 0.35;
 };
 
 /**
@@ -170,6 +204,22 @@ public:
                       params.spatial_resolution_y, 
                       params.spatial_resolution_theta},
           params_(params){
+
+      params_.submap_num_range_data = std::max(2, params_.submap_num_range_data);
+      params_.submap_overlap_range_data = std::clamp(
+          params_.submap_overlap_range_data, 1, params_.submap_num_range_data - 1);
+      // A creation radius below the node's motion gate would spawn a submap per scan.
+      params_.submap_creation_distance = std::max(0.5, params_.submap_creation_distance);
+      // Abandoning must always happen strictly after creating, or the two thrash.
+      params_.submap_abandon_distance = std::max(
+          1.5 * params_.submap_creation_distance, params_.submap_abandon_distance);
+      params_.max_points_per_scan_node =
+          std::max<std::size_t>(1, params_.max_points_per_scan_node);
+      params_.loop_max_candidates =
+          std::max<std::size_t>(1, params_.loop_max_candidates);
+      params_.loop_max_branches =
+          std::max<std::size_t>(1, params_.loop_max_branches);
+      params_.max_hypotheses = std::max<std::size_t>(1, params_.max_hypotheses);
       
       // Create the initial hypothesis (single hypothesis: "exploring")
       auto initial_hypothesis = std::make_shared<Hypothesis>();
@@ -395,92 +445,144 @@ public:
         
     }
 
-    /// Aligns two submaps (query and reference) to find the MLE relative transform T_ref_query.
-    Sophus::SE2d align_submaps(const std::shared_ptr<Submap>& query, const std::shared_ptr<Submap>& reference, const Sophus::SE2d& initial_relative_pose) const {
-        std::vector<Eigen::Vector2d> query_points;
-        const auto& q_grid = query->grid();
-        for (int y = 0; y < q_grid.height(); ++y) {
-            for (int x = 0; x < q_grid.width(); ++x) {
-                if (q_grid.at(x, y) > 0.5f) { // Only align occupied cells
-                    double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
-                    double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
-                    query_points.push_back({local_x, local_y});
+    struct ScanMatchResult {
+        Sophus::SE2d T_submap_node;
+        double score = 0.0;
+        double overlap = 0.0;
+        bool valid = false;
+    };
+
+    struct SearchState {
+        Sophus::SE2d pose;
+        double score = 0.0;
+        double overlap = 0.0;
+    };
+
+    [[nodiscard]] std::shared_ptr<const ScanNodeData> make_scan_node_data(
+        const measurement_type& z) {
+        auto data = std::make_shared<ScanNodeData>();
+        data->sequence = next_scan_sequence_++;
+        if (z.empty()) return data;
+        const std::size_t point_limit =
+            std::max<std::size_t>(1, params_.max_points_per_scan_node);
+        const std::size_t stride = std::max<std::size_t>(
+            1, (z.size() + point_limit - 1) / point_limit);
+        data->returns.reserve(std::min(z.size(), point_limit));
+        for (std::size_t i = 0; i < z.size() && data->returns.size() < point_limit;
+             i += stride) {
+            data->returns.push_back(z[i]);
+        }
+        return data;
+    }
+
+    [[nodiscard]] bool should_create_scan_node(
+        const SubmapList& submaps, const state_type& pose) const {
+        if (!submaps.has_last_keyframe_pose) return true;
+        const auto delta = submaps.last_keyframe_pose.inverse() * pose;
+        return delta.translation().norm() >= params_.keyframe_min_translation ||
+               std::abs(delta.so2().log()) >= params_.keyframe_min_rotation;
+    }
+
+    [[nodiscard]] SearchState score_scan_in_submap(
+        const ScanNodeData& data, const Submap& submap,
+        const Sophus::SE2d& T_submap_node) const {
+        SearchState result{T_submap_node, 0.0, 0.0};
+        if (data.returns.empty()) return result;
+        constexpr double kSigma = 0.20;
+        std::size_t inside = 0;
+        double likelihood_sum = 0.0;
+        for (const auto& point : data.returns) {
+            const Eigen::Vector2d hit =
+                T_submap_node * Eigen::Vector2d{point.first, point.second};
+            const float distance = submap.distance_at(hit.x(), hit.y());
+            if (!std::isfinite(distance)) continue;
+            ++inside;
+            const double normalized = static_cast<double>(distance) / kSigma;
+            likelihood_sum += std::exp(-0.5 * normalized * normalized);
+        }
+        result.overlap = static_cast<double>(inside) / data.returns.size();
+        if (inside > 0) result.score = likelihood_sum / inside;
+        return result;
+    }
+
+    /**
+     * Bounded correlative scan matching: a coarse lattice followed by beam refinements.
+     * This replaces the previous exhaustive four-level submap-to-submap search.
+     */
+    [[nodiscard]] ScanMatchResult match_scan_to_submap(
+        const ScanNodeData& data, const Submap& submap,
+        const Sophus::SE2d& initial_pose) const {
+        constexpr std::size_t kBeamWidth = 8;
+        std::vector<SearchState> beam;
+        for (double dx = -params_.loop_search_translation;
+             dx <= params_.loop_search_translation + 1.0e-9; dx += 0.50) {
+            for (double dy = -params_.loop_search_translation;
+                 dy <= params_.loop_search_translation + 1.0e-9; dy += 0.50) {
+                for (double angle = -params_.loop_search_rotation;
+                     angle <= params_.loop_search_rotation + 1.0e-9; angle += 0.14) {
+                    const auto candidate = initial_pose * Sophus::SE2d{
+                        Sophus::SO2d{angle}, Eigen::Vector2d{dx, dy}};
+                    auto state = score_scan_in_submap(data, submap, candidate);
+                    if (state.overlap >= params_.loop_min_overlap * 0.75) beam.push_back(state);
                 }
             }
         }
-
-        if (query_points.empty()) {
-            return initial_relative_pose;
-        }
-
-        const auto& ref_grid = reference->grid();
-        auto score_fn = [&](const Sophus::SE2d& T_ref_query) {
-            double score = 0.0;
-            for (const auto& pt : query_points) {
-                Eigen::Vector2d pt_in_ref = T_ref_query * pt;
-                int gx, gy, idx;
-                if (world_to_index(pt_in_ref.x(), pt_in_ref.y(), gx, gy, idx, ref_grid)) {
-                    score += ref_grid.at(idx);
-                } else {
-                    score -= 5.0; // Out-of-bounds penalty
-                }
-            }
-            return score;
+        if (beam.empty()) return {};
+        auto better = [](const SearchState& a, const SearchState& b) {
+            return a.score * std::min(1.0, a.overlap / 0.5) >
+                   b.score * std::min(1.0, b.overlap / 0.5);
         };
+        if (beam.size() > kBeamWidth) {
+            std::partial_sort(beam.begin(), beam.begin() + kBeamWidth, beam.end(), better);
+            beam.resize(kBeamWidth);
+        } else {
+            std::sort(beam.begin(), beam.end(), better);
+        }
 
-        // 1. Local search (cm-level, fraction of degree)
-        auto dxs = {-0.04, -0.02, 0.0, 0.02, 0.04};
-        auto dys = {-0.04, -0.02, 0.0, 0.02, 0.04};
-        auto dthetas = {-0.5 * Sophus::Constants<double>::pi()/180, 0.0, 0.5 * Sophus::Constants<double>::pi()/180};
-        
-        double best_score = -1e9;
-        Sophus::SE2d best_pose = initial_relative_pose;
-        
-        for (double dx : dxs) {
-            for (double dy : dys) {
-                for (double dt : dthetas) {
-                    Sophus::SE2d candidate = initial_relative_pose * Sophus::SE2d(Sophus::SO2d{dt}, Eigen::Vector2d{dx, dy});
-                    double score = score_fn(candidate);
-                    if (score > best_score) {
-                        best_score = score;
-                        best_pose = candidate;
+        for (const auto& resolution : std::array<std::pair<double, double>, 3>{
+                 std::pair<double, double>{0.15, 0.04}, {0.05, 0.015}, {0.015, 0.005}}) {
+            std::vector<SearchState> refined;
+            refined.reserve(beam.size() * 27);
+            for (const auto& seed : beam) {
+                for (int ix = -1; ix <= 1; ++ix) {
+                    for (int iy = -1; iy <= 1; ++iy) {
+                        for (int ia = -1; ia <= 1; ++ia) {
+                            const auto candidate = seed.pose * Sophus::SE2d{
+                                Sophus::SO2d{ia * resolution.second},
+                                Eigen::Vector2d{ix * resolution.first, iy * resolution.first}};
+                            auto state = score_scan_in_submap(data, submap, candidate);
+                            if (state.overlap >= params_.loop_min_overlap * 0.75) refined.push_back(state);
+                        }
                     }
                 }
             }
+            if (refined.empty()) break;
+            if (refined.size() > kBeamWidth) {
+                std::partial_sort(refined.begin(), refined.begin() + kBeamWidth, refined.end(), better);
+                refined.resize(kBeamWidth);
+            } else {
+                std::sort(refined.begin(), refined.end(), better);
+            }
+            beam = std::move(refined);
         }
 
-        // 2. Sub-centimeter refinement
-        auto dxs2 = {-0.01, 0.0, 0.01};
-        auto dys2 = {-0.01, 0.0, 0.01};
-        auto dts2 = {-0.2 * Sophus::Constants<double>::pi()/180, 0.0, 0.2 * Sophus::Constants<double>::pi()/180};
-        
-        Sophus::SE2d refined_pose = best_pose;
-        double refined_score = best_score;
-        for (double dx : dxs2) {
-            for (double dy : dys2) {
-                for (double dt : dts2) {
-                    Sophus::SE2d candidate = best_pose * Sophus::SE2d(Sophus::SO2d{dt}, Eigen::Vector2d{dx, dy});
-                    double score = score_fn(candidate);
-                    if (score > refined_score) {
-                        refined_score = score;
-                        refined_pose = candidate;
-                    }
-                }
-            }
-        }
-        
-        return refined_pose;
+        const auto& best = beam.front();
+        return {best.pose, best.score, best.overlap,
+                best.score >= params_.loop_min_score &&
+                    best.overlap >= params_.loop_min_overlap};
     }
 
     /// Update the occupancy grid map of each hypothesis based on the transformed measurement.
     std::vector<FinishedSubmapEvent> update_occupancy_grid(const measurement_type& z) {
         std::vector<FinishedSubmapEvent> finished_events;
+        std::shared_ptr<const ScanNodeData> shared_scan_data;
+
+        if (z.empty()) return finished_events;
 
         for (auto& hypothesis : hypotheses_) {
             auto& submaps = hypothesis->submaps;
-            bool finished_this_step = false;
 
-            // 1. Find the best particle in THIS hypothesis
+            // The graph receives one representative local-SLAM pose per hypothesis.
             double best_w = -1.0;
             state_type best_pose;
             for (const auto& p : particles_) {
@@ -492,29 +594,68 @@ public:
                     }
                 }
             }
-            if (best_w < 0) continue;  // Dead hypothesis (no particles)
+            if (best_w < 0) continue;
 
-            // 2. Ensure we have an active submap, and enforce Copy-On-Write if shared
+            // Cartographer-style motion filter: it bounds the size of the pose graph
+            // only. Every scan is still inserted into the active submaps, so grid
+            // quality does not depend on the keyframe rate.
+            const bool create_graph_node = should_create_scan_node(submaps, best_pose);
+            if (create_graph_node && !shared_scan_data) {
+                shared_scan_data = make_scan_node_data(z);
+            }
+            const bool retain_node =
+                create_graph_node && shared_scan_data && !shared_scan_data->returns.empty();
+
             submaps.make_active_unique();
-            
-            // Spawn new submap if needed (either empty, or the newest submap has 25 insertions)
-            if (submaps.active_submaps.empty() || 
-                submaps.active_submaps.back()->num_insertions() >= 25) {
-                submaps.active_submaps.push_back(std::make_shared<Submap>(best_pose, SUBMAP_COLS, SUBMAP_ROWS, GRID_RESOLUTION));
+
+            // Overlapping active submaps, with half-submap staggering by default. The
+            // insertion counter is not enough on its own: it bounds how many scans a
+            // submap receives, not how far the robot travels while receiving them, so a
+            // fast robot could leave the fixed grid box long before reaching the count.
+            // The travelled distance is therefore a second, independent trigger.
+            bool needs_new_submap = submaps.active_submaps.empty();
+            if (!needs_new_submap) {
+                const auto& newest = submaps.active_submaps.back();
+                const double distance_from_origin =
+                    (best_pose.translation() - newest->global_pose().translation()).norm();
+                needs_new_submap =
+                    newest->num_insertions() >= params_.submap_overlap_range_data ||
+                    distance_from_origin >= params_.submap_creation_distance;
+            }
+            if (needs_new_submap) {
+                submaps.active_submaps.push_back(std::make_shared<Submap>(
+                    submaps.next_submap_id++, best_pose, SUBMAP_COLS, SUBMAP_ROWS,
+                    GRID_RESOLUTION));
             }
 
-            // 3. Insert scan into ALL active submaps (interlocking)
+            TrajectoryNode node;
+            if (retain_node) {
+                node.id = submaps.next_node_id++;
+                node.constant_data = shared_scan_data;
+                node.global_pose = best_pose;
+
+                if (!submaps.trajectory_nodes.empty()) {
+                    const auto& previous = submaps.trajectory_nodes.back();
+                    submaps.local_trajectory_constraints.push_back({
+                        previous.id, node.id,
+                        previous.global_pose.inverse() * node.global_pose,
+                        3.0, 5.0});
+                }
+            }
+
+            // Every scan is inserted into every overlapping active submap. Intra-submap
+            // constraints are measured before insertion, but only for retained nodes.
             for (auto& active_submap : submaps.active_submaps) {
-                // Get the robot's coordinates in the submap's local frame.
-                // It is perfectly safe for the robot to be physically outside the submap's bounding box; 
-                // Bresenham will just clip the rays to the map boundaries.
-                auto T_w_s = active_submap->global_pose();
-                auto T_s_r = T_w_s.inverse() * best_pose;
+                const auto T_s_r = active_submap->global_pose().inverse() * best_pose;
+                if (retain_node) {
+                    submaps.node_submap_constraints.push_back({
+                        active_submap->id(), node.id, T_s_r,
+                        5.0, 8.0, ConstraintTag::kIntraSubmap, 1.0, 1.0});
+                }
+
                 int gx0, gy0, dummy_idx;
                 world_to_index(T_s_r.translation().x(), T_s_r.translation().y(), gx0, gy0, dummy_idx, active_submap->grid());
-
                 auto& lo_grid = active_submap->mutable_grid();
-                
                 clear_robot_footprint(ROBOT_RADIUS, gx0, gy0, lo_grid);
 
                 for (const auto& local_point : z) {
@@ -534,31 +675,24 @@ public:
                         lo_grid.at(hit_idx) = std::min(lo_grid.at(hit_idx) + l_occ_, 5.0f);
                     }
                 }
-                
                 active_submap->add_insertion();
             }
 
-            // 4. Finish ready submaps (>= 50 insertions) and generate events
-            auto finished_indices = submaps.finish_ready_submaps();
-            for (size_t f_idx : finished_indices) {
-                // Generate a highly accurate sequential constraint by aligning the overlapping submaps
-                if (f_idx > 0) {
-                    SequentialConstraint constraint;
-                    constraint.from_idx = f_idx - 1;
-                    constraint.to_idx = f_idx;
-                    
-                    auto pose_a = submaps.history[constraint.from_idx]->global_pose();
-                    auto pose_b = submaps.history[constraint.to_idx]->global_pose();
-                    Sophus::SE2d initial_relative = pose_a.inverse() * pose_b;
-                    
-                    
-                    constraint.relative_pose = align_submaps(submaps.history[constraint.to_idx], submaps.history[constraint.from_idx], initial_relative);
-                    
-                    submaps.odometry_constraints.push_back(constraint);
-                }
+            if (retain_node) {
+                submaps.trajectory_nodes.push_back(std::move(node));
+                submaps.last_keyframe_pose = best_pose;
+                submaps.has_last_keyframe_pose = true;
+            }
 
-                finished_events.push_back({hypothesis->id, f_idx});
-                finished_this_step = true; // Still used for logging if needed
+            for (SubmapId id : submaps.finish_ready_submaps(params_.submap_num_range_data)) {
+                finished_events.push_back({hypothesis->id, id});
+            }
+            // Without this the distance trigger alone would let active submaps pile up:
+            // a submap the robot has driven out of keeps its slot until it reaches
+            // submap_num_range_data, even though every raycast now falls outside it.
+            for (SubmapId id : submaps.finish_abandoned_submaps(
+                     best_pose.translation(), params_.submap_abandon_distance)) {
+                finished_events.push_back({hypothesis->id, id});
             }
         }
         return finished_events;
@@ -566,22 +700,14 @@ public:
 
     /// Step 5: Post-update processing (Loop closure, PGO, Best map composite)
     void post_update(const measurement_type& z, const std::vector<FinishedSubmapEvent>& finished_events) {
-        measurement_type z_sparse;
-        constexpr size_t kStep = 2;
-        z_sparse.reserve(z.size() / kStep + 1);
-        for (size_t i = 0; i < z.size(); i += kStep) {
-            z_sparse.push_back(z[i]);
-        }
-
-        // --- Tick down per-hypothesis loop closure cooldown ---
-        for (auto& hypothesis : hypotheses_) {
-            if (hypothesis->loop_closure_cooldown > 0) {
-                hypothesis->loop_closure_cooldown--;
+        // --- Loop Closure Detection (driven by FinishedSubmapEvents) ---
+        (void)z;
+        detect_loop_closure(finished_events);
+        if (!finished_events.empty()) {
+            for (auto& hypothesis : hypotheses_) {
+                hypothesis->submaps.trim_scan_data_outside_active_submaps();
             }
         }
-
-        // --- Loop Closure Detection (driven by FinishedSubmapEvents) ---
-        detect_loop_closure(z_sparse, finished_events);
 
         // --- Determine Best Hypothesis & Best Pose ---
         std::map<size_t, double> hypothesis_weights;
@@ -618,9 +744,20 @@ public:
         }
 
         // --- PGO Trigger (for the winning hypothesis) ---
-        if (best_hypothesis->submaps.loop_constraints.size() > best_hypothesis->optimized_loops_count) {
+        if (best_hypothesis->submaps.inter_constraint_count() >
+            best_hypothesis->optimized_inter_constraints_count) {
             optimize_pose_graph(best_hypothesis);
-            best_hypothesis->optimized_loops_count = best_hypothesis->submaps.loop_constraints.size();
+            best_hypothesis->optimized_inter_constraints_count =
+                best_hypothesis->submaps.inter_constraint_count();
+            best_particle_weight = -1.0;
+            for (const auto& p : particles_) {
+                if (std::get<2>(p) != best_hypothesis) continue;
+                const double weight = static_cast<double>(std::get<1>(p));
+                if (weight > best_particle_weight) {
+                    best_particle_weight = weight;
+                    best_pose_ = std::get<0>(p);
+                }
+            }
         }
 
         // Composite full global map from the best particle's hypothesis for RViz
@@ -848,17 +985,26 @@ public:
                 std::shared_ptr<Hypothesis> target_hypothesis = hypothesis;
 
                 if (!is_first_spatial_cluster) {
+                    if (hypotheses_.size() >= params_.max_hypotheses) {
+                        // Keep this geometric mode in its parent when the bounded
+                        // hypothesis budget is exhausted.
+                        for (size_t local_idx : s_cluster_to_indices[scid]) {
+                            const size_t global_idx = indices[local_idx];
+                            std::get<2>(*(particles_.begin() + global_idx)) = hypothesis;
+                        }
+                        continue;
+                    }
                     // SPATIAL DIVERGENCE FORK!
                     target_hypothesis = std::make_shared<Hypothesis>(*hypothesis); // Copy history & properties
                     target_hypothesis->id = next_hypothesis_id_++;
                     
                     // The new hypothesis explicitly SHARES the exact same active submaps.
                     // Copy-on-Write (COW) is enforced right before inserting the scan in update_occupancy_grid.
-                    target_hypothesis->submaps.odometry_constraints = hypothesis->submaps.odometry_constraints;
-                    target_hypothesis->submaps.loop_constraints = hypothesis->submaps.loop_constraints;
+                    // ScanNodeData and submap grids remain shared. Only the small vectors
+                    // of poses/constraints are copied for the diverging graph state.
                     target_hypothesis->submaps.active_submaps = hypothesis->submaps.active_submaps;
-                    target_hypothesis->loop_closure_cooldown = hypothesis->loop_closure_cooldown;
-                    target_hypothesis->optimized_loops_count = hypothesis->optimized_loops_count;
+                    target_hypothesis->optimized_inter_constraints_count =
+                        hypothesis->optimized_inter_constraints_count;
                     hypotheses_.push_back(target_hypothesis);
 
                     // Find representative pose of the diverged cluster
@@ -1014,50 +1160,22 @@ public:
         }
     }
 
-    /// Composites the local tracking context for the scan matcher, incorporating nearby historical submaps
+    /// Local tracking view: match against every active submap. Cartographer can match
+    /// against a single one because its grids grow on demand; our submaps are a fixed
+    /// 12 x 12 m while the LiDAR reaches much further, so restricting the view to the
+    /// oldest active submap starves the scan matcher of endpoints as the robot leaves
+    /// it. Historical submaps still participate only through graph constraints, not by
+    /// being mixed into the local likelihood field.
     void compose_tracking_view(const std::shared_ptr<Hypothesis>& hypothesis, const state_type& representative_pose, GridTypeLO& tracking_lo) const {
+        (void)representative_pose;
         std::fill(tracking_lo.data().begin(), tracking_lo.data().end(), 0.0f);
-        
-        // 1. Draw ALL active submaps (interlocking)
-        for (const auto& active_submap : hypothesis->submaps.active_submaps) {
-            draw_submap_into_grid(active_submap, tracking_lo);
-        }
 
-        // 2. Draw previous frozen submap (whether authoritative or redundant, it's our immediate tracking past)
-        if (!hypothesis->submaps.history.empty()) {
+        if (!hypothesis->submaps.active_submaps.empty()) {
+            for (const auto& active_submap : hypothesis->submaps.active_submaps) {
+                draw_submap_into_grid(active_submap, tracking_lo);
+            }
+        } else if (!hypothesis->submaps.history.empty()) {
             draw_submap_into_grid(hypothesis->submaps.history.back(), tracking_lo);
-        }
-
-        // 3. Draw top_k nearby historical submaps
-        size_t k = 1;
-        // The submap's geometry spans up to lidar_range from its center.
-        // The robot's current view spans up to lidar_range from its pose.
-        // Intersection happens if dist <= 2 * lidar_range.
-        // Assuming a max lidar range of ~15m, a radius of 30.0m guarantees we don't miss intersecting submaps.
-        double radius = 30.0; 
-        
-        std::vector<std::pair<double, std::shared_ptr<Submap>>> nearby;
-        size_t hist_size = hypothesis->submaps.history.size();
-        
-        if (hist_size > 1) { // We need at least one submap strictly before back()
-            for (size_t i = 0; i + 1 < hist_size; ++i) {
-                auto sm = hypothesis->submaps.history[i];
-                double dx = representative_pose.translation().x() - sm->global_pose().translation().x();
-                double dy = representative_pose.translation().y() - sm->global_pose().translation().y();
-                double dist = std::sqrt(dx*dx + dy*dy);
-                
-                if (dist <= radius) {
-                    nearby.push_back({dist, sm});
-                }
-            }
-
-            // Sort by proximity
-            std::sort(nearby.begin(), nearby.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-
-            // Draw up to K closest submaps
-            for (size_t i = 0; i < std::min(k, nearby.size()); ++i) {
-                draw_submap_into_grid(nearby[i].second, tracking_lo);
-            }
         }
 
         for (auto& val : tracking_lo.data()) {
@@ -1065,380 +1183,311 @@ public:
         }
     }
 
+
     struct LoopCandidate {
-        size_t ref_idx;
-        double score;
-        Sophus::SE2d best_match;
+        SubmapId reference_submap_id = 0;
+        ScanNodeId query_node_id = 0;
+        double score = 0.0;
+        double overlap = 0.0;
+        std::size_t reference_history_index = 0;
+        Sophus::SE2d T_reference_node;
+        bool valid = false;
     };
 
-    /// Step 3: Detect and Inject Loop Closure candidates (per hypothesis)
-    void detect_loop_closure(const std::vector<std::pair<double, double>>& z_sparse, const std::vector<FinishedSubmapEvent>& finished_events) {
-        if (z_sparse.empty() || finished_events.empty()) return;
-
-        // Iterate over the events of submaps that just finished
+    /**
+     * Detects loop constraints between selected scan nodes and old frozen submaps.
+     * Candidate retrieval is bounded; geometric verification uses a distance field
+     * and beam refinement rather than exhaustive submap-to-submap raster matching.
+     */
+    void detect_loop_closure(const std::vector<FinishedSubmapEvent>& finished_events) {
         for (const auto& event : finished_events) {
-            std::shared_ptr<Hypothesis> hypothesis = nullptr;
-            for (auto& h : hypotheses_) {
-                if (h->id == event.hypothesis_id) {
-                    hypothesis = h;
-                    break;
+            auto hypothesis_it = std::find_if(
+                hypotheses_.begin(), hypotheses_.end(), [&](const auto& hypothesis) {
+                    return hypothesis->id == event.hypothesis_id;
+                });
+            if (hypothesis_it == hypotheses_.end()) continue;
+            const auto hypothesis = *hypothesis_it;
+            auto& graph = hypothesis->submaps;
+            const auto query_submap = graph.find_submap(event.query_submap_id);
+            if (!query_submap || graph.history.size() <= params_.loop_recent_submaps) continue;
+
+            auto query_node_ids = graph.insertion_nodes(event.query_submap_id);
+            if (query_node_ids.empty()) continue;
+
+            // Three scans distributed through the finished submap provide robustness
+            // without matching all of its keyframes against every candidate.
+            std::vector<ScanNodeId> representative_nodes;
+            const std::size_t samples = std::min<std::size_t>(3, query_node_ids.size());
+            for (std::size_t i = 0; i < samples; ++i) {
+                const std::size_t index = samples == 1
+                    ? query_node_ids.size() - 1
+                    : i * (query_node_ids.size() - 1) / (samples - 1);
+                representative_nodes.push_back(query_node_ids[index]);
+            }
+
+            const auto query_history_it = std::find_if(
+                graph.history.begin(), graph.history.end(), [&](const auto& submap) {
+                    return submap->id() == event.query_submap_id;
+                });
+            if (query_history_it == graph.history.end()) continue;
+            const std::size_t query_index =
+                static_cast<std::size_t>(std::distance(graph.history.begin(), query_history_it));
+
+            struct RetrievalCandidate {
+                std::size_t history_index;
+                double distance;
+                double signature_distance;
+            };
+            std::vector<RetrievalCandidate> retrieval;
+            for (std::size_t index = 0; index < graph.history.size(); ++index) {
+                if (index + params_.loop_recent_submaps >= query_index) continue;
+                const auto& reference = graph.history[index];
+                const double distance =
+                    (reference->global_pose().translation() -
+                     query_submap->global_pose().translation()).norm();
+                if (distance > params_.loop_candidate_distance) continue;
+
+                double signature_distance = 0.0;
+                const auto& a = reference->radial_signature();
+                const auto& b = query_submap->radial_signature();
+                const std::size_t count = std::min(a.size(), b.size());
+                for (std::size_t i = 0; i < count; ++i) {
+                    const double delta = a[i] - b[i];
+                    signature_distance += delta * delta;
                 }
+                retrieval.push_back({index, distance, signature_distance});
             }
-            if (!hypothesis) continue; // Hypothesis was killed
-
-            // If cooldown is still active, wait until it finishes
-            if (hypothesis->loop_closure_cooldown > 0) {
-                continue;
+            std::sort(retrieval.begin(), retrieval.end(), [](const auto& a, const auto& b) {
+                // Geometry is primary; the signature cheaply breaks nearby ties.
+                return a.distance + 4.0 * a.signature_distance <
+                       b.distance + 4.0 * b.signature_distance;
+            });
+            if (retrieval.size() > params_.loop_max_candidates) {
+                retrieval.resize(params_.loop_max_candidates);
             }
 
-            // 1. Find the best particle in THIS hypothesis for its representative pose
-            double best_w = -1.0;
-            state_type representative_pose;
-            for (const auto& p : particles_) {
-                if (std::get<2>(p) != hypothesis) continue;
-                double w = static_cast<double>(std::get<1>(p));
-                if (w > best_w) {
-                    best_w = w;
-                    representative_pose = std::get<0>(p);
-                }
-            }
-            if (best_w < 0) continue;  // Dead hypothesis
-
-            // 2. Search THIS hypothesis's history for proximity matches
-            const auto& history = hypothesis->submaps.history;
-            
-            // Pre-extract the query submap's point cloud ONCE (it doesn't change per candidate)
-            auto query_submap = history[event.query_idx];
-            std::vector<Eigen::Vector2d> query_points;
-            const auto& q_grid = query_submap->grid();
-            int pt_count = 0;
-            for (int y = 0; y < q_grid.height(); ++y) {
-                for (int x = 0; x < q_grid.width(); ++x) {
-                    if (q_grid.at(x, y) > 0.5f) {
-                        if (pt_count++ % 4 == 0) { // Take 1 out of every 4 occupied cells
-                            double local_x = q_grid.origin_x() + (x + 0.5) * q_grid.resolution();
-                            double local_y = q_grid.origin_y() + (y + 0.5) * q_grid.resolution();
-                            query_points.push_back({local_x, local_y});
-                        }
-                    }
-                }
-            }
-            if (query_points.empty()) continue;
-
-            constexpr size_t min_separation = 5;
             std::vector<LoopCandidate> candidates;
-
-            // 1. Evaluate ALL potential historical submaps within proximity
-            for (size_t i = 0; i < history.size(); ++i) {
-                if (i + min_separation >= event.query_idx) continue;
-
-                auto old_submap = history[i];
-                
-                Sophus::SE2d T_ref_query_guess = old_submap->global_pose().inverse() * query_submap->global_pose();
-                
-                double dx = T_ref_query_guess.translation().x();
-                double dy = T_ref_query_guess.translation().y();
-                double distance = std::sqrt(dx*dx + dy*dy);
-
-                if (distance < 7.0) {
-                    std::cout << "\n[LOOP CLOSURE] Hipotesis " << hypothesis->id 
-                              << ": Candidato por PROXIMIDAD! Submapa " << i 
-                              << " detectado a " << distance << "m. Evaluando alineacion..." << std::endl;
-
-                    double best_score = -std::numeric_limits<double>::infinity();
-                    Sophus::SE2d best_match = T_ref_query_guess;
-                    double best_sx = 0, best_sy = 0, best_stheta = 0;
-
-                    auto evaluate_pose = [&](double sx, double sy, double stheta) {
-                        Sophus::SE2d candidate = T_ref_query_guess * Sophus::SE2d{Sophus::SO2d{stheta}, Eigen::Vector2d{sx, sy}};
-                        double score = 0.0;
-                        for (const auto& pt : query_points) {
-                            Eigen::Vector2d hit = candidate * pt;
-                            int gx, gy, hit_idx;
-                            if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, old_submap->grid())) {
-                                score += old_submap->grid().at(hit_idx);
-                            } else {
-                                score -= 5.0; // Out-of-bounds penalty
-                            }
-                        }
-                        // Normalize by number of points so score is stable across different submaps
-                        score = score / query_points.size();
-
-                        if (score > best_score) {
-                            best_score = score;
-                            best_match = candidate;
-                            best_sx = sx; best_sy = sy; best_stheta = stheta;
-                        }
-                    };
-
-                    // COARSE: 50cm, 11 deg. Enormous search space to catch large drifts!
-                    for (double sx = -7.0; sx <= 7.0; sx += 0.5) {
-                        for (double sy = -7.0; sy <= 7.0; sy += 0.5) {
-                            for (double stheta = -0.8; stheta <= 0.8; stheta += 0.2) {
-                                evaluate_pose(sx, sy, stheta);
-                            }
-                        }
-                    }
-
-                    // MEDIUM: 15cm, 3 deg (around best coarse)
-                    double m_sx = best_sx, m_sy = best_sy, m_stheta = best_stheta;
-                    for (double sx = m_sx - 0.5; sx <= m_sx + 0.5; sx += 0.15) {
-                        for (double sy = m_sy - 0.5; sy <= m_sy + 0.5; sy += 0.15) {
-                            for (double stheta = m_stheta - 0.2; stheta <= m_stheta + 0.2; stheta += 0.05) {
-                                evaluate_pose(sx, sy, stheta);
-                            }
-                        }
-                    }
-
-                    // FINE: 5cm, 1.1 deg (around best coarse)
-                    double c_sx = best_sx, c_sy = best_sy, c_stheta = best_stheta;
-                    for (double sx = c_sx - 0.25; sx <= c_sx + 0.25; sx += 0.05) {
-                        for (double sy = c_sy - 0.25; sy <= c_sy + 0.25; sy += 0.05) {
-                            for (double stheta = c_stheta - 0.1; stheta <= c_stheta + 0.1; stheta += 0.02) {
-                                evaluate_pose(sx, sy, stheta);
-                            }
-                        }
-                    }
-
-                    // SUPER FINE: 1cm, 0.2 deg (around best fine)
-                    c_sx = best_sx; c_sy = best_sy; c_stheta = best_stheta;
-                    for (double sx = c_sx - 0.05; sx <= c_sx + 0.05; sx += 0.01) {
-                        for (double sy = c_sy - 0.05; sy <= c_sy + 0.05; sy += 0.01) {
-                            for (double stheta = c_stheta - 0.02; stheta <= c_stheta + 0.02; stheta += 0.005) {
-                                evaluate_pose(sx, sy, stheta);
-                            }
-                        }
-                    }
-
-                    if (best_score > 1.0) {
-                        candidates.push_back({i, best_score, best_match});
-                    } else {
-                        std::cout << "[LOOP CLOSURE] Hipotesis " << hypothesis->id 
-                                  << ": Falsa alarma en submapa " << i << " (Score bajo: " << best_score << ")" << std::endl;
+            for (const auto& retrieved : retrieval) {
+                const auto& reference = graph.history[retrieved.history_index];
+                LoopCandidate best;
+                best.reference_submap_id = reference->id();
+                best.reference_history_index = retrieved.history_index;
+                for (ScanNodeId node_id : representative_nodes) {
+                    const auto* node = graph.find_node(node_id);
+                    if (!node || !node->constant_data) continue;
+                    const auto initial =
+                        reference->global_pose().inverse() * node->global_pose;
+                    const auto match = match_scan_to_submap(
+                        *node->constant_data, *reference, initial);
+                    if (match.valid && match.score > best.score) {
+                        best.query_node_id = node_id;
+                        best.score = match.score;
+                        best.overlap = match.overlap;
+                        best.T_reference_node = match.T_submap_node;
+                        best.valid = true;
                     }
                 }
+                if (best.valid) candidates.push_back(best);
             }
-
-            if (candidates.empty()) continue;
-
-            // 2. Sort candidates descending by score (best match first)
             std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
-                return a.score > b.score;
+                return a.score * a.overlap > b.score * b.overlap;
             });
 
-            // 3. Keep only the best candidates that are sufficiently different in history (NMS)
-            std::vector<LoopCandidate> distinct_candidates;
-            for (const auto& cand : candidates) {
-                bool is_distinct = true;
-                for (const auto& accepted : distinct_candidates) {
-                    if (std::abs(static_cast<int>(cand.ref_idx) - static_cast<int>(accepted.ref_idx)) < static_cast<int>(min_separation)) {
-                        is_distinct = false;
+            // NMS avoids branching on adjacent old submaps that represent one place.
+            std::vector<LoopCandidate> distinct;
+            for (const auto& candidate : candidates) {
+                bool separated = true;
+                for (const auto& accepted : distinct) {
+                    const auto delta = static_cast<long long>(candidate.reference_history_index) -
+                                       static_cast<long long>(accepted.reference_history_index);
+                    if (std::abs(delta) < static_cast<long long>(params_.loop_recent_submaps)) {
+                        separated = false;
                         break;
                     }
                 }
-                if (is_distinct) {
-                    distinct_candidates.push_back(cand);
-                }
+                if (separated) distinct.push_back(candidate);
             }
 
-            // 4. Generate hypotheses for the best distinct candidate(s)
-            size_t forks_created = 0;
-            constexpr size_t max_forks_per_event = 2;
+            std::vector<std::size_t> particle_indices;
+            for (std::size_t i = 0; i < particles_.size(); ++i) {
+                if (std::get<2>(*(particles_.begin() + i)) == hypothesis) {
+                    particle_indices.push_back(i);
+                }
+            }
+            if (particle_indices.size() <= 5 || distinct.empty()) continue;
+            std::sort(particle_indices.begin(), particle_indices.end(), [&](std::size_t a, std::size_t b) {
+                return std::get<1>(*(particles_.begin() + a)) <
+                       std::get<1>(*(particles_.begin() + b));
+            });
 
-            for (const auto& cand : distinct_candidates) {
-                if (forks_created >= max_forks_per_event) break;
-                if (hypotheses_.size() >= 4) {
-                    std::cout << "[LOOP CLOSURE] Limite global de hipotesis (4) alcanzado. Omitiendo candidato adicional." << std::endl;
-                    break;
+            const std::size_t available_hypotheses =
+                params_.max_hypotheses > hypotheses_.size()
+                    ? params_.max_hypotheses - hypotheses_.size() : 0;
+            const std::size_t forks = std::min({
+                params_.loop_max_branches, distinct.size(), available_hypotheses});
+            if (forks == 0) continue;
+            const std::size_t particles_per_fork = std::max<std::size_t>(
+                1, std::min(particle_indices.size() / 5,
+                            particle_indices.size() / (forks + 1)));
+
+            for (std::size_t fork = 0; fork < forks; ++fork) {
+                const auto& candidate = distinct[fork];
+                auto child = std::make_shared<Hypothesis>(*hypothesis);
+                child->id = next_hypothesis_id_++;
+                child->submaps.node_submap_constraints.push_back({
+                    candidate.reference_submap_id,
+                    candidate.query_node_id,
+                    candidate.T_reference_node,
+                    10.0,
+                    12.0,
+                    ConstraintTag::kInterSubmap,
+                    candidate.score,
+                    candidate.overlap});
+                hypotheses_.push_back(child);
+
+                const std::size_t begin = fork * particles_per_fork;
+                const std::size_t end = std::min(begin + particles_per_fork, particle_indices.size());
+                for (std::size_t i = begin; i < end; ++i) {
+                    std::get<2>(*(particles_.begin() + particle_indices[i])) = child;
                 }
 
-                std::cout << "\033[1;31m -> Match EXITOSO Seleccionado! Submapa Ref: " << cand.ref_idx 
-                          << ", Score normalizado: " << cand.score << "\033[0m" << std::endl;
-                
-                // Record this pose permanently for RViz visualization
-                loop_closure_poses_.push_back(representative_pose);
+                const auto* matched_node = child->submaps.find_node(candidate.query_node_id);
+                if (matched_node) loop_closure_poses_.push_back(matched_node->global_pose);
+                optimize_pose_graph(child);
+                child->optimized_inter_constraints_count =
+                    child->submaps.inter_constraint_count();
+                std::cout << "[LOOP CLOSURE] H" << hypothesis->id << " -> H"
+                          << child->id << ", scan " << candidate.query_node_id
+                          << " x submap " << candidate.reference_submap_id
+                          << ", score=" << candidate.score
+                          << ", overlap=" << candidate.overlap << std::endl;
+            }
 
-                // Find particles in THIS hypothesis
-                std::vector<size_t> h_indices;
-                for (size_t pi = 0; pi < particles_.size(); ++pi) {
-                    if (std::get<2>(*(particles_.begin() + pi)) == hypothesis) {
-                        h_indices.push_back(pi);
-                    }
+            double total_weight = 0.0;
+            for (const auto& particle : particles_) {
+                total_weight += static_cast<double>(std::get<1>(particle));
+            }
+            if (total_weight > 0.0) {
+                for (auto&& particle : particles_) {
+                    std::get<1>(particle) = beluga::Weight(
+                        static_cast<double>(std::get<1>(particle)) / total_weight);
                 }
-
-                if (h_indices.size() <= 5) break;
-
-                std::sort(h_indices.begin(), h_indices.end(), [&](size_t a, size_t b) {
-                    return std::get<1>(*(particles_.begin() + a)) < std::get<1>(*(particles_.begin() + b));
-                });
-                
-                size_t to_move = h_indices.size() * 0.2;
-                if (to_move == 0) break;
-
-                // Create a NEW hypothesis (fork)
-                auto new_hypothesis = std::make_shared<Hypothesis>();
-                new_hypothesis->id = next_hypothesis_id_++;
-                new_hypothesis->submaps = hypothesis->submaps;  // Copy the full history
-                
-                // Insert explicit loop constraint
-                LoopConstraint constraint;
-                constraint.id = new_hypothesis->submaps.loop_constraints.size();
-                constraint.query_idx = event.query_idx;
-                constraint.reference_idx = cand.ref_idx;
-                
-                // Direct submap-to-submap match result
-                constraint.T_reference_query = cand.best_match;
-                constraint.information = Eigen::Matrix3d::Identity();
-                new_hypothesis->submaps.loop_constraints.push_back(constraint);
-
-                // Throw away drifted active submaps in new hypothesis
-                new_hypothesis->submaps.active_submaps.clear();
-                
-                hypotheses_.push_back(new_hypothesis);
-
-                // Calculate average weight of the top 80% to give to the moved ones
-                double sum_w_top = 0.0;
-                for (size_t k = to_move; k < h_indices.size(); ++k) {
-                    sum_w_top += static_cast<double>(std::get<1>(*(particles_.begin() + h_indices[k])));
-                }
-                double avg_w = sum_w_top / (h_indices.size() - to_move);
-
-                for (size_t k = 0; k < to_move; ++k) {
-                    auto it = particles_.begin() + h_indices[k];
-                    // Assign to new hypothesis BEFORE PGO (so PGO will teleport them)
-                    std::get<2>(*it) = new_hypothesis;
-                    // Boost weight
-                    std::get<1>(*it) = beluga::Weight(avg_w);
-                }
-                
-                // INMEDIATELY run PGO on the new loop hypothesis so its map and particles become consistent!
-                optimize_pose_graph(new_hypothesis);
-                new_hypothesis->optimized_loops_count = new_hypothesis->submaps.loop_constraints.size();
-
-                // Set cooldown for BOTH to avoid rapid re-triggering while ambiguity resolves
-                hypothesis->loop_closure_cooldown = 200;
-                new_hypothesis->loop_closure_cooldown = 200;
-
-                // Renormalize all weights across all particles
-                double global_sum = 0.0;
-                for (const auto& p : particles_) global_sum += static_cast<double>(std::get<1>(p));
-                if (global_sum > 0.0) {
-                    for (auto&& p : particles_) {
-                        std::get<1>(p) = beluga::Weight(static_cast<double>(std::get<1>(p)) / global_sum);
-                    }
-                }
-
-                forks_created++;
             }
         }
     }
 
-    /// Step 4: Pose Graph Optimization (PGO) - Ceres Solver
-    void optimize_pose_graph(std::shared_ptr<Hypothesis> target_hypothesis) {
-        auto& submap_list = target_hypothesis->submaps;
-        auto& hist = submap_list.history;
-        size_t num_poses = hist.size();
-        if (num_poses < 2) return;
+    /// Step 4: joint scan-node/submap Pose Graph Optimization.
 
-        std::cout << "\n[PGO] Iniciando Ceres Pose Graph Optimization..." << std::endl;
-        std::cout << "[PGO] Optimizando grafo con " << num_poses << " nodos y " 
-                  << submap_list.loop_constraints.size() << " loop closures." << std::endl;
+    void optimize_pose_graph(const std::shared_ptr<Hypothesis>& hypothesis) {
+        auto& graph = hypothesis->submaps;
+        if (graph.trajectory_nodes.empty() || graph.node_submap_constraints.empty()) return;
 
-        std::vector<std::array<double, 3>> poses(num_poses);
-
-        // 1. Initialize parameter blocks with current poses
-        for (size_t i = 0; i < num_poses; ++i) {
-            auto current_pose = hist[i]->global_pose();
-            poses[i][0] = current_pose.translation().x();
-            poses[i][1] = current_pose.translation().y();
-            poses[i][2] = current_pose.so2().log();
+        std::map<SubmapId, std::array<double, 3>> submap_poses;
+        for (const auto& submap : graph.history) {
+            const auto& pose = submap->global_pose();
+            submap_poses[submap->id()] = {
+                pose.translation().x(), pose.translation().y(), pose.so2().log()};
+        }
+        for (const auto& submap : graph.active_submaps) {
+            const auto& pose = submap->global_pose();
+            submap_poses[submap->id()] = {
+                pose.translation().x(), pose.translation().y(), pose.so2().log()};
         }
 
+        std::map<ScanNodeId, std::array<double, 3>> node_poses;
+        for (const auto& node : graph.trajectory_nodes) {
+            node_poses[node.id] = {
+                node.global_pose.translation().x(), node.global_pose.translation().y(),
+                node.global_pose.so2().log()};
+        }
+        if (submap_poses.empty() || node_poses.empty()) return;
+
+        const auto old_latest_node_pose = graph.trajectory_nodes.back().global_pose;
         ceres::Problem problem;
+        std::size_t residual_count = 0;
 
-        // 2. Add Odometry Edges (Sequential constraints)
-        for (const auto& odom : submap_list.odometry_constraints) {
-            if (odom.from_idx >= num_poses || odom.to_idx >= num_poses) continue;
-            
-            ceres::CostFunction* cost_function = PoseGraphEdgeError::Create(
-                odom.relative_pose.translation().x(),
-                odom.relative_pose.translation().y(),
-                odom.relative_pose.so2().log()
-            );
-
-            problem.AddResidualBlock(cost_function, nullptr, poses[odom.from_idx].data(), poses[odom.to_idx].data());
+        for (const auto& constraint : graph.node_submap_constraints) {
+            auto submap_it = submap_poses.find(constraint.submap_id);
+            auto node_it = node_poses.find(constraint.node_id);
+            if (submap_it == submap_poses.end() || node_it == node_poses.end()) continue;
+            auto* cost = PoseGraphEdgeError::Create(
+                constraint.T_submap_node.translation().x(),
+                constraint.T_submap_node.translation().y(),
+                constraint.T_submap_node.so2().log(),
+                constraint.translation_weight,
+                constraint.rotation_weight);
+            ceres::LossFunction* loss = constraint.tag == ConstraintTag::kInterSubmap
+                ? static_cast<ceres::LossFunction*>(new ceres::HuberLoss(1.0)) : nullptr;
+            problem.AddResidualBlock(
+                cost, loss, submap_it->second.data(), node_it->second.data());
+            ++residual_count;
         }
 
-        // 3. Add Loop Closure Edges
-        for (const auto& constraint : submap_list.loop_constraints) {
-            if (constraint.query_idx >= num_poses || constraint.reference_idx >= num_poses) continue;
-
-            ceres::CostFunction* loop_cost = PoseGraphEdgeError::Create(
-                constraint.T_reference_query.translation().x(),
-                constraint.T_reference_query.translation().y(),
-                constraint.T_reference_query.so2().log(),
-                10.0, // translation weight (10x stronger means 100x squared cost)
-                10.0  // rotation weight
-            );
-
-            // We can add a robust loss function (e.g., HuberLoss) for loop closures to reject outliers
-            ceres::LossFunction* loss_function = new ceres::HuberLoss(1.0);
-            problem.AddResidualBlock(loop_cost, loss_function, poses[constraint.reference_idx].data(), poses[constraint.query_idx].data());
+        for (const auto& constraint : graph.local_trajectory_constraints) {
+            auto from_it = node_poses.find(constraint.from_node_id);
+            auto to_it = node_poses.find(constraint.to_node_id);
+            if (from_it == node_poses.end() || to_it == node_poses.end()) continue;
+            auto* cost = PoseGraphEdgeError::Create(
+                constraint.T_from_to.translation().x(),
+                constraint.T_from_to.translation().y(),
+                constraint.T_from_to.so2().log(),
+                constraint.translation_weight,
+                constraint.rotation_weight);
+            problem.AddResidualBlock(cost, nullptr, from_it->second.data(), to_it->second.data());
+            ++residual_count;
         }
+        if (residual_count == 0) return;
 
-        // 4. Anchor the first pose
-        problem.SetParameterBlockConstant(poses[0].data());
-
-        // 5. Solve
+        // Gauge freedom is removed by anchoring the first submap only.
+        problem.SetParameterBlockConstant(submap_poses.begin()->second.data());
         ceres::Solver::Options options;
         options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-        options.minimizer_progress_to_stdout = true;
-        options.max_num_iterations = 100;
-        
+        options.max_num_iterations = 50;
+        options.num_threads = 1;
+        options.minimizer_progress_to_stdout = false;
         ceres::Solver::Summary summary;
         ceres::Solve(options, &problem, &summary);
 
-        std::cout << summary.BriefReport() << std::endl;
+        auto write_submap_pose = [&](std::shared_ptr<Submap>& submap) {
+            const auto pose_it = submap_poses.find(submap->id());
+            if (pose_it == submap_poses.end()) return;
+            if (submap.use_count() > 1) submap = submap->clone();
+            submap->set_global_pose(Sophus::SE2d{
+                Sophus::SO2d{pose_it->second[2]},
+                Eigen::Vector2d{pose_it->second[0], pose_it->second[1]}});
+        };
+        for (auto& submap : graph.history) write_submap_pose(submap);
+        for (auto& submap : graph.active_submaps) write_submap_pose(submap);
 
-        // 6. Write back optimized poses and compute correction delta
-        auto old_last_pose = hist.back()->global_pose();
-        
-        for (size_t i = 1; i < num_poses; ++i) {
-            Sophus::SE2d corrected_pose{
-                Sophus::SO2d{poses[i][2]}, 
-                Eigen::Vector2d{poses[i][0], poses[i][1]}
-            };
-
-            // Copy-on-Write: If this submap is shared with another hypothesis, clone it
-            if (hist[i].use_count() > 1) {
-                hist[i] = hist[i]->clone();
-            }
-
-            hist[i]->set_global_pose(corrected_pose);
+        for (auto& node : graph.trajectory_nodes) {
+            const auto pose_it = node_poses.find(node.id);
+            if (pose_it == node_poses.end()) continue;
+            node.global_pose = Sophus::SE2d{
+                Sophus::SO2d{pose_it->second[2]},
+                Eigen::Vector2d{pose_it->second[0], pose_it->second[1]}};
         }
 
-        auto new_last_pose = hist.back()->global_pose();
-        auto delta_tf = new_last_pose * old_last_pose.inverse();
-
-        // 7. Apply correction delta to the active submaps to preserve relative anchoring
-        submap_list.make_active_unique();
-        for (auto& active_submap : submap_list.active_submaps) {
-            active_submap->set_global_pose(delta_tf * active_submap->global_pose());
-        }
-
-        // 8. Apply correction delta to all particles in THIS hypothesis
-        for (auto&& p : particles_) {
-            if (std::get<2>(p) == target_hypothesis) {
-                std::get<0>(p) = delta_tf * std::get<0>(p);
+        // Particles are current online states, not graph variables. Transport them
+        // by the correction of the latest retained local-SLAM node.
+        const auto correction =
+            graph.trajectory_nodes.back().global_pose * old_latest_node_pose.inverse();
+        for (auto&& particle : particles_) {
+            if (std::get<2>(particle) == hypothesis) {
+                std::get<0>(particle) = correction * std::get<0>(particle);
             }
         }
+        graph.last_keyframe_pose = correction * graph.last_keyframe_pose;
 
-        std::cout << "[PGO] Ceres Optimization Finalizada. Particulas y submapas corregidos." << std::endl;
+        std::cout << "[PGO] H" << hypothesis->id << ": "
+                  << submap_poses.size() << " submaps, " << node_poses.size()
+                  << " scan nodes, " << residual_count << " constraints. "
+                  << summary.BriefReport() << std::endl;
     }
 
 private:
     std::vector<std::shared_ptr<Hypothesis>> hypotheses_;
     size_t next_hypothesis_id_ = 0;
+    std::uint64_t next_scan_sequence_ = 0;
     beluga::TupleVector<FastSLAMParticle> particles_;
 
     MotionModel motion_model_;

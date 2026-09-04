@@ -55,4 +55,11 @@ ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3 Sophus)
 ament_export_include_directories(include)
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(submap_graph_test test/submap_graph_test.cpp)
+  target_include_directories(submap_graph_test PRIVATE include)
+  target_link_libraries(submap_graph_test Sophus::Sophus Eigen3::Eigen TBB::tbb)
+endif()
+
 ament_package()

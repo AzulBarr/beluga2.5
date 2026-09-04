@@ -23,6 +23,22 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("alpha4", 0.05);
     this->declare_parameter("alpha5", 0.1);
     this->declare_parameter("likelihood_scaling_factor", 0.05);
+    this->declare_parameter("submap_num_range_data", 50);
+    this->declare_parameter("submap_overlap_range_data", 25);
+    this->declare_parameter("submap_creation_distance", 2.4);
+    this->declare_parameter("submap_abandon_distance", 6.0);
+    this->declare_parameter("keyframe_min_translation", 0.15);
+    this->declare_parameter("keyframe_min_rotation", 5.0 * Sophus::Constants<double>::pi() / 180.0);
+    this->declare_parameter("max_points_per_scan_node", 180);
+    this->declare_parameter("loop_recent_submaps", 5);
+    this->declare_parameter("loop_max_candidates", 6);
+    this->declare_parameter("loop_max_branches", 2);
+    this->declare_parameter("max_hypotheses", 4);
+    this->declare_parameter("loop_candidate_distance", 10.0);
+    this->declare_parameter("loop_search_translation", 3.0);
+    this->declare_parameter("loop_search_rotation", 0.7);
+    this->declare_parameter("loop_min_score", 0.55);
+    this->declare_parameter("loop_min_overlap", 0.35);
 
     setup_slam();
 
@@ -71,6 +87,22 @@ void BelugaSLAMNode::setup_slam() {
     params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
     params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
     params.likelihood_scaling_factor = get_parameter("likelihood_scaling_factor").as_double();
+    params.submap_num_range_data = get_parameter("submap_num_range_data").as_int();
+    params.submap_overlap_range_data = get_parameter("submap_overlap_range_data").as_int();
+    params.submap_creation_distance = get_parameter("submap_creation_distance").as_double();
+    params.submap_abandon_distance = get_parameter("submap_abandon_distance").as_double();
+    params.keyframe_min_translation = get_parameter("keyframe_min_translation").as_double();
+    params.keyframe_min_rotation = get_parameter("keyframe_min_rotation").as_double();
+    params.max_points_per_scan_node = static_cast<std::size_t>(get_parameter("max_points_per_scan_node").as_int());
+    params.loop_recent_submaps = static_cast<std::size_t>(get_parameter("loop_recent_submaps").as_int());
+    params.loop_max_candidates = static_cast<std::size_t>(get_parameter("loop_max_candidates").as_int());
+    params.loop_max_branches = static_cast<std::size_t>(get_parameter("loop_max_branches").as_int());
+    params.max_hypotheses = static_cast<std::size_t>(get_parameter("max_hypotheses").as_int());
+    params.loop_candidate_distance = get_parameter("loop_candidate_distance").as_double();
+    params.loop_search_translation = get_parameter("loop_search_translation").as_double();
+    params.loop_search_rotation = get_parameter("loop_search_rotation").as_double();
+    params.loop_min_score = get_parameter("loop_min_score").as_double();
+    params.loop_min_overlap = get_parameter("loop_min_overlap").as_double();
     min_update_angle = get_parameter("min_update_angle").as_double();
     min_update_distance = get_parameter("min_update_distance").as_double();
     uncertainty_map_publish_interval = get_parameter("uncertainty_map_publish_interval").as_int();
