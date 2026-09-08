@@ -26,10 +26,45 @@ Define una sola clase plantilla, `DerivedCache<Payload>`, para guardar datos der
 ---
 ## [fastslam_oc_grid_core.hpp](../belugaslam_core/include/belugaslam_core/fastslam_oc_grid_core.hpp)
 
-### BelugaSLAM()
-- **Entrada:** 
-- **Salida:** 
+Define la clase `BelugaSLAM`, que contiene el algoritmo completo: el frontend, que en cada scan predice con odometría, hace scan matching, pesa las partículas y las inserta en los submapas; y el backend, que al cerrarse un submapa busca cierres de lazo, los verifica y optimiza el grafo de poses. Cada partícula guarda un puntero a su `Hypothesis`, así que muchas partículas comparten el mismo mapa y las hipótesis se dividen solo cuando aparecen dos interpretaciones distintas del entorno.
 
+### BelugaSLAM()
+- **Entrada:** el modelo de movimiento, el modelo de medición y el struct `FastSLAMParams` con la configuración.
+- **Salida:** la instancia lista para recibir el primer scan.
+- Valida la configuración: lanza excepción cuando el valor no tiene un arreglo obvio y lo recorta al mínimo funcional cuando sí lo tiene.
+- Abre los CSV de diagnóstico si hay ruta configurada y escribe sus encabezados.
+- Crea una única hipótesis inicial y le asigna todas las partículas, en el origen y con peso uniforme.
+- Deja la grilla de publicación con la extensión fija de `grid_config.hpp`, hasta que exista el primer submapa.
+
+---
+### particles()
+- **Entrada:** ninguna.
+- **Salida:** el vector de partículas, con la pose, el peso y el puntero a la hipótesis de cada una.
+- Tiene dos versiones, `const` y no `const`.
+
+<!--
+La versión no const solo la usan los tests.
+-->
+
+---
+### get_active_hypotheses_count()
+- **Entrada:** ninguna.
+- **Salida:** cuántas hipótesis hay activas.
+- Es la métrica que dice si el sistema está dudando: 1 es una sola interpretación del entorno, más de 1 significa que un cierre de lazo ambiguo o una divergencia espacial abrió ramas.
+
+<!--
+Se registra en el CSV, y como se lee después de resample() arrastra el mismo desfase que el conteo de partículas.
+-->
+
+---
+### get_submaps_count()
+- **Entrada:** ninguna.
+- **Salida:** cuántos submapas hay en el historial.
+- No se usa en ningún lado, ni en el nodo ni en los tests.
+
+<!--
+Además de estar sin usar, si se usara tendría dos problemas: lee hypotheses_.front(), que es la primera de la lista y no la mejor, mientras que todos los demás accesores de ese bloque usan best_hypothesis_; y cuenta solo history, así que ignora los hasta dos submapas activos.
+-->
 ---
 ### sample_motion_model(u)
 - **Entrada:** 
@@ -55,11 +90,14 @@ Define una sola clase plantilla, `DerivedCache<Payload>`, para guardar datos der
 - **Entrada:** 
 - **Salida:** 
 
-que se encarga de disparar loop closure con los submapas recién cerrados, eligir la hipótesis de mayor peso total, correr PGO si hay nuevas restricciones y armar el mapa global para publicar.
+que se encarga de disparar loop closure con los submapas recién cerrados, correr PGO si hay nuevas restricciones, elegir la hipótesis que se publica y armar el mapa global.
+
+- La elección de la hipótesis está en una función aparte, `refresh_output_selection()`, y depende del parámetro `output_selection_mode`: con `map` (el valor por defecto) gana la de mayor peso total, con desempate por id; con `pose_risk` gana la que minimiza el riesgo cuadrático de posición, es decir la que está más cerca del resto de las hipótesis ponderadas por su masa.
+
 <!-- 
-z no se usa: línea 697 es literalmente (void)z. El parámetro está en la firma pero descartado, así que la medición no interviene acá.
-Los pasos 1 y 4 están detrás de #if BELUGASLAM_ENABLE_LOOP_CLOSURE. Con loop closure deshabilitado, post_update() se reduce a elegir hipótesis, fijar pose y componer el mapa.
-Menor: en la línea 734 se chequea best_hypothesis && antes de usarlo, pero en 750 se hace best_hypothesis->submaps sin chequear. En la práctica nunca es nulo (el id se inicializa desde hypotheses_.front()), pero las dos líneas se contradicen sobre si puede serlo.
+z no se usa: la primera línea del cuerpo es literalmente (void)z. El parámetro está en la firma pero descartado, así que la medición no interviene acá.
+Los pasos de loop closure están detrás de #if BELUGASLAM_ENABLE_LOOP_CLOSURE. Con loop closure deshabilitado, post_update() se reduce a elegir hipótesis, fijar pose y componer el mapa.
+La lógica de select_output_pose vive en output_selection.hpp. Publica siempre una pose que ya existe en alguna hipótesis, en vez de una media entre hipótesis: así la pose que sale queda emparejada con un mapa completo y coherente. El "riesgo" que reporta es una pérdida cuadrática interna en m2, no un RMSE medido contra ground truth.
 -->
 
 ---
@@ -74,23 +112,24 @@ Menor: en la línea 734 se chequea best_hypothesis && antes de usarlo, pero en 7
 
 ---
 ### loop_closure_poses()
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** ninguna.
+- **Salida:** la pose del robot en cada cierre de lazo aceptado, en orden de ocurrencia.
+- Es un registro histórico que solo crece, no un estado actual.
+- Existe para dibujar marcadores en RViz.
+
+<!--
+Son las poses de cuando ocurrió cada evento, según la hipótesis en ese momento; no se corrigen si una optimización posterior mueve la trayectoria. Es el mismo caso que el topic /trajectory.
+
+publish_visualization() no redibuja los marcadores en cada tick: compara el tamaño del vector contra el que recordaba y solo republica si creció. Como el vector nunca se achica ni se reordena, el tamaño alcanza como detector de cambios, la misma idea que usa inter_constraint_count() para saltear el PGO.
+-->
 
 ---
 ### spatial_split_poses()
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** ninguna.
+- **Salida:** la pose del robot en cada división de hipótesis por divergencia espacial.
+- Igual que [loop_closure_poses()](#loop_closure_poses): solo crece y existe para RViz.
 
----
-### particles()
-- **Entrada:** 
-- **Salida:** 
 
----
-### get_active_hypotheses_count()
-- **Entrada:** 
-- **Salida:** 
 
 ---
 ## [grid_config.hpp](../belugaslam_core/include/belugaslam_core/grid_config.hpp)
@@ -103,7 +142,11 @@ Menor: en la línea 734 se chequea best_hypothesis && antes de usarlo, pero en 7
 
 ## [loop_belief.hpp](../belugaslam_core/include/belugaslam_core/loop_belief.hpp)
 
+## [loop_search.hpp](../belugaslam_core/include/belugaslam_core/loop_search.hpp)
+
 ## [motion_filter.hpp](../belugaslam_core/include/belugaslam_core/motion_filter.hpp)
+
+## [output_selection.hpp](../belugaslam_core/include/belugaslam_core/output_selection.hpp)
 
 ## [particle_proposal.hpp](../belugaslam_core/include/belugaslam_core/particle_proposal.hpp)
 
@@ -117,6 +160,10 @@ Menor: en la línea 734 se chequea best_hypothesis && antes de usarlo, pero en 7
 ### `grow_to_include(min_x, min_y, max_x, max_y)`
 - **Entrada:** 
 - **Salida:** 
+
+## [pose_graph_cost.hpp](../belugaslam_core/include/belugaslam_core/pose_graph_cost.hpp)
+
+## [pose_graph_residual.hpp](../belugaslam_core/include/belugaslam_core/pose_graph_residual.hpp)
 
 ## [robust_tracking.hpp](../belugaslam_core/include/belugaslam_core/robust_tracking.hpp)
 
@@ -487,10 +534,13 @@ Los cuatro caminos de salida (out_of_order, empty_scan, tf_error, processed) que
 - **Entrada:** timestamp del scan, status (`out_of_order`, `empty_scan`, `tf_error` o `processed`), instante de inicio del callback y el struct `ScanTiming` con las métricas del scan.
 - **Salida:** ninguna.
 - Mide el tiempo total del callback (`total_ms`).
-- Escribe una fila del CSV de performance combinando tres fuentes: las métricas del scan (`timing`), los contadores acumulados del nodo (`scans_received_`, `tf_errors_`, `map_publications_`…) y el estado actual del filtro ([particles()](#particles) y [get_active_hypotheses_count()](#get_active_hypotheses_count)).
+- Escribe una fila del CSV de performance combinando cuatro fuentes: las métricas del scan (`timing`), los contadores acumulados del nodo (`scans_received_`, `tf_errors_`, `map_publications_`…), el estado actual del filtro ([particles()](#particles) y [get_active_hypotheses_count()](#get_active_hypotheses_count)) y la pose de salida con los datos de la selección de hipótesis.
+- Las últimas nueve columnas (`output_x`, `output_y`, `output_yaw`, `output_selection_mode`, `map_hypothesis`, `map_position_risk_m2`, `selected_position_risk_m2`, `polish_solves`, `polish_work_ms`) solo se llenan si el status es `processed`; en las filas rechazadas quedan vacías.
 - Imprime en consola un resumen con los tiempos principales y los contadores, como mucho una vez cada 5 s.
 
 <!-- 
+Las columnas de salida quedan vacías en las filas rechazadas porque un callback que descartó el scan no produjo una estimación nueva: repetir la anterior haría parecer que hubo una medición donde no la hubo.
+
 record_performance corre al final de todo y lee el estado ahí mismo:
 << slam_->particles().size() << ',' << slam_->get_active_hypotheses_count() << ','
 Pero matching_ms, insertion_ms y backend_ms de esa misma fila se midieron antes del remuestreo, con la población anterior. Como el remuestreo KLD cambia la cantidad de partículas, la fila puede decir "50 partículas, 12 ms de matching" cuando el matching en realidad corrió sobre 20.
