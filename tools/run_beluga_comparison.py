@@ -27,7 +27,7 @@ import zipfile
 
 
 def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=True,
-                   particles=30, frontend_pose_mode='proposal_mean', workers=2, replay_rate=1.0):
+                   particles=30, frontend_pose_mode='frontend', workers=2, replay_rate=1.0):
     return [
         'ros2', 'launch', 'belugaslam_example', 'intel_dataset_belugaslam.xml',
         'use_sim_time:=true', 'record_bag:=false', f'replay_rate:={replay_rate}',
@@ -128,7 +128,16 @@ def validate_optimized_trajectory(run):
             processed = [r for r in csv.DictReader(stream) if r['status']=='processed']
         if not stamps or stamps != [int(row['stamp_ns']) for row in processed]:
             raise ValueError('Retrospective timestamps do not match online scan coverage')
-        if result['selected_hypothesis'] != int(processed[-1]['selected_hypothesis']):
+        final_pgo = any('extra_shutdown_optimization=true' in line for line in lines if line.startswith('#'))
+        result['extra_shutdown_optimization'] = final_pgo
+        result['last_online_hypothesis'] = int(processed[-1]['selected_hypothesis'])
+        if final_pgo:
+            if not any('final_pgo_success=true' in line for line in lines if line.startswith('#')):
+                raise ValueError('Final PGO did not converge successfully')
+            membership = [line.split('=', 1)[1] for line in lines if line.startswith('# final_hypotheses=')]
+            if len(membership) != 1 or result['selected_hypothesis'] not in [int(x) for x in membership[0].split(',')]:
+                raise ValueError('Exported graph is absent from the final population')
+        elif result['selected_hypothesis'] != int(processed[-1]['selected_hypothesis']):
             raise ValueError('Retrospective graph differs from the final selected hypothesis')
         result['poses'] = len(stamps)
     except (OSError, ValueError, KeyError, InvalidOperation) as error:
@@ -282,7 +291,7 @@ def main():
     parser.add_argument('--loop-robust-polish', action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument('--max-hypotheses', type=int, choices=[1, 4], default=4)
     parser.add_argument('--particles', type=int, default=30)
-    parser.add_argument('--frontend-pose-mode', choices=['frontend', 'proposal_mean'], default='proposal_mean')
+    parser.add_argument('--frontend-pose-mode', choices=['frontend', 'proposal_mean', 'proposal_seed'], default='frontend')
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--replay-rate', type=float, default=1.0)
     parser.add_argument('--seed', type=int, default=42)

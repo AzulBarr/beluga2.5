@@ -62,8 +62,22 @@ ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3 Sophus TBB Ceres)
 ament_export_include_directories(include)
 
+# Offline replay calls the SAME BelugaSLAM class as the ROS node, with no TF,
+# message queues or reference poses. It is useful for separating numerical
+# regressions from delivery/timing failures at large particle counts.
+add_executable(intel_accuracy_replay ../tools/intel_accuracy_replay.cpp)
+target_link_libraries(intel_accuracy_replay ${PROJECT_NAME})
+target_compile_features(intel_accuracy_replay PRIVATE cxx_std_17)
+install(TARGETS intel_accuracy_replay DESTINATION lib/${PROJECT_NAME})
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  add_executable(tracking_accuracy_test test/tracking_accuracy_test.cpp)
+  target_include_directories(tracking_accuracy_test PRIVATE include)
+  target_compile_features(tracking_accuracy_test PRIVATE cxx_std_17)
+  add_test(NAME tracking_accuracy_test COMMAND tracking_accuracy_test)
+  ament_add_gtest(accuracy_regression_test test/accuracy_regression_test.cpp)
+  target_link_libraries(accuracy_regression_test ${PROJECT_NAME})
   ament_add_gtest(submap_graph_test test/submap_graph_test.cpp)
   target_include_directories(submap_graph_test PRIVATE include)
   target_link_libraries(submap_graph_test Sophus::Sophus Eigen3::Eigen TBB::tbb)

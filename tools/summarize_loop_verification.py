@@ -38,6 +38,10 @@ def summarize(path, threshold, labels_path=None):
         result['polish_sum_trial_elapsed_ms'] = sum(float(row['polish_ms']) for row in all_rows)
         result['installed_trials'] = sum(int(row['trial_installed']) for row in all_rows)
     predictions = {mode: {} for mode in ("belief", "map", "uniform", "geometry")}
+    events = {}
+    consumed = {}
+    disagreements = []
+    event_available = bool(all_rows) and all('event_id' in row for row in all_rows)
     for key, rows in groups.items():
         result["hypothesis_rows"] += len(rows)
         if len({row["hypothesis"] for row in rows}) != len(rows):
@@ -51,6 +55,37 @@ def summarize(path, threshold, labels_path=None):
         first = rows[0]
         if abs(sum(w * e for w, e in zip(weights, compatibility)) - float(first["belief_score"])) > 1e-6:
             raise ValueError(f"Inconsistent marginalized score for candidate {key}")
+        map_index = max(range(len(weights)), key=lambda i: weights[i])
+        expected_map = compatibility[map_index]
+        expected_uniform = sum(compatibility)/len(compatibility)
+        if (not math.isclose(expected_map, float(first['map_score']), abs_tol=1e-6) or
+                not math.isclose(expected_uniform, float(first['uniform_score']), abs_tol=1e-6)):
+            raise ValueError(f'Inconsistent MAP/uniform score for candidate {key}')
+        disagreements.append({'candidate_id': key,
+                              'belief_minus_MAP': float(first['belief_score'])-expected_map,
+                              'non_MAP_mass_bound': 1-weights[map_index]})
+        if event_available:
+            event = int(first['event_id'])
+            prior = {int(row['hypothesis']): float(row['prior_weight']) for row in rows}
+            retained = float(first['retained_branch_mass'])
+            if not math.isfinite(retained) or not 0 < retained <= 1:
+                raise ValueError(f'Invalid retained branch mass in event {event}')
+            previous = events.get(event)
+            if previous and (previous['prior'].keys() != prior.keys() or
+                             any(abs(previous['prior'][h]-w)>1e-6 for h,w in prior.items())):
+                raise ValueError(f'Frozen prior changed in event {event}')
+            if previous and abs(previous['retained']-retained)>1e-6:
+                raise ValueError(f'Inconsistent retained branch mass in event {event}')
+            events[event] = {'prior': prior, 'retained': retained}
+            for row in rows:
+                if (int(row['event_id']) != event or
+                        not math.isclose(float(row['retained_branch_mass']), retained, abs_tol=1e-6)):
+                    raise ValueError(f'Inconsistent retained branch mass/event in candidate {key}')
+                if int(row['query_consumed']):
+                    query = int(row['query_sequence'])
+                    if query in consumed and consumed[query] != event:
+                        raise ValueError(f'Query {query} consumed in multiple events')
+                    consumed[query] = event
         usable = any(int(row["trial_usable"]) for row in rows)
         for mode in ("belief", "map", "uniform"):
             predictions[mode][key] = usable and float(first[f"{mode}_score"]) >= threshold
@@ -72,6 +107,12 @@ def summarize(path, threshold, labels_path=None):
                            precision=tp / (tp + fp) if tp + fp else None,
                            recall=tp / (tp + fn) if tp + fn else None)
         result["modes"][mode] = metrics
+    result['largest_score_disagreements'] = sorted(disagreements,
+        key=lambda item: abs(item['belief_minus_MAP']), reverse=True)[:20]
+    result['event_audit'] = {'available': event_available,
+        'events': len(events), 'consumed_queries': len(consumed),
+        'events_with_pruning': sum(e['retained']<1-1e-9 for e in events.values()),
+        'maximum_discarded_branch_mass': max((1-e['retained'] for e in events.values()), default=0.)}
     return result
 
 

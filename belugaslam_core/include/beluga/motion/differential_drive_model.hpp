@@ -143,23 +143,29 @@ class DifferentialDriveModel {
     const auto& previous_orientation = previous_pose.so2();
     const auto& current_orientation = pose.so2();
     const auto heading_rotation = Sophus::SO2d{std::atan2(translation.y(), translation.x())};
+    // Preserve the measured displacement even below the noise threshold. In
+    // particular a 5 mm backward step must never become 5 mm forward. The
+    // threshold suppresses unstable heading NOISE, not the deterministic motion.
     const auto first_rotation =
-        distance > params_.distance_threshold ? heading_rotation * previous_orientation.inverse() : Sophus::SO2d{};
+        distance > 0.0 ? heading_rotation * previous_orientation.inverse() : Sophus::SO2d{};
     const auto second_rotation = current_orientation * previous_orientation.inverse() * first_rotation.inverse();
+    const auto first_noise_rotation = distance > params_.distance_threshold ? first_rotation : Sophus::SO2d{};
+    const auto second_noise_rotation = distance > params_.distance_threshold ? second_rotation :
+        current_orientation * previous_orientation.inverse();
 
     using DistributionParam = std::pair<double, double>;
     const auto first_rotation_params = DistributionParam{
         first_rotation.log(), std::sqrt(
-                                  params_.rotation_noise_from_rotation * rotation_variance(first_rotation) +
+                                  params_.rotation_noise_from_rotation * rotation_variance(first_noise_rotation) +
                                   params_.rotation_noise_from_translation * distance_variance)};
     const auto translation_params = DistributionParam{
         distance, std::sqrt(
                       params_.translation_noise_from_translation * distance_variance +
                       params_.translation_noise_from_rotation *
-                          (rotation_variance(first_rotation) + rotation_variance(second_rotation)))};
+                          (rotation_variance(first_noise_rotation) + rotation_variance(second_noise_rotation)))};
     const auto second_rotation_params = DistributionParam{
         second_rotation.log(), std::sqrt(
-                                   params_.rotation_noise_from_rotation * rotation_variance(second_rotation) +
+                                   params_.rotation_noise_from_rotation * rotation_variance(second_noise_rotation) +
                                    params_.rotation_noise_from_translation * distance_variance)};
 
     return [=](const auto& state, auto& gen) {

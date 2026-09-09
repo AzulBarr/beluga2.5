@@ -85,6 +85,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     declare_parameter("tracking_min_overlap", 0.35);
     declare_parameter("tracking_inlier_distance", 0.20);
     declare_parameter("tracking_effective_beams", 20.0);
+    declare_parameter("tracking_prior_information_scale", 1.0);
     declare_parameter("tracking_min_points", 12);
     declare_parameter("tracking_max_points", 180);
     declare_parameter("tracking_max_iterations", 20);
@@ -138,6 +139,13 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
 }
 
 BelugaSLAMNode::~BelugaSLAMNode() {
+    if (slam_ && (optimized_trajectory_file_.is_open() || final_trajectory_csv_.is_open())) {
+        try {
+            std::cout << "[FINAL PGO] success=" << std::boolalpha << slam_->finalize_trajectory() << std::endl;
+        } catch (const std::exception& error) {
+            std::cerr << "[FINAL PGO] failed: " << error.what() << std::endl;
+        }
+    }
     if (optimized_trajectory_file_.is_open() && slam_) {
         try {
             const auto count=slam_->write_optimized_trajectory(optimized_trajectory_file_);
@@ -292,6 +300,7 @@ void BelugaSLAMNode::setup_slam() {
     params.tracking.min_overlap = static_cast<decltype(params.tracking.min_overlap)>(get_parameter("tracking_min_overlap").as_double());
     params.tracking.inlier_distance = static_cast<decltype(params.tracking.inlier_distance)>(get_parameter("tracking_inlier_distance").as_double());
     params.tracking.effective_beams = static_cast<decltype(params.tracking.effective_beams)>(get_parameter("tracking_effective_beams").as_double());
+    params.tracking.prior_information_scale = get_parameter("tracking_prior_information_scale").as_double();
     if (get_parameter("tracking_min_points").as_int() < 1 || get_parameter("tracking_min_points").as_int() > 100000) throw std::invalid_argument("Invalid tracking_min_points");
     params.tracking.min_points = static_cast<decltype(params.tracking.min_points)>(get_parameter("tracking_min_points").as_int());
     if (get_parameter("tracking_max_points").as_int() < 1 || get_parameter("tracking_max_points").as_int() > 100000) throw std::invalid_argument("Invalid tracking_max_points");

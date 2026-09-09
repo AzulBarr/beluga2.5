@@ -128,7 +128,7 @@ def generate_launch_description():
     declare_enable_pgo = DeclareLaunchArgument('enable_pgo', default_value='true', description='Enable periodic PGO; false also prevents loop application')
     declare_loop_verifier_mode = DeclareLaunchArgument('loop_verifier_mode', default_value='belief', description='Loop verifier: belief, map, uniform or geometry')
     declare_output_selection_mode = DeclareLaunchArgument('output_selection_mode', default_value='map', choices=['map', 'pose_risk'], description='Published pose/map selection; pose_risk minimizes retained frontend squared position loss')
-    declare_frontend_pose_mode = DeclareLaunchArgument('frontend_pose_mode', default_value='frontend', choices=['frontend', 'proposal_mean'], description='Per-hypothesis pose: original matcher or guarded full-proposal mean')
+    declare_frontend_pose_mode = DeclareLaunchArgument('frontend_pose_mode', default_value='frontend', choices=['frontend', 'proposal_mean', 'proposal_seed'], description='Per-hypothesis pose: matcher, guarded proposal mean, or non-worsening proposal-seeded refinement')
     declare_proposal_pose_min_ess = DeclareLaunchArgument('proposal_pose_min_ess', default_value='5.0')
     declare_optimized_trajectory_path = DeclareLaunchArgument('optimized_trajectory_path', default_value='', description='Write the selected retrospective graph trajectory in TUM format on clean shutdown')
     declare_proposal_pose_min_local_mass = DeclareLaunchArgument('proposal_pose_min_local_mass', default_value='0.90')
@@ -169,6 +169,7 @@ def generate_launch_description():
     declare_tracking_min_overlap = DeclareLaunchArgument('tracking_min_overlap', default_value='0.35', description='See QUALITY_REVIEW.md for tracking_min_overlap')
     declare_tracking_inlier_distance = DeclareLaunchArgument('tracking_inlier_distance', default_value='0.20', description='See QUALITY_REVIEW.md for tracking_inlier_distance')
     declare_tracking_effective_beams = DeclareLaunchArgument('tracking_effective_beams', default_value='20.0', description='See QUALITY_REVIEW.md for tracking_effective_beams')
+    declare_tracking_prior_information_scale = DeclareLaunchArgument('tracking_prior_information_scale', default_value='1.0', description='Matcher prior scale; 1 preserves regularization, .05 is an experimental 20-beam MAP interpretation')
     declare_tracking_min_points = DeclareLaunchArgument('tracking_min_points', default_value='12', description='See QUALITY_REVIEW.md for tracking_min_points')
     declare_tracking_max_points = DeclareLaunchArgument('tracking_max_points', default_value='180', description='See QUALITY_REVIEW.md for tracking_max_points')
     declare_tracking_max_iterations = DeclareLaunchArgument('tracking_max_iterations', default_value='20', description='See QUALITY_REVIEW.md for tracking_max_iterations')
@@ -277,6 +278,7 @@ def generate_launch_description():
             "tracking_min_overlap": ParameterValue(LaunchConfiguration('tracking_min_overlap'), value_type=float),
             "tracking_inlier_distance": ParameterValue(LaunchConfiguration('tracking_inlier_distance'), value_type=float),
             "tracking_effective_beams": ParameterValue(LaunchConfiguration('tracking_effective_beams'), value_type=float),
+            "tracking_prior_information_scale": ParameterValue(LaunchConfiguration('tracking_prior_information_scale'), value_type=float),
             "tracking_min_points": ParameterValue(LaunchConfiguration('tracking_min_points'), value_type=int),
             "tracking_max_points": ParameterValue(LaunchConfiguration('tracking_max_points'), value_type=int),
             "tracking_max_iterations": ParameterValue(LaunchConfiguration('tracking_max_iterations'), value_type=int),
@@ -384,6 +386,7 @@ def generate_launch_description():
     declare_tracking_min_overlap,
     declare_tracking_inlier_distance,
     declare_tracking_effective_beams,
+    declare_tracking_prior_information_scale,
     declare_tracking_min_points,
     declare_tracking_max_points,
     declare_tracking_max_iterations,

@@ -176,7 +176,7 @@ while True:time.sleep(.1)
         result = subprocess.run(
             [sys.executable, str(Path(__file__).with_name('run_beluga_comparison.py')),
              '--workspace', str(workspace), '--output-root', str(self.run / 'runs'),
-             '--drain-seconds', '0', '--verifier', 'map'],
+             '--drain-seconds', '0', '--verifier', 'map', '--frontend-pose-mode', 'proposal_mean'],
             env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         archives = list((self.run / 'runs').glob('*.zip'))

@@ -1,3 +1,5 @@
+> Current pose-accuracy revision: see [RMSE_REVISION_20260909.md](RMSE_REVISION_20260909.md) for fixes, architecture limitations, validation and replay instructions. Earlier review files describe historical revisions.
+
 # Beluga-SLAM
 
 ## Overview

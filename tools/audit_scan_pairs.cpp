@@ -47,13 +47,22 @@ bool Read(std::istream& input,Frame& frame) {
   }
   return true;
 }
+template<class Options>
+auto set_prior_scale(Options& o,double scale,int) -> decltype(o.prior_information_scale=scale,void()) {
+  o.prior_information_scale=scale;
+}
+template<class Options>
+void set_prior_scale(Options&,double scale,long) {
+  if(scale!=1.0) throw std::invalid_argument("The original matcher supports only prior scale 1");
+}
 int main(int argc,char** argv) {
-  if(argc!=3){std::cerr<<"Usage: audit_scan_pairs frames.txt results.csv\n";return 2;}
+  if(argc!=3 && argc!=4){std::cerr<<"Usage: audit_scan_pairs frames.txt results.csv [prior_information_scale]\n";return 2;}
   std::ifstream input(argv[1]);std::ofstream out(argv[2]);
   if(!input||!out)return 2;
   out<<std::setprecision(17)<<"sequence,stamp,dt,fit_points,held_points,forward_accepted,reverse_accepted,"
       "prior_held_log,matched_held_log,matched_overlap,cycle_m,cycle_rad,innovation_m,innovation_rad,match_ms\n";
   Frame previous,current;TrackingOptions options;
+  if(argc==4) set_prior_scale(options,std::stod(argv[3]),0);
   if(!Read(input,previous))return 2;
   auto previous_field=Field(previous);std::size_t index=0;
   while(Read(input,current)) {

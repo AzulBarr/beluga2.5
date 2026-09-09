@@ -135,7 +135,7 @@ struct FastSLAMParams {
     std::string loop_verifier_mode = "belief";  // belief, map, uniform, geometry
     // Output decision only. pose_risk minimizes retained frontend position loss.
     std::string output_selection_mode = "map";  // map, pose_risk
-    std::string frontend_pose_mode = "frontend";  // frontend, proposal_mean (opt-in)
+    std::string frontend_pose_mode = "frontend";  // frontend, proposal_mean, proposal_seed
     double proposal_pose_min_ess = 5.0;
     double proposal_pose_min_local_mass = 0.90;
     double proposal_pose_max_log_drop = 0.02;
@@ -213,8 +213,9 @@ public:
       if (params_.worker_threads < 1) throw std::invalid_argument("worker_threads must be positive");
       if (params_.output_selection_mode != "map" && params_.output_selection_mode != "pose_risk")
           throw std::invalid_argument("output_selection_mode must be map or pose_risk");
-      if (params_.frontend_pose_mode != "frontend" && params_.frontend_pose_mode != "proposal_mean")
-          throw std::invalid_argument("frontend_pose_mode must be frontend or proposal_mean");
+      if (params_.frontend_pose_mode != "frontend" && params_.frontend_pose_mode != "proposal_mean" &&
+          params_.frontend_pose_mode != "proposal_seed")
+          throw std::invalid_argument("frontend_pose_mode must be frontend, proposal_mean or proposal_seed");
       if (!std::isfinite(params_.proposal_pose_min_ess) || params_.proposal_pose_min_ess<1 ||
           !(params_.proposal_pose_min_local_mass>0.5 && params_.proposal_pose_min_local_mass<=1) ||
           !std::isfinite(params_.proposal_pose_max_log_drop) || params_.proposal_pose_max_log_drop<0)
@@ -222,7 +223,7 @@ public:
       for (double x : {params_.tracking.sigma, params_.tracking.prior_translation_sigma,
                        params_.tracking.prior_rotation_sigma, params_.tracking.max_translation,
                        params_.tracking.max_rotation, params_.tracking.inlier_distance,
-                       params_.tracking.effective_beams, params_.map_resolution})
+                       params_.tracking.effective_beams, params_.tracking.prior_information_scale, params_.map_resolution})
           if (!std::isfinite(x) || x <= 0) throw std::invalid_argument("Tracking scales must be finite and positive");
       if (!(params_.tracking.outlier_probability > 0 && params_.tracking.outlier_probability < 1) ||
           !(params_.tracking.min_overlap >= 0 && params_.tracking.min_overlap <= 1) ||
@@ -295,7 +296,7 @@ public:
           loop_diagnostics_ << "candidate_id,query_sequence,reference_sequence,source_hypothesis,"
               "candidate_dx,candidate_dy,candidate_dtheta,verifier_mode,hypothesis,prior_weight,"
               "trial_usable,fit_translation,fit_rotation,translation_rmse,rotation_rmse,compatibility,"
-              "belief_score,map_score,uniform_score,geometry_score,eligible,selected,forced_fit_translation,forced_fit_rotation,forced_compatibility,settled_compatibility,polish_attempted,polish_ms,verification_status,trial_installed\n";
+              "belief_score,map_score,uniform_score,geometry_score,eligible,selected,forced_fit_translation,forced_fit_rotation,forced_compatibility,settled_compatibility,polish_attempted,polish_ms,verification_status,trial_installed,event_id,query_consumed,retained_branch_mass\n";
       }
 
       // Create the initial hypothesis (single hypothesis: "exploring")
@@ -636,6 +637,31 @@ public:
                         h->pose_source="proposal_mean";
                         h->tracking_overlap=decision.score.overlap;
                         h->tracking_log_likelihood=decision.score.mean_log_likelihood;
+                        h->tracking_correction=(ref.prediction.inverse()*h->local_pose).translation().norm();
+                    }
+                }
+            }
+            if (params_.frontend_pose_mode=="proposal_seed") {
+                // Use the integrated particle cloud as an additional optimizer
+                // seed, retaining the same odometry prior and original optimum.
+                // A noisy Monte Carlo mean must not replace a better scan fit.
+                h->proposal_pose_decision="seed_not_eligible";
+                if (h->tracking_status=="tracked" && ref.field && summary.valid &&
+                    summary.ess>=params_.proposal_pose_min_ess &&
+                    summary.local_mass>=params_.proposal_pose_min_local_mass) {
+                    auto options=params_.tracking;
+                    options.min_overlap=std::max(options.min_overlap,params_.recovery.min_overlap);
+                    const auto prior=sample(inverse*ref.prediction);
+                    const auto refined=belugaslam::match_tracking_scan(*ref.field,scan,prior,options,&summary.mean);
+                    const double original_cost=belugaslam::tracking_objective(*ref.field,scan,frontend,prior,options);
+                    h->proposal_pose_decision="frontend_cost_retained";
+                    if (refined.accepted && refined.final_cost+1e-10<original_cost) {
+                        h->local_pose=transform*state_type{Sophus::SO2d{refined.pose.yaw},
+                            Eigen::Vector2d{refined.pose.x,refined.pose.y}};
+                        h->pose_source="proposal_seed";
+                        h->proposal_pose_decision="seed_refinement_accepted";
+                        h->tracking_overlap=refined.score.overlap;
+                        h->tracking_log_likelihood=refined.score.mean_log_likelihood;
                         h->tracking_correction=(ref.prediction.inverse()*h->local_pose).translation().norm();
                     }
                 }
@@ -1400,6 +1426,21 @@ public:
         refresh_publication(); return best_oc_grid_;
     }
     [[nodiscard]] state_type best_pose() const { return best_pose_; }
+    // Drain the backend at the end of a finite recording before either export.
+    // Periodic PGO otherwise leaves the last < pgo_every_n_nodes unoptimized.
+    bool finalize_trajectory() {
+        final_pgo_attempted_ = params_.enable_pgo;
+        final_pgo_succeeded_ = true;
+        if (params_.enable_pgo) {
+            for (const auto& h : hypotheses_) {
+                if (h->submaps.inter_constraint_count() == 0) continue;
+                if (!optimize_pose_graph(h, true, std::numeric_limits<std::size_t>::max(), true))
+                    final_pgo_succeeded_ = false;
+            }
+        }
+        refresh_output_selection();
+        return final_pgo_succeeded_;
+    }
     // A retrospective trajectory from ONE currently selected graph, distinct from
     // the sequence of online /best_pose messages, which may have switched graphs.
     std::size_t write_optimized_trajectory(std::ostream& out) const {
@@ -1407,7 +1448,12 @@ public:
         const auto& graph=best_hypothesis_->submaps;
         out<<"# retrospective_graph selected_hypothesis="<<best_hypothesis_->id<<'\n';
         out<<"# nodes="<<graph.trajectory_nodes.size()<<" nodes_at_last_pgo="<<best_hypothesis_->optimized_node_count
-           <<" extra_shutdown_optimization=false\n";
+           <<" extra_shutdown_optimization="<<(final_pgo_attempted_ ? "true" : "false")
+           <<" final_pgo_success="<<(final_pgo_succeeded_ ? "true" : "false")
+           <<" interpolation=se2_node_corrections\n";
+        out<<"# final_hypotheses=";
+        for (std::size_t i=0;i<hypotheses_.size();++i) out<<(i ? "," : "")<<hypotheses_[i]->id;
+        out<<'\n';
         out<<std::setprecision(17);
         std::size_t count=0;
         std::int64_t previous=0;
@@ -1731,7 +1777,8 @@ public:
         const auto* reference_sample = before.find_sample(candidate.reference_sequence);
         const auto* query_sample = before.find_sample(candidate.query_sequence);
         if (!reference_sample || !query_sample || candidate.reference_sequence >= candidate.query_sequence) return result;
-        const auto reference_map = before.find_submap(reference_sample->submap_id);
+        const auto anchored_reference = before.find_submap_by_anchor(candidate.reference_sequence);
+        const auto reference_map = anchored_reference ? anchored_reference : before.find_submap(reference_sample->submap_id);
         if (!reference_map) return result;
         for (const auto& edge : before.node_submap_constraints) {
             if (edge.tag == ConstraintTag::kInterSubmap && edge.reference_sequence == candidate.reference_sequence &&
@@ -1760,7 +1807,13 @@ public:
         const auto query_id = ensure_query_node(graph, candidate.query_sequence);
         // Transport the SAME r->q measurement into this hypothesis's reference
         // submap using its recorded r pose. Never copy another mode's numeric IDs.
-        const auto measurement = reference_sample->T_submap_robot * candidate.T_reference_query;
+        // Prefer the actual native frame used by retrieval. The anchor scan's
+        // recorded matching submap is often its PREDECESSOR. After PGO those two
+        // frozen frames are no longer rigidly tied, so routing the loop through
+        // the predecessor installs a different geometric constraint.
+        // If this hypothesis has no submap born at r, use its recorded local r.
+        const auto measurement = anchored_reference ? candidate.T_reference_query :
+            reference_sample->T_submap_robot * candidate.T_reference_query;
         const auto loop_index = graph.node_submap_constraints.size();
         graph.node_submap_constraints.push_back({reference_map->id(), query_id, measurement,
             10.0, 12.0, ConstraintTag::kInterSubmap, candidate.score, candidate.overlap,
@@ -1839,8 +1892,13 @@ public:
         verify_loop_candidates(candidates);
     }
 
-    void verify_loop_candidates(const std::vector<LoopCandidate>& candidates) {
+    void verify_loop_candidates(const std::vector<LoopCandidate>& proposed_candidates) {
+        std::vector<LoopCandidate> candidates;
+        for (const auto& candidate : proposed_candidates)
+            if (!consumed_loop_queries_.count(candidate.query_sequence)) candidates.push_back(candidate);
         if (candidates.empty()) return;
+        const auto event_id = next_loop_event_id_++;
+        double retained_branch_mass = 1.0;
         const auto prior_hypotheses = hypotheses_;
         const auto mass_map = hypothesis_masses();
         std::vector<double> masses;
@@ -1913,6 +1971,8 @@ public:
                 }
             }
             std::stable_sort(pool.begin(), pool.end(), [](const auto& a, const auto& b) { return a.mass > b.mass; });
+            double unpruned_mass = 0.0;
+            for (const auto& branch : pool) unpruned_mass += branch.mass;
             // Reserve a no-loop alternative if the configured hypothesis budget
             // permits ambiguity. Its quota does not inflate its probability mass.
             const auto null_it = std::find_if(pool.begin(), pool.end(), [](const auto& b) { return b.no_loop; });
@@ -1920,6 +1980,9 @@ public:
             if (pool.size() > params_.max_hypotheses) pool.resize(params_.max_hypotheses);
             if (pool.size() >= 2 && best_null.hypothesis &&
                 std::none_of(pool.begin(), pool.end(), [](const auto& b) { return b.no_loop; })) pool.back() = best_null;
+            double kept_mass = 0.0;
+            for (const auto& branch : pool) kept_mass += branch.mass;
+            retained_branch_mass = unpruned_mass > 0 ? kept_mass / unpruned_mass : 1.0;
             for (const auto& branch : pool) {
                 if (!branch.no_loop) {
                     auto& report = reports.at(branch.candidate_index);
@@ -1930,6 +1993,7 @@ public:
                 }
             }
             install_population(pool, params_.max_particles);
+            consumed_loop_queries_.insert(reports[accepted.front()].candidate.query_sequence);
             for (auto index : accepted) {
                 if (!reports[index].selected) continue;
                 // Marker is diagnostic only; the actual constraints carry stable scan IDs.
@@ -1955,7 +2019,9 @@ public:
                     << report.candidate.score * report.candidate.overlap << ',' << report.eligible << ',' << report.selected << ','
                     << trial.forced_fit_translation << ',' << trial.forced_fit_rotation << ','
                     << trial.forced_compatibility << ',' << trial.settled_compatibility << ','
-                    << trial.polish_attempted << ',' << trial.polish_ms << ',' << trial.status << ',' << trial.installed << '\n';
+                    << trial.polish_attempted << ',' << trial.polish_ms << ',' << trial.status << ',' << trial.installed << ','
+                    << event_id << ',' << consumed_loop_queries_.count(report.candidate.query_sequence) << ','
+                    << retained_branch_mass << '\n';
             }
         }
         if (loop_diagnostics_.is_open()) loop_diagnostics_.flush();
@@ -2104,6 +2170,8 @@ private:
     size_t next_hypothesis_id_ = 0;
     std::uint64_t next_scan_sequence_ = 0;
     std::uint64_t next_loop_candidate_id_ = 0;
+    std::uint64_t next_loop_event_id_ = 0;
+    std::set<std::uint64_t> consumed_loop_queries_;
     std::ofstream loop_diagnostics_;
     std::ofstream tracking_diagnostics_;
     std::vector<std::vector<state_type>> motion_proposals_;
@@ -2139,6 +2207,7 @@ private:
     std::size_t map_hypothesis_id_ = 0;
     double map_position_risk_m2_ = 0.0, selected_position_risk_m2_ = 0.0;
     mutable bool publication_dirty_ = true;
+    bool final_pgo_attempted_ = false, final_pgo_succeeded_ = false;
     mutable std::size_t publication_rebuilds_ = 0;
     mutable DynamicOccupancyGrid best_oc_grid_;
     mutable GridTypeLO best_lo_grid_;

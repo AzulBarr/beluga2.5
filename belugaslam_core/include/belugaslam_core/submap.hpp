@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -441,8 +442,42 @@ struct SubmapList {
     if (!sample) return false;
     const auto submap = find_submap(sample->submap_id);
     if (!submap) return false;
-    pose = submap->global_pose() * sample->T_submap_robot;
+    const auto local = submap->local_pose() * sample->T_submap_robot;
+    // Apply a continuous correction field to the immutable local trajectory.
+    // A rigid submap readout between individually optimized nodes gives a
+    // different answer immediately next to a keyframe and at each handover.
+    const auto next = std::lower_bound(trajectory_nodes.begin(), trajectory_nodes.end(), sequence,
+        [](const auto& node, auto seq) { return node.sequence < seq; });
+    if (trajectory_nodes.empty()) {
+      pose = submap->global_pose() * sample->T_submap_robot;
+    } else if (next == trajectory_nodes.begin()) {
+      pose = next->global_pose * next->local_pose.inverse() * local;
+    } else if (next == trajectory_nodes.end()) {
+      const auto& last = trajectory_nodes.back();
+      pose = last.global_pose * last.local_pose.inverse() * local;
+    } else {
+      const auto& previous = *std::prev(next);
+      double alpha = static_cast<double>(sequence-previous.sequence)/(next->sequence-previous.sequence);
+      const auto* left_sample = find_sample(previous.sequence);
+      const auto* right_sample = find_sample(next->sequence);
+      if (left_sample && right_sample && right_sample->stamp_ns > left_sample->stamp_ns) {
+        const long double left = left_sample->stamp_ns, right = right_sample->stamp_ns;
+        alpha = static_cast<double>((static_cast<long double>(sample->stamp_ns)-left)/(right-left));
+      }
+      alpha = std::clamp(alpha, 0.0, 1.0);
+      const auto left_correction = previous.global_pose * previous.local_pose.inverse();
+      const auto right_correction = next->global_pose * next->local_pose.inverse();
+      pose = left_correction * Sophus::SE2d::exp(alpha * (left_correction.inverse()*right_correction).log()) * local;
+    }
     return true;
+  }
+
+  // Submap frames are born at the robot pose of their anchor scan. A later PGO
+  // can move that frame differently from the preceding (overlapping) submap.
+  [[nodiscard]] std::shared_ptr<Submap> find_submap_by_anchor(std::uint64_t sequence) const {
+    for (const auto& sm : history) if (sm->anchor_sequence() == sequence) return sm;
+    for (const auto& sm : active_submaps) if (sm->anchor_sequence() == sequence) return sm;
+    return nullptr;
   }
 
   [[nodiscard]] std::vector<ScanNodeId> insertion_nodes(SubmapId submap_id) const {

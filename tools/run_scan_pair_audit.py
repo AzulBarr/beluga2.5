@@ -19,7 +19,11 @@ def main():
     parser.add_argument("output_directory", type=Path)
     parser.add_argument("--include-directory", type=Path,
                         default=root / "belugaslam_core/include")
+    parser.add_argument("--prior-information-scale", type=float, default=1.0,
+                        help="Explicit experimental matcher regularization; default preserves legacy behavior")
     args = parser.parse_args()
+    if not math.isfinite(args.prior_information_scale) or args.prior_information_scale<=0:
+        parser.error('prior information scale must be positive')
     sys.path.insert(0, str(root / "belugaslam_example/bags/intel"))
     from carmen_reader import load_ordered_flaser
     records, backwards = load_ordered_flaser(args.recording)
@@ -46,7 +50,7 @@ def main():
         subprocess.run(["g++", "-std=c++17", "-O3", "-Wall", "-Wextra",
                         "-I" + str(args.include_directory.resolve()), str(source),
                         "-o", str(executable)], check=True)
-        subprocess.run([str(executable), str(frames), str(csv_path)], check=True)
+        subprocess.run([str(executable), str(frames), str(csv_path), str(args.prior_information_scale)], check=True)
     with csv_path.open(newline="", encoding="utf-8") as source:
         rows = [{key: float(value) for key, value in row.items()}
                 for row in csv.DictReader(source)]
@@ -70,6 +74,7 @@ def main():
         "matcher_sha256": hashlib.sha256((args.include_directory /
                            "belugaslam_core/robust_tracking.hpp").read_bytes()).hexdigest(),
         "frames": len(records), "pairs": len(rows),
+        "prior_information_scale": args.prior_information_scale,
         "out_of_order_before_sort": backwards,
         "forward_accepted": sum(int(row["forward_accepted"]) for row in rows),
         "both_directions_accepted": len(both),

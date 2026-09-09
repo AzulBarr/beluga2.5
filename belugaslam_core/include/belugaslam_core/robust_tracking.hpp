@@ -18,6 +18,10 @@ struct TrackingOptions {
   double max_translation = 0.50, max_rotation = 0.25;
   double min_overlap = 0.35, inlier_distance = 0.20;
   double effective_beams = 20.0;
+  // The matcher is a regularized point estimate, not the PF importance update.
+  // Keep the established prior by default. 1/effective_beams is the explicitly
+  // selectable Gaussian-prior / effective-beam likelihood interpretation.
+  double prior_information_scale = 1.0;
   std::size_t min_points = 12, max_points = 180;
   int max_iterations = 20;
 };
@@ -92,7 +96,9 @@ inline double tracking_objective(const TrackingField& f,const ScanPoints& z,cons
                                  const PoseSample2& prior,const TrackingOptions& o) {
   const double dx=(p.x-prior.x)/o.prior_translation_sigma, dy=(p.y-prior.y)/o.prior_translation_sigma;
   const double da=wrap_angle(p.yaw-prior.yaw)/o.prior_rotation_sigma;
-  return -tracking_score(f,z,p,o).mean_log_likelihood+0.5*(dx*dx+dy*dy+da*da);
+  // Cost units are per beam. A scale of 1/B gives the Gaussian-prior MAP
+  // interpretation for L=exp(B*mean_log_L); scale 1 preserves legacy smoothing.
+  return -tracking_score(f,z,p,o).mean_log_likelihood+0.5*(dx*dx+dy*dy+da*da)*o.prior_information_scale;
 }
 inline bool solve_tracking_system(std::array<std::array<double,3>,3> matrix,
                                   std::array<double,3> rhs,std::array<double,3>& solution) {
@@ -165,7 +171,8 @@ inline TrackingResult match_tracking_scan(const TrackingField& field,const ScanP
     const std::array<double,3> delta{pose.x-prior.x,pose.y-prior.y,wrap_angle(pose.yaw-prior.yaw)};
     for (int a=0;a<3;++a) {
       const double sigma=a==2?o.prior_rotation_sigma:o.prior_translation_sigma;
-      H[a][a]+=1/(sigma*sigma);g[a]+=delta[a]/(sigma*sigma);
+      const double information=o.prior_information_scale/(sigma*sigma);
+      H[a][a]+=information;g[a]+=delta[a]*information;
       H[a][a]+=damping*std::max(1.0,H[a][a]);g[a]=-g[a];
     }
     if (!solve_tracking_system(H,g,step)) break;

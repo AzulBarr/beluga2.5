@@ -69,6 +69,7 @@
   <arg name="tracking_min_overlap" default="0.35"/>
   <arg name="tracking_inlier_distance" default="0.20"/>
   <arg name="tracking_effective_beams" default="20.0"/>
+  <arg name="tracking_prior_information_scale" default="1.0"/>
   <arg name="tracking_min_points" default="12"/>
   <arg name="tracking_max_points" default="180"/>
   <arg name="tracking_max_iterations" default="20"/>
@@ -157,6 +158,7 @@
     <arg name="tracking_min_overlap" value="$(var tracking_min_overlap)"/>
     <arg name="tracking_inlier_distance" value="$(var tracking_inlier_distance)"/>
     <arg name="tracking_effective_beams" value="$(var tracking_effective_beams)"/>
+    <arg name="tracking_prior_information_scale" value="$(var tracking_prior_information_scale)"/>
     <arg name="tracking_min_points" value="$(var tracking_min_points)"/>
     <arg name="tracking_max_points" value="$(var tracking_max_points)"/>
     <arg name="tracking_max_iterations" value="$(var tracking_max_iterations)"/>
