@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <sstream>
 #include "belugaslam_core/fastslam_oc_grid_core.hpp"
 namespace {
 Sophus::SE2d Pose(double x=0,double y=0,double a=0) {return {Sophus::SO2d{a},Eigen::Vector2d{x,y}};}
@@ -13,6 +14,75 @@ TEST(QualityIntegration, StartsWithRequestedPopulation) {
   auto slam=Slam(p);EXPECT_EQ(slam->particles().size(),30U);
   double sum=0;for(const auto& particle:slam->particles()) sum+=static_cast<double>(std::get<1>(particle));
   EXPECT_NEAR(sum,1,1e-12);
+}
+
+TEST(QualityIntegration, ProposalReadoutPreservesWeightsAndFeedsNodeAndPublication) {
+  std::vector<double> previous_weights;
+  for (const std::string mode:{"frontend","proposal_mean"}) {
+    FastSLAMParams params;params.max_particles=300;params.frontend_pose_mode=mode;
+    auto slam=Slam(params);auto h=std::get<2>(*slam->particles().begin());
+    auto map=std::make_shared<Submap>(0,Pose(),160,160,.05);
+    BelugaSLAM::measurement_type scan;
+    for(int y=20;y<140;++y) {map->mutable_grid().at(120,y)=5;scan.emplace_back(2.025,-4+(y+.5)*.05);}
+    h->submaps.active_submaps.push_back(map);h->has_local_pose=true;
+    std::size_t i=0;
+    for(auto&& p:slam->particles())std::get<0>(p)=Pose(.005+.01*(i++%2));
+    slam->sample_motion_model({Pose(),Pose()});slam->measurement_model_map(scan);
+    ASSERT_EQ(h->tracking_status,"tracked");
+    std::vector<double> weights;
+    for(const auto& p:slam->particles())weights.push_back(static_cast<double>(std::get<1>(p)));
+    if(mode=="frontend")previous_weights=weights;
+    else {
+      ASSERT_EQ(weights,previous_weights); // no second likelihood update
+      ASSERT_EQ(h->pose_source,"proposal_mean");
+      EXPECT_LT((h->local_pose.inverse()*slam->hypothesis_mean_pose(h)).translation().norm(),1e-12);
+      const auto before=h->local_pose;
+      const auto covariance=h->pose_covariance;
+      auto events=slam->update_occupancy_grid(scan,1.,1000000000);
+      ASSERT_FALSE(h->submaps.trajectory_nodes.empty());
+      EXPECT_LT((before.inverse()*h->submaps.trajectory_nodes.back().global_pose).translation().norm(),1e-12);
+      slam->post_update(scan,events);slam->resample();
+      EXPECT_LT((before.inverse()*slam->best_pose()).translation().norm(),1e-12);
+      EXPECT_LT((covariance-slam->best_pose_covariance()).norm(),1e-12);
+      slam->install_population({{h,h,1.,Pose(),true}},300);slam->refresh_output_selection();
+      EXPECT_LT((before.inverse()*slam->best_pose()).translation().norm(),1e-12);
+      EXPECT_LT((covariance-slam->best_pose_covariance()).norm(),1e-12);
+    }
+  }
+}
+
+TEST(QualityIntegration, SpatialChildStartsAtPreResamplingMeanImmediately) {
+  FastSLAMParams params;params.min_particles=5;params.max_particles=30;params.split_persistence=1;
+  auto slam=Slam(params);auto parent=std::get<2>(*slam->particles().begin());
+  parent->has_local_pose=true;std::size_t i=0;
+  for(auto&& p:slam->particles()) {
+    const auto n=i++;std::get<0>(p)=n<20 ? Pose() : Pose(n%2?5.02:5.01);
+  }
+  slam->resample();std::shared_ptr<Hypothesis> child;
+  for(const auto& p:slam->particles())if(std::get<2>(p)!=parent)child=std::get<2>(p);
+  ASSERT_TRUE(child);EXPECT_TRUE(child->has_local_pose);
+  EXPECT_EQ(child->pose_source,"spatial_mean");
+  EXPECT_NEAR(child->local_pose.translation().x(),5.015,1e-12);
+  EXPECT_TRUE(child->has_pose_covariance);
+}
+
+TEST(QualityIntegration, RetrospectiveExportKeepsExactScanTimesAndUsesGraphPoses) {
+  auto slam=Slam();const BelugaSLAM::measurement_type scan{{1.05,.05}};
+  for(std::int64_t i=0;i<3;++i) {
+    const auto stamp=976055000123456789LL+i*123456;
+    slam->sample_motion_model({Pose(),Pose()});slam->measurement_model_map(scan);
+    const auto events=slam->update_occupancy_grid(scan,static_cast<double>(stamp)*1.e-9,stamp);
+    slam->post_update(scan,events);
+  }
+  auto h=std::get<2>(*slam->particles().begin());
+  ASSERT_EQ(h->submaps.trajectory_samples.size(),3U);
+  h->submaps.trajectory_nodes.front().global_pose=Pose(3,2);
+  std::ostringstream output;
+  EXPECT_EQ(slam->write_optimized_trajectory(output),3U);
+  EXPECT_NE(output.str().find("976055000.123456789 3 2 0 0 0 0 1"),std::string::npos);
+  EXPECT_NE(output.str().find("976055000.123580245"),std::string::npos);
+  EXPECT_NE(output.str().find("976055000.123703701"),std::string::npos);
+  EXPECT_NEAR(slam->best_pose().translation().norm(),0,1e-12);
 }
 TEST(QualityIntegration, FieldInvalidatesOnGridWriteAndDetachesAcrossClones) {
   Submap a(0,Pose(),80,80,0.1);

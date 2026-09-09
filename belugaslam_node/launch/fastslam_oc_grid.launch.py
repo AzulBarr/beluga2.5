@@ -128,6 +128,11 @@ def generate_launch_description():
     declare_enable_pgo = DeclareLaunchArgument('enable_pgo', default_value='true', description='Enable periodic PGO; false also prevents loop application')
     declare_loop_verifier_mode = DeclareLaunchArgument('loop_verifier_mode', default_value='belief', description='Loop verifier: belief, map, uniform or geometry')
     declare_output_selection_mode = DeclareLaunchArgument('output_selection_mode', default_value='map', choices=['map', 'pose_risk'], description='Published pose/map selection; pose_risk minimizes retained frontend squared position loss')
+    declare_frontend_pose_mode = DeclareLaunchArgument('frontend_pose_mode', default_value='frontend', choices=['frontend', 'proposal_mean'], description='Per-hypothesis pose: original matcher or guarded full-proposal mean')
+    declare_proposal_pose_min_ess = DeclareLaunchArgument('proposal_pose_min_ess', default_value='5.0')
+    declare_optimized_trajectory_path = DeclareLaunchArgument('optimized_trajectory_path', default_value='', description='Write the selected retrospective graph trajectory in TUM format on clean shutdown')
+    declare_proposal_pose_min_local_mass = DeclareLaunchArgument('proposal_pose_min_local_mass', default_value='0.90')
+    declare_proposal_pose_max_log_drop = DeclareLaunchArgument('proposal_pose_max_log_drop', default_value='0.02')
     declare_loop_belief_threshold = DeclareLaunchArgument('loop_belief_threshold', default_value='0.25', description='Minimum aggregated trajectory compatibility')
     declare_loop_translation_scale = DeclareLaunchArgument('loop_translation_scale', default_value='0.30', description='Trajectory alignment translation scale in meters')
     declare_loop_rotation_scale = DeclareLaunchArgument('loop_rotation_scale', default_value='0.10', description='Trajectory alignment rotation scale in radians')
@@ -232,6 +237,11 @@ def generate_launch_description():
             "enable_pgo": ParameterValue(LaunchConfiguration('enable_pgo'), value_type=bool),
             "loop_verifier_mode": ParameterValue(LaunchConfiguration('loop_verifier_mode'), value_type=str),
             "output_selection_mode": ParameterValue(LaunchConfiguration('output_selection_mode'), value_type=str),
+            "frontend_pose_mode": ParameterValue(LaunchConfiguration('frontend_pose_mode'), value_type=str),
+            "optimized_trajectory_path": ParameterValue(LaunchConfiguration('optimized_trajectory_path'), value_type=str),
+            "proposal_pose_min_ess": ParameterValue(LaunchConfiguration('proposal_pose_min_ess'), value_type=float),
+            "proposal_pose_min_local_mass": ParameterValue(LaunchConfiguration('proposal_pose_min_local_mass'), value_type=float),
+            "proposal_pose_max_log_drop": ParameterValue(LaunchConfiguration('proposal_pose_max_log_drop'), value_type=float),
             "loop_belief_threshold": ParameterValue(LaunchConfiguration('loop_belief_threshold'), value_type=float),
             "loop_translation_scale": ParameterValue(LaunchConfiguration('loop_translation_scale'), value_type=float),
             "loop_rotation_scale": ParameterValue(LaunchConfiguration('loop_rotation_scale'), value_type=float),
@@ -335,6 +345,11 @@ def generate_launch_description():
     declare_enable_pgo,
     declare_loop_verifier_mode,
     declare_output_selection_mode,
+    declare_frontend_pose_mode,
+    declare_optimized_trajectory_path,
+    declare_proposal_pose_min_ess,
+    declare_proposal_pose_min_local_mass,
+    declare_proposal_pose_max_log_drop,
     declare_loop_belief_threshold,
     declare_loop_translation_scale,
     declare_loop_rotation_scale,

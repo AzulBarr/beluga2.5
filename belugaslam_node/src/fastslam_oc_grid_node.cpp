@@ -44,6 +44,11 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("enable_pgo", true);
     this->declare_parameter("loop_verifier_mode", "belief");
     this->declare_parameter("output_selection_mode", "map");
+    this->declare_parameter("frontend_pose_mode", "frontend");
+    this->declare_parameter("optimized_trajectory_path", "");
+    this->declare_parameter("proposal_pose_min_ess", 5.0);
+    this->declare_parameter("proposal_pose_min_local_mass", 0.90);
+    this->declare_parameter("proposal_pose_max_log_drop", 0.02);
     this->declare_parameter("loop_belief_threshold", 0.25);
     this->declare_parameter("loop_translation_scale", 0.30);
     this->declare_parameter("loop_rotation_scale", 0.10);
@@ -132,6 +137,19 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     std::cout << "\033[1;32m[BelugaSLAM] Node initialized and waiting for data...\033[0m" << std::endl;
 }
 
+BelugaSLAMNode::~BelugaSLAMNode() {
+    if (optimized_trajectory_file_.is_open() && slam_) {
+        try {
+            const auto count=slam_->write_optimized_trajectory(optimized_trajectory_file_);
+            optimized_trajectory_file_.flush();
+            if (!optimized_trajectory_file_) throw std::runtime_error("Trajectory flush failed");
+            std::cout<<"[TRAJECTORY EXPORT] Wrote "<<count<<" retrospective poses from the selected graph."<<std::endl;
+        } catch (const std::exception& error) {
+            std::cerr<<"[TRAJECTORY EXPORT] "<<error.what()<<std::endl;
+        }
+    }
+}
+
 void BelugaSLAMNode::setup_slam() {
     double a1 = get_parameter("alpha1").as_double();
     double a2 = get_parameter("alpha2").as_double();
@@ -194,6 +212,15 @@ void BelugaSLAMNode::setup_slam() {
     params.enable_pgo = get_parameter("enable_pgo").as_bool();
     params.loop_verifier_mode = get_parameter("loop_verifier_mode").as_string();
     params.output_selection_mode = get_parameter("output_selection_mode").as_string();
+    params.frontend_pose_mode = get_parameter("frontend_pose_mode").as_string();
+    const auto trajectory_path=get_parameter("optimized_trajectory_path").as_string();
+    if (!trajectory_path.empty()) {
+        optimized_trajectory_file_.open(trajectory_path);
+        if (!optimized_trajectory_file_) throw std::runtime_error("Cannot open optimized_trajectory_path");
+    }
+    params.proposal_pose_min_ess = get_parameter("proposal_pose_min_ess").as_double();
+    params.proposal_pose_min_local_mass = get_parameter("proposal_pose_min_local_mass").as_double();
+    params.proposal_pose_max_log_drop = get_parameter("proposal_pose_max_log_drop").as_double();
     params.loop_belief_threshold = get_parameter("loop_belief_threshold").as_double();
     params.loop_translation_scale = get_parameter("loop_translation_scale").as_double();
     params.loop_rotation_scale = get_parameter("loop_rotation_scale").as_double();
@@ -338,7 +365,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         auto t1 = Clock::now(); timing.motion_ms = elapsed(t0, t1);
         slam_->measurement_model_map(z);
         auto t2 = Clock::now(); timing.matching_ms = elapsed(t1, t2);
-        const auto finished_events = slam_->update_occupancy_grid(z, stamp.seconds());
+        const auto finished_events = slam_->update_occupancy_grid(z, stamp.seconds(), stamp.nanoseconds());
         auto t3 = Clock::now(); timing.insertion_ms = elapsed(t2, t3);
         slam_->post_update(z, finished_events);
         auto t4 = Clock::now(); timing.backend_ms = elapsed(t3, t4);
@@ -651,23 +678,9 @@ void BelugaSLAMNode::broadcast_map_to_odom(const rclcpp::Time& stamp, const Soph
 
 
 void BelugaSLAMNode::compute_se2_covariance() {
-    // Report the selected mode's second moment about the published frontend pose.
-    // A covariance about the global mixture mean belongs to a different estimator.
-    const auto best = slam_->best_pose();
-    const auto selected = slam_->best_hypothesis_id();
-    covariance_.setZero();
-    double mass = 0;
-    for (const auto& particle : slam_->particles()) {
-        if (std::get<2>(particle)->id != selected) continue;
-        const double weight = static_cast<double>(std::get<1>(particle));
-        const auto& pose = std::get<0>(particle);
-        const Eigen::Vector3d error{pose.translation().x() - best.translation().x(),
-            pose.translation().y() - best.translation().y(),
-            belugaslam::wrap_angle(pose.so2().log() - best.so2().log())};
-        covariance_ += weight * error * error.transpose(); mass += weight;
-    }
-    if (mass > 0) covariance_ /= mass;
-    else covariance_ = 1e3 * Sophus::Matrix3<double>::Identity();
+    // The core captures conditional proposal moments before categorical selection
+    // and resampling, and transports them with the selected hypothesis under PGO.
+    covariance_=slam_->best_pose_covariance();
 }
 
 void BelugaSLAMNode::compute_entropy() {

@@ -169,6 +169,10 @@ TEST(LoopPgoTest, ActiveGridsMoveRigidlyAndLocalPriorsRemainImmutable) {
   const auto local_prior = graph.local_trajectory_constraints.back().T_from_to;
   const auto node_local = graph.trajectory_nodes.back().local_pose;
   const auto pixels = graph.active_submaps[0]->grid().data();
+  h->has_pose_covariance=true;
+  h->pose_covariance=Eigen::Vector3d{1.,4.,.5}.asDiagonal();
+  const auto covariance=h->pose_covariance;
+  const auto old_global_local=h->T_global_local;
   graph.node_submap_constraints.push_back({graph.history.front()->id(), graph.trajectory_nodes.back().id,
       Pose(0.1, 0.0), 10, 12, ConstraintTag::kInterSubmap, 1, 1, 0, 8});
   ASSERT_TRUE(slam->optimize_pose_graph(h, true, graph.node_submap_constraints.size() - 1));
@@ -177,6 +181,9 @@ TEST(LoopPgoTest, ActiveGridsMoveRigidlyAndLocalPriorsRemainImmutable) {
   SamePose(graph.local_trajectory_constraints.back().T_from_to, local_prior);
   SamePose(graph.trajectory_nodes.back().local_pose, node_local);
   EXPECT_EQ(graph.active_submaps[0]->grid().data(), pixels);
+  Eigen::Matrix3d J=Eigen::Matrix3d::Identity();
+  J.topLeftCorner<2,2>()=(h->T_global_local*old_global_local.inverse()).so2().matrix();
+  EXPECT_LT((h->pose_covariance-J*covariance*J.transpose()).norm(),1e-10);
 }
 
 TEST(LoopPgoTest, InvalidGraphFailsWithoutCommittingState) {

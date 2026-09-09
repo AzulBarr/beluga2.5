@@ -46,6 +46,10 @@ def summarize(path):
             'status_counts': dict(Counter(row.get('status','unavailable') for row in rows)),
             'max_consecutive_weak_scans': max(int(row.get('consecutive_weak_scans',0)) for row in rows),
             'pf_frontend_distance_m': percentiles([float(row['pf_frontend_distance_m']) for row in rows if 'pf_frontend_distance_m' in row]),
+            'pose_source_counts': dict(Counter(row.get('pose_source','unavailable') for row in rows)),
+            'proposal_pose_decisions': dict(Counter(row.get('proposal_pose_decision','unavailable') for row in rows)),
+            'proposal_ess': percentiles([float(row['proposal_ess']) for row in rows if 'proposal_ess' in row]),
+            'proposal_mean_offset_m': percentiles([float(row['proposal_mean_offset_m']) for row in rows if 'proposal_mean_offset_m' in row]),
         } for h, rows in sorted(modes.items())},
         'notes': [
             'Usability gates insertion; high rejection can reduce coverage.',

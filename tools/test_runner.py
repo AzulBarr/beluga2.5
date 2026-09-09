@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from run_beluga_comparison import launch_command, validate_csvs, validate_map, validate_parameters
+from run_beluga_comparison import launch_command, validate_csvs, validate_map, validate_parameters, validate_optimized_trajectory
 
 
 class RunnerTests(unittest.TestCase):
@@ -16,9 +16,9 @@ class RunnerTests(unittest.TestCase):
         self.run = Path(self.temp.name)
         self.write('performance.csv', [
             {'received': i + 1, 'processed': i + 1, 'status': 'processed',
-             'stamp_ns': 1000 + i, 'output_selection_mode': 'pose_risk'} for i in range(2)])
+             'stamp_ns': 1000 + i, 'output_selection_mode': 'pose_risk', 'selected_hypothesis': 0, 'particles': 30} for i in range(2)])
         self.write('tracking.csv', [
-            {'sequence': i, 'hypothesis': h, 'mass': mass}
+            {'sequence': i, 'hypothesis': h, 'mass': mass, 'particles': 15}
             for i in range(2) for h, mass in [(0, .6), (1, .4)]])
         self.write('loops.csv', [{'verifier_mode': 'map'}])
 
@@ -29,6 +29,39 @@ class RunnerTests(unittest.TestCase):
 
     def test_complete(self):
         self.assertTrue(validate_csvs(self.run, 2, 'map')['complete'])
+
+    def test_actual_particle_counts(self):
+        self.assertTrue(validate_csvs(self.run, 2, 'map', 30)['complete'])
+        self.assertFalse(validate_csvs(self.run, 2, 'map', 300)['complete'])
+
+    def test_hundreds_of_particles_and_pose_mode_forwarded(self):
+        command=launch_command(self.run,'belief',4,42,particles=300,
+                               frontend_pose_mode='proposal_mean',workers=4,replay_rate=.5)
+        for arg in ('max_particles:=300','worker_threads:=4','replay_rate:=0.5','frontend_pose_mode:=proposal_mean'):
+            self.assertIn(arg,command)
+        a=launch_command(self.run,'belief',4,42,frontend_pose_mode='frontend')
+        b=launch_command(self.run,'belief',4,42,frontend_pose_mode='proposal_mean')
+        self.assertEqual([(x,y) for x,y in zip(a,b) if x!=y],
+                         [('frontend_pose_mode:=frontend','frontend_pose_mode:=proposal_mean')])
+
+    def trajectory(self, body=None, hypothesis=0):
+        path=self.run/'optimized_trajectory.tum'
+        if body is None:
+            body='0.000001000 0 0 0 0 0 0 1\n0.000001001 1 0 0 0 0 0 1\n'
+        path.write_text(f'# retrospective_graph selected_hypothesis={hypothesis}\n'+body)
+        return validate_optimized_trajectory(self.run)
+
+    def test_retrospective_trajectory_coverage_and_identity(self):
+        self.assertTrue(self.trajectory()['complete'])
+        self.assertFalse(self.trajectory(hypothesis=5)['complete'])
+
+    def test_bad_retrospective_trajectory(self):
+        for body in ('', '0.000001000 0 0 0 0 0 0 1\n',
+                     '0.000001000 nan 0 0 0 0 0 1\n',
+                     '0.000001000 0 0 0 0 0 0 2\n',
+                     '0.0000010001 0 0 0 0 0 0 1\n'):
+            with self.subTest(body=body):
+                self.assertFalse(self.trajectory(body)['complete'])
 
     def test_missing_dataset_tail(self):
         self.assertFalse(validate_csvs(self.run, 3, 'map')['complete'])
@@ -112,7 +145,7 @@ from pathlib import Path
 a=sys.argv[1:]
 if a[:2]==['node','list']:sys.exit(0)
 if a[:2]==['param','dump']:
- print('/belugaslam:\\n  ros__parameters:\\n    output_selection_mode: pose_risk\\n    loop_verifier_mode: map\\n    pgo_analytic_jacobians: true\\n    loop_robust_polish: true\\n    max_hypotheses: 4\\n    max_particles: 30\\n    random_seed: 42\\n    enable_pgo: true\\n    enable_loop_closure: true');sys.exit(0)
+ print('/belugaslam:\\n  ros__parameters:\\n    output_selection_mode: pose_risk\\n    loop_verifier_mode: map\\n    pgo_analytic_jacobians: true\\n    loop_robust_polish: true\\n    max_hypotheses: 4\\n    max_particles: 30\\n    random_seed: 42\\n    enable_pgo: true\\n    enable_loop_closure: true\\n    frontend_pose_mode: proposal_mean\\n    worker_threads: 2');sys.exit(0)
 if a[:2]==['topic','echo']:
  assert '--full-length' in a
  print('info:\\n  width: 1\\n  height: 1\\n  resolution: 0.05\\ndata:\\n- 0');sys.exit(0)
@@ -121,15 +154,16 @@ p=dict(s.split(':=',1) for s in a if ':=' in s)
 f=Path(p['performance_diagnostics_path']).open('w',buffering=1)
 t=Path(p['tracking_diagnostics_path']).open('w',buffering=1)
 l=Path(p['loop_diagnostics_path']).open('w',buffering=1)
-f.write('received,processed,status,stamp_ns,output_selection_mode\\n')
-t.write('sequence,hypothesis,mass\\n')
+f.write('received,processed,status,stamp_ns,output_selection_mode,selected_hypothesis,particles\\n')
+t.write('sequence,hypothesis,mass,particles\\n')
 l.write('verifier_mode\\n'+p['loop_verifier_mode']+'\\n')
 for i in range(2):
- f.write(f'{i+1},{i+1},processed,{1000+i},pose_risk\\n')
- t.write(f'{i},0,1\\n')
+ f.write(f'{i+1},{i+1},processed,{1000+i},pose_risk,0,30\\n')
+ t.write(f'{i},0,1,30\\n')
 def stop(signum,frame):
- f.write('3,3,processed,1002,pose_risk\\n')
- t.write('2,0,1\\n')
+ f.write('3,3,processed,1002,pose_risk,0,30\\n')
+ t.write('2,0,1,30\\n')
+ Path(p['optimized_trajectory_path']).write_text('# retrospective_graph selected_hypothesis=0\\n'+''.join(f'0.{1000+i:09d} 0 0 0 0 0 0 1\\n' for i in range(3)))
  for s in (f,t,l):s.close()
  print('Clean shutdown',flush=True)
  sys.exit(0)
@@ -155,6 +189,8 @@ while True:time.sleep(.1)
             self.assertTrue(status['map_validation']['complete'])
             self.assertEqual(status['map_validation']['recorded_cells'], 1)
             self.assertTrue(status['parameter_validation']['complete'])
+            self.assertTrue(status['optimized_trajectory_validation']['complete'])
+            self.assertEqual(status['optimized_trajectory_validation']['poses'], 3)
             self.assertEqual(status['csv_validation']['processed_scans'], 3)
             terminal_name = next(n for n in zipped.namelist() if n.endswith('/terminal.log'))
             self.assertIn(b'Clean shutdown', zipped.read(terminal_name))

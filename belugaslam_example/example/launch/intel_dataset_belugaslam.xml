@@ -19,6 +19,11 @@
   <arg name="enable_pgo" default="true"/>
   <arg name="loop_verifier_mode" default="belief"/>
   <arg name="output_selection_mode" default="map"/>
+  <arg name="frontend_pose_mode" default="frontend"/>
+  <arg name="optimized_trajectory_path" default=""/>
+  <arg name="proposal_pose_min_ess" default="5.0"/>
+  <arg name="proposal_pose_min_local_mass" default="0.90"/>
+  <arg name="proposal_pose_max_log_drop" default="0.02"/>
   <arg name="loop_belief_threshold" default="0.25"/>
   <arg name="loop_translation_scale" default="0.30"/>
   <arg name="loop_rotation_scale" default="0.10"/>
@@ -104,6 +109,11 @@
     <arg name="enable_pgo" value="$(var enable_pgo)"/>
     <arg name="loop_verifier_mode" value="$(var loop_verifier_mode)"/>
     <arg name="output_selection_mode" value="$(var output_selection_mode)"/>
+    <arg name="frontend_pose_mode" value="$(var frontend_pose_mode)"/>
+    <arg name="optimized_trajectory_path" value="$(var optimized_trajectory_path)"/>
+    <arg name="proposal_pose_min_ess" value="$(var proposal_pose_min_ess)"/>
+    <arg name="proposal_pose_min_local_mass" value="$(var proposal_pose_min_local_mass)"/>
+    <arg name="proposal_pose_max_log_drop" value="$(var proposal_pose_max_log_drop)"/>
     <arg name="loop_belief_threshold" value="$(var loop_belief_threshold)"/>
     <arg name="loop_translation_scale" value="$(var loop_translation_scale)"/>
     <arg name="loop_rotation_scale" value="$(var loop_rotation_scale)"/>

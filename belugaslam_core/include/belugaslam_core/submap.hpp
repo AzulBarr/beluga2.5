@@ -613,12 +613,17 @@ struct Hypothesis {
    * occupancy grid where no later optimisation can undo them -- a pose graph can move a
    * submap, never repair its interior.
    *
-   * So this pose is seeded once when the hypothesis is born, from the weighted mean of
-   * its cluster, and from then on it only ever moves by odometry prediction followed by
-   * scan matching against this hypothesis's own map.
+   * This pose is seeded from the cluster mean. Each scan uses odometry prediction
+   * and native-grid matching. The opt-in proposal_mean readout then uses the entire
+   * scored proposal cloud if concentration and scan-fit gates pass. The final pose
+   * is shared by insertion, graph node construction, publication and the next prior.
    */
   Sophus::SE2d local_pose;
   bool has_local_pose = false;
+  Eigen::Matrix3d pose_covariance = Eigen::Matrix3d::Zero();
+  bool has_pose_covariance = false;
+  std::string pose_source = "frontend", proposal_pose_decision = "not_evaluated";
+  double proposal_ess=0, proposal_local_mass=0, proposal_position_std=0, proposal_yaw_std=0, proposal_mean_offset=0;
   bool tracking_evaluated = false;
   bool tracking_usable = true;
   double tracking_overlap = 0.0;

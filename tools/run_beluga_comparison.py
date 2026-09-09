@@ -8,6 +8,7 @@ import argparse
 import collections
 import csv
 import datetime
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import math
@@ -25,12 +26,14 @@ import time
 import zipfile
 
 
-def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=True):
+def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=True,
+                   particles=30, frontend_pose_mode='proposal_mean', workers=2, replay_rate=1.0):
     return [
         'ros2', 'launch', 'belugaslam_example', 'intel_dataset_belugaslam.xml',
-        'use_sim_time:=true', 'record_bag:=false', 'replay_rate:=1.0',
-        f'random_seed:={seed}', 'worker_threads:=2', 'min_particles:=5',
-        'max_particles:=30', f'max_hypotheses:={max_hypotheses}',
+        'use_sim_time:=true', 'record_bag:=false', f'replay_rate:={replay_rate}',
+        f'random_seed:={seed}', f'worker_threads:={workers}', 'min_particles:=5',
+        f'max_particles:={particles}', f'max_hypotheses:={max_hypotheses}',
+        f'frontend_pose_mode:={frontend_pose_mode}',
         'enable_loop_closure:=true', 'enable_pgo:=true',
         f'pgo_analytic_jacobians:={str(analytic).lower()}',
         f'loop_robust_polish:={str(polish).lower()}',
@@ -39,6 +42,7 @@ def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=Tr
         f'tracking_diagnostics_path:={run / "tracking.csv"}',
         f'loop_diagnostics_path:={run / "loops.csv"}',
         f'final_trajectory_path:={run / "final_trajectory.csv"}',
+        f'optimized_trajectory_path:={run / "optimized_trajectory.tum"}',
     ]
 
 
@@ -98,6 +102,41 @@ def validate_parameters(path, expected):
     return {'complete': not problems, 'problems': problems}
 
 
+def validate_optimized_trajectory(run):
+    result = {'complete': False, 'trajectory_kind': 'retrospective_graph', 'problems': []}
+    try:
+        lines = (run / 'optimized_trajectory.tum').read_text().splitlines()
+        header = re.fullmatch(r'# retrospective_graph selected_hypothesis=(\d+)', lines[0]) if lines else None
+        if not header:
+            raise ValueError('Missing selected-graph trajectory header')
+        result['selected_hypothesis'] = int(header.group(1))
+        stamps = []
+        for line in lines[1:]:
+            if not line.strip() or line.startswith('#'):
+                continue
+            fields = line.split()
+            if len(fields) != 8:
+                raise ValueError('Malformed TUM pose')
+            stamp = Decimal(fields[0]) * 1_000_000_000
+            if not stamp.is_finite() or stamp != stamp.to_integral_value():
+                raise ValueError('Invalid nanosecond timestamp')
+            values = [float(x) for x in fields[1:]]
+            if not all(math.isfinite(x) for x in values) or abs(sum(x*x for x in values[3:])-1) > 1e-6:
+                raise ValueError('Invalid TUM pose/quaternion')
+            stamps.append(int(stamp))
+        with (run / 'performance.csv').open(newline='') as stream:
+            processed = [r for r in csv.DictReader(stream) if r['status']=='processed']
+        if not stamps or stamps != [int(row['stamp_ns']) for row in processed]:
+            raise ValueError('Retrospective timestamps do not match online scan coverage')
+        if result['selected_hypothesis'] != int(processed[-1]['selected_hypothesis']):
+            raise ValueError('Retrospective graph differs from the final selected hypothesis')
+        result['poses'] = len(stamps)
+    except (OSError, ValueError, KeyError, InvalidOperation) as error:
+        result['problems'].append(str(error))
+    result['complete'] = not result['problems']
+    return result
+
+
 def capture(command, output, timeout=30):
     """Bounded CLI capture. Preserve errors separately from YAML output."""
     try:
@@ -136,7 +175,7 @@ def stop_launch(process):
     return {'launch_returncode': process.returncode, 'forced_termination': forced}
 
 
-def validate_csvs(run, expected, verifier):
+def validate_csvs(run, expected, verifier, particles=None):
     """Validate full Intel scan coverage after shutdown; never discard bad rows."""
     result = {'expected_input_scans': expected, 'problems': []}
     tables = {}
@@ -167,11 +206,15 @@ def validate_csvs(run, expected, verifier):
                     int(row['processed']) != i + 1 or row['output_selection_mode'] != 'pose_risk'):
                 result['problems'].append(f'Unexpected callback, counter or output mode at scan {i}')
                 break
+            if particles is not None and int(row['particles']) != particles:
+                result['problems'].append(f'Unexpected particle count at scan {i}')
+                break
         stamps = [int(row['stamp_ns']) for row in perf]
         if any(b <= a for a, b in zip(stamps, stamps[1:])):
             result['problems'].append('Non-increasing processed timestamps')
         masses = collections.defaultdict(list)
         ids = collections.defaultdict(set)
+        population = collections.defaultdict(int)
         for row in tables['tracking.csv']:
             seq, hid = int(row['sequence']), int(row['hypothesis'])
             if hid in ids[seq]:
@@ -181,10 +224,14 @@ def validate_csvs(run, expected, verifier):
             if not math.isfinite(mass) or mass < 0:
                 result['problems'].append(f'Invalid tracking mass at scan {seq}')
             masses[seq].append(mass)
+            if particles is not None:
+                population[seq] += int(row['particles'])
         if expected is None or sorted(masses) != list(range(expected)):
             result['problems'].append('Tracking scan sequences do not match full dataset')
         if any(not math.isclose(math.fsum(v), 1, abs_tol=1e-6, rel_tol=0) for v in masses.values()):
             result['problems'].append('Incomplete or unnormalized tracking belief')
+        if particles is not None and any(n != particles for n in population.values()):
+            result['problems'].append('Tracking particle counts do not match the requested population')
         if any(row['verifier_mode'] != verifier for row in tables['loops.csv']):
             result['problems'].append('Logged verifier differs from requested mode')
         result['processed_scans'] = len(perf)
@@ -200,6 +247,8 @@ def record_source_identity(workspace, run):
     paths = [
         'belugaslam_core/include/belugaslam_core/fastslam_oc_grid_core.hpp',
         'belugaslam_core/include/belugaslam_core/output_selection.hpp',
+        'belugaslam_core/include/belugaslam_core/proposal_pose.hpp',
+        'belugaslam_core/include/belugaslam_core/submap.hpp',
         'belugaslam_core/include/belugaslam_core/pose_graph_cost.hpp',
         'belugaslam_core/include/belugaslam_core/pose_graph_residual.hpp',
         'belugaslam_core/include/belugaslam_core/loop_belief.hpp',
@@ -232,6 +281,10 @@ def main():
     parser.add_argument('--pgo-analytic-jacobians', action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument('--loop-robust-polish', action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument('--max-hypotheses', type=int, choices=[1, 4], default=4)
+    parser.add_argument('--particles', type=int, default=30)
+    parser.add_argument('--frontend-pose-mode', choices=['frontend', 'proposal_mean'], default='proposal_mean')
+    parser.add_argument('--workers', type=int, default=2)
+    parser.add_argument('--replay-rate', type=float, default=1.0)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--workspace', type=Path, default=Path.home() / 'ros2_ws')
     parser.add_argument('--output-root', type=Path, default=Path.home() / 'beluga_runs')
@@ -240,6 +293,10 @@ def main():
     args = parser.parse_args()
     if args.seed <= 0 or args.seed > 2**32 - 1 or not math.isfinite(args.drain_seconds) or args.drain_seconds < 0:
         parser.error('Use a positive uint32 seed and a finite nonnegative drain time')
+    if not 5<=args.particles<=10000 or not 1<=args.workers<=64:
+        parser.error('Use 5..10000 particles and 1..64 worker threads')
+    if not math.isfinite(args.replay_rate) or not 0<args.replay_rate<=10:
+        parser.error('Use a finite replay rate in (0, 10]')
     if not args.workspace.is_dir() or not shutil.which('ros2'):
         parser.error('Workspace missing or ROS2 not sourced; see README.md')
     # Never stop or reuse another running SLAM instance.
@@ -253,17 +310,18 @@ def main():
         parser.error('An existing /belugaslam node is running. Stop the preceding launch first.')
     args.workspace = args.workspace.resolve()
     args.output_root.mkdir(parents=True, exist_ok=True)
-    prefix = (f'{args.verifier}_h{args.max_hypotheses}_seed{args.seed}_'
+    prefix = (f'{args.verifier}_h{args.max_hypotheses}_n{args.particles}_{args.frontend_pose_mode}_seed{args.seed}_'
               f'a{int(args.pgo_analytic_jacobians)}p{int(args.loop_robust_polish)}_')
     run = Path(tempfile.mkdtemp(prefix=prefix, dir=args.output_root.resolve()))
     command = launch_command(run, args.verifier, args.max_hypotheses, args.seed,
-                             args.pgo_analytic_jacobians, args.loop_robust_polish)
+                             args.pgo_analytic_jacobians, args.loop_robust_polish,
+                             args.particles, args.frontend_pose_mode, args.workers, args.replay_rate)
     meta = {'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'command': command, 'workspace': str(args.workspace), 'captures': {},
             'drain_seconds': args.drain_seconds, 'ground_truth_used': False}
     (run / 'launch_command.txt').write_text(shlex.join(command) + '\n')
     record_source_identity(args.workspace, run)
-    print(f'Run directory: {run}\nThe full replay takes about 45 minutes. '
+    print(f'Run directory: {run}\nThe full replay takes about {45/args.replay_rate:g} minutes. '
           'This runner captures the final map and parameters, then stops and zips automatically.\n', flush=True)
     done = threading.Event()
     state = {'expected': None}
@@ -315,13 +373,15 @@ def main():
                 meta['error'] = 'Launch output reader did not finish; inspect terminal.log'
         if reader is None or not reader.is_alive():
             terminal.close()
-    meta['csv_validation'] = validate_csvs(run, state['expected'], args.verifier)
+    meta['csv_validation'] = validate_csvs(run, state['expected'], args.verifier, args.particles)
     meta['map_validation'] = validate_map(run / 'final_map_raw.yaml')
+    meta['optimized_trajectory_validation'] = validate_optimized_trajectory(run)
     meta['parameter_validation'] = validate_parameters(run / 'parameters.yaml', {
         'loop_verifier_mode': args.verifier, 'output_selection_mode': 'pose_risk',
         'pgo_analytic_jacobians': args.pgo_analytic_jacobians,
         'loop_robust_polish': args.loop_robust_polish,
-        'max_hypotheses': args.max_hypotheses, 'max_particles': 30,
+        'max_hypotheses': args.max_hypotheses, 'max_particles': args.particles,
+        'frontend_pose_mode': args.frontend_pose_mode, 'worker_threads': args.workers,
         'random_seed': args.seed, 'enable_pgo': True, 'enable_loop_closure': True,
     })
     captures_ok = all(meta['captures'].get(name, {}).get('returncode') == 0 and
@@ -329,6 +389,7 @@ def main():
                       for name in ('parameters', 'map'))
     meta['complete_capture'] = bool(meta['csv_validation']['complete'] and captures_ok and
                                     meta['map_validation']['complete'] and meta['parameter_validation']['complete'] and
+                                    meta['optimized_trajectory_validation']['complete'] and
                                     not meta.get('error') and not meta.get('forced_termination'))
     meta['finished_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     (run / 'run_status.json').write_text(json.dumps(meta, indent=2) + '\n')
