@@ -63,12 +63,12 @@ inline std::vector<std::pair<int, int>> bresenham_line(
  * and by deferring the end of the update, so hits are already in place when misses land.
  *
  * \param grid The submap's log-odds grid, in submap-local coordinates.
- * \param T_submap_sensor Sensor pose in the submap frame.
- * \param scan Range returns in the sensor frame.
+ * \param T_submap_robot Robot pose in the submap frame.
+ * \param scan Range returns in the robot frame, the same frame the pose is measured in.
  * \param hit_scratch,miss_scratch Reused buffers, so the cost per scan is not allocation.
  */
 inline void insert_scan_into_submap_grid(
-    LogOddsGrid& grid, const Sophus::SE2d& T_submap_sensor,
+    LogOddsGrid& grid, const Sophus::SE2d& T_submap_robot,
     const std::vector<std::pair<double, double>>& scan,
     const ScanInsertionParams& params, std::vector<int>& hit_scratch,
     std::vector<int>& miss_scratch,
@@ -76,11 +76,11 @@ inline void insert_scan_into_submap_grid(
   if (scan.empty()) return;
 
   // 1. Grow first, so that no return is silently clipped and every index below is final.
-  const Eigen::Vector2d sensor_origin = T_submap_sensor.translation();
-  double min_x = sensor_origin.x(), max_x = min_x;
-  double min_y = sensor_origin.y(), max_y = min_y;
+  const Eigen::Vector2d robot_origin = T_submap_robot.translation();
+  double min_x = robot_origin.x(), max_x = min_x;
+  double min_y = robot_origin.y(), max_y = min_y;
   for (const auto& point : scan) {
-    const Eigen::Vector2d hit = T_submap_sensor * Eigen::Vector2d{point.first, point.second};
+    const Eigen::Vector2d hit = T_submap_robot * Eigen::Vector2d{point.first, point.second};
     min_x = std::min(min_x, hit.x());
     max_x = std::max(max_x, hit.x());
     min_y = std::min(min_y, hit.y());
@@ -97,7 +97,7 @@ inline void insert_scan_into_submap_grid(
     return gx >= 0 && gx < grid.width() && gy >= 0 && gy < grid.height();
   };
 
-  const auto [gx0, gy0] = to_cell(sensor_origin.x(), sensor_origin.y());
+  const auto [gx0, gy0] = to_cell(robot_origin.x(), robot_origin.y());
 
   // The robot's own footprint is forced free before the scan, never after, so a return
   // landing on it is not silently erased.
@@ -115,7 +115,7 @@ inline void insert_scan_into_submap_grid(
   updates.begin(grid.data().size());
   updates.endpoints.reserve(scan.size());
   for (const auto& point : scan) {
-    const Eigen::Vector2d hit = T_submap_sensor * Eigen::Vector2d{point.first, point.second};
+    const Eigen::Vector2d hit = T_submap_robot * Eigen::Vector2d{point.first, point.second};
     updates.endpoints.push_back(to_cell(hit.x(), hit.y()));
   }
   belugaslam::apply_scan_cells(grid.data(), grid.width(), grid.height(), gx0, gy0,
@@ -140,7 +140,7 @@ public:
 
   LogOddsGrid& mutable_grid() {
     if (is_finished_) throw std::runtime_error("Attempted to mutate a finished submap grid");
-    if (!grid_.unique()) grid_ = std::make_shared<LogOddsGrid>(*grid_);
+    if (grid_.use_count() != 1) grid_ = std::make_shared<LogOddsGrid>(*grid_);
     tracking_field_.reset();
     return *grid_;
   }
@@ -178,7 +178,7 @@ public:
   /// structures built, so they are sized to the cropped grid.
   void finish() {
     if (is_finished_) return;
-    if (!grid_.unique()) grid_ = std::make_shared<LogOddsGrid>(*grid_);
+    if (grid_.use_count() != 1) grid_ = std::make_shared<LogOddsGrid>(*grid_);
     grid_->crop_to_known_cells(kCropMarginCells);
     tracking_field_.reset();
     is_finished_ = true;

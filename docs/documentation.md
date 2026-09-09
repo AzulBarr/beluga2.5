@@ -66,28 +66,92 @@ Además de estar sin usar, si se usara tendría dos problemas: lee hypotheses_.f
 -->
 ---
 ### sample_motion_model(u)
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** el control de movimiento, o sea la pose de odometría actual y la anterior.
+- **Salida:** ninguna.
+- Guarda el desplazamiento de odometría del scan.
+- Genera varias propuestas de pose por partícula muestreando el modelo de movimiento.
+- Si el robot no se movió, genera una sola propuesta y no le agrega ruido.
+- Deja la primera propuesta como pose provisional; la elección definitiva la hace [measurement_model_map(z)](#measurement_model_mapz).
+
+<!--
+La cantidad de propuestas por partícula es motion_proposal_samples. Con valor 1 el filtro se comporta como un bootstrap filter clásico: la propuesta es el modelo de movimiento y el peso es la verosimilitud del sensor.
+
+Las propuestas quedan guardadas en motion_proposals_ y las consume el paso siguiente. Los dos pasos están acoplados: llamar a sample_motion_model() sin llamar después a measurement_model_map() deja las propuestas colgadas y las partículas en la primera muestra, que no es la elegida por el sensor.
+
+El umbral de "quieto" es 1e-24 en norma al cuadrado (1e-12 m) y 1e-12 rad. Existe para que el robot detenido no acumule ruido de odometría scan tras scan.
+-->
 
 ---
 ### measurement_model_map(z)
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** el scan en coordenadas del robot.
+- **Salida:** ninguna.
+- Submuestrea el scan con [select_tracking_points(scan, limit)](#select_tracking_pointsscan-limit).
+- Corre el scan matching de cada hipótesis contra su propio submapa de referencia.
+- Puntúa cada propuesta de movimiento con [tracking_score(field, scan, pose, options)](#tracking_scorefield-scan-pose-options).
+- Elige una propuesta por partícula con [select_motion_proposal(logs, generator)](#select_motion_proposallogs-generator) y actualiza el peso con la evidencia de esa elección.
+- Normaliza los pesos y escribe el CSV de tracking si se pidió.
+
+<!--
+La verosimilitud se multiplica por effective_beams (20 por defecto) antes de usarla como peso. Los puntos de un scan no son mediciones independientes: si se usara el log-likelihood de los cientos de puntos tal cual, una sola partícula se llevaría todo el peso y el filtro colapsaría. El factor trata al scan como si fueran 20 mediciones independientes.
+
+El scoring de las propuestas es paralelo, pero la selección y la reducción de pesos son seriales a propósito: las extracciones del generador aleatorio tienen que ocurrir en orden fijo para que la corrida sea reproducible con la misma semilla.
+
+El peso de la partícula es su peso previo por la verosimilitud MEDIA de sus propuestas, no la de la propuesta elegida. Usar la elegida sesgaría el filtro, porque la selección ya favorece a la mejor.
+-->
 
 ---
 ### update_occupancy_grid(z, stamp)
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** el scan en coordenadas del robot, el timestamp en segundos y, opcionalmente, el timestamp en nanosegundos.
+- **Salida:** los submapas que quedaron terminados en este scan.
+- Le asigna un número de secuencia al scan.
+- Decide por hipótesis si el scan es keyframe, con el umbral de [motion_filter_accepts(elapsed_seconds, translation, rotation, max_time_seconds, max_translation, max_rotation)](#motion_filter_acceptselapsed_seconds-translation-rotation-max_time_seconds-max_translation-max_rotation).
+- Si no es keyframe, solo registra la muestra de trayectoria y sigue.
+- Crea un submapa nuevo cuando el más reciente alcanzó submap_num_range_data inserciones.
+- Inserta el scan en los dos submapas activos y agrega al grafo el nodo y sus restricciones.
+
+<!--
+Todo el paso usa hypothesis->local_pose, no la partícula de mayor peso. Tomar la mejor partícula en cada scan haría que la trayectoria salte entre partículas distintas, y ese salto se insertaría en la grilla como si fuera movimiento real: paredes dobles o gruesas que ninguna optimización posterior puede arreglar, porque el PGO mueve submapas pero no repara su interior.
+
+Si la hipótesis todavía no tiene local_pose se saltea entera y ese scan no deja ni nodo ni muestra de trayectoria. Por eso las secuencias del archivo final pueden no arrancar en cero.
+
+Un scan rechazado por el tracking tampoco modifica grillas ni contadores, pero sí registra su muestra de trayectoria. Así la trayectoria exportada queda completa aunque el mapa no se haya tocado.
+
+El parámetro stamp_ns tiene default: si no se pasa, se deriva del timestamp en segundos redondeando a nanosegundos.
+-->
 
 ---
 ### resample()
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** ninguna.
+- **Salida:** ninguna.
+- Detecta divergencia espacial entre partículas y divide la población en hipótesis nuevas si corresponde.
+- Calcula el ESS y no remuestrea si supera la mitad de las partículas y ninguna hipótesis está agotada por dentro.
+- Ordena las hipótesis por masa y recorta a max_hypotheses.
+- Reinstala la población repartiendo cuotas de partículas y vuelve a elegir la salida.
+
+<!--
+El chequeo de agotamiento es doble: el ESS global y, además, uno por hipótesis. Una hipótesis chica puede quedar con todas sus partículas en una sola pose aunque el ESS global esté alto, y sin ese segundo chequeo se quedaría congelada.
+
+Las cuotas garantizan un mínimo de partículas por hipótesis. Eso es una asignación de cómputo, no masa de creencia: el llamador tiene que dividir el peso de la hipótesis entre su cuota, si no las hipótesis con pocas partículas ganarían peso solo por existir.
+
+Se cachea la covarianza de cada hipótesis ANTES de remuestrear. Después del remuestreo las partículas están duplicadas y la covarianza mediría el remuestreo en vez de la incertidumbre real.
+-->
 
 ---
 ### post_update(finished_events)
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** los submapas que terminaron en este scan.
+- **Salida:** ninguna.
+- Busca candidatos a loop closure entre los submapas terminados.
+- Corre el PGO de base de cada hipótesis, salteándolo si el grafo no cambió desde la última optimización.
+- Verifica cada candidato y acepta o descarta el loop.
+- Vuelve a elegir la hipótesis de salida.
+
+<!--
+La firma real recibe también el scan, pero no lo usa: está descartado con (void)z. Queda por simetría con los otros pasos del ciclo.
+
+El PGO de base se saltea cuando el grafo no tiene restricciones inter-submapa. Sin loops, el grafo local se construye a partir de las mismas poses locales inmutables y ya tiene solución de residuo cero: armar el problema de Ceres no agregaría información.
+
+El orden importa. La búsqueda de candidatos va primero y el PGO de base después, porque la verificación necesita comparar contra un grafo ya optimizado. Pero armar Ceres antes de saber si hay algún candidato sería trabajo perdido, así que la búsqueda se hace primero y el solve solo si hace falta.
+-->
 
 que se encarga de disparar loop closure con los submapas recién cerrados, correr PGO si hay nuevas restricciones, elegir la hipótesis que se publica y armar el mapa global.
 
@@ -101,13 +165,23 @@ La lógica de select_output_pose vive en output_selection.hpp. Publica siempre u
 
 ---
 ### best_occupancy_grid()
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** ninguna.
+- **Salida:** la grilla de ocupación de la hipótesis seleccionada, en valores de nav_msgs.
+- Reconstruye la vista de publicación si algo cambió desde la última llamada.
+
+<!--
+La reconstrucción es perezosa: se marca con publication_dirty_ y solo ocurre en la primera lectura después de un cambio. Componer la vista dibuja todos los submapas de la hipótesis en una grilla única, así que cuesta proporcional al mapa entero. Llamarla en cada scan sería caro; el nodo la llama desde un timer aparte.
+-->
 
 ---
 ### best_log_odds_grid()
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** ninguna.
+- **Salida:** la grilla de log-odds de la hipótesis seleccionada.
+- Igual que [best_occupancy_grid()](#best_occupancy_grid), pero sin convertir a la escala de nav_msgs.
+
+<!--
+Las dos comparten la misma reconstrucción, así que pedir las dos seguidas no cuesta el doble. La usa el cálculo de entropía, que necesita la probabilidad continua y no el valor discretizado a 0-100.
+-->
 
 ---
 ### loop_closure_poses()
@@ -129,6 +203,23 @@ publish_visualization() no redibuja los marcadores en cada tick: compara el tama
 - Igual que [loop_closure_poses()](#loop_closure_poses): solo crece y existe para RViz.
 
 
+
+---
+### `write_optimized_trajectory(out)`
+- **Entrada:** el stream donde escribir.
+- **Salida:** cuántas poses escribió.
+- Escribe la trayectoria optimizada de la hipótesis seleccionada, en formato TUM.
+- Antepone dos líneas de comentario con la hipótesis elegida y la cantidad de nodos.
+- Toma el timestamp de cada muestra y la pose corregida del grafo.
+- Lanza excepción si falta la pose de alguna secuencia o si los timestamps no son crecientes.
+
+<!--
+Es el mismo dato que la columna optimizada de [final_trajectory()](#final_trajectory): las dos recorren trajectory_samples y sacan la pose del mismo llamado a pose_at_sequence(). Las diferencias son el formato, que acá es TUM listo para evo, y que esta no exporta la pose online.
+
+El timestamp sale de la propia muestra, no del nodo de ROS, así que no depende de que el nodo lleve su registro de secuencia a timestamp.
+
+Escribe los nanosegundos con setw(9) y relleno de ceros para no perder precisión: formatear el timestamp como double redondearía a unos 200 ns.
+-->
 
 ---
 ### final_trajectory()
@@ -160,53 +251,492 @@ No coincide con la cuenta de scans recibidos del nodo: el core numera solo los q
 ---
 ## [grid_config.hpp](../belugaslam_core/include/belugaslam_core/grid_config.hpp)
 
+Constantes de la grilla generadas automáticamente. No se edita a mano: lo regenera el proceso de build. No define funciones, solo los valores de ocupación de nav_msgs, el radio del robot y el tamaño, la resolución y el origen de la grilla por defecto.
+
+<!--
+Los valores de kGridRows, kGridCols, kOriginX y kOriginY corresponden a un mapa fijo de 350x350 celdas. El SLAM no los usa para sus submapas, que se agrandan solos a medida que entran scans; quedan para las herramientas que necesitan una grilla de tamaño conocido de antemano.
+
+kRobotRadius vale 0.01 m, mucho menos que un robot real. Es el radio que se fuerza a libre alrededor del sensor al insertar un scan, así que un valor chico es conservador: limpia menos celdas.
+-->
+
 ## [grid_update.hpp](../belugaslam_core/include/belugaslam_core/grid_update.hpp)
 
+Escribe un scan en una grilla de log-odds: marca los impactos y traza los rayos de espacio libre entre el sensor y cada impacto. Está separado del submapa para poder testear la actualización de celdas sin construir un mapa.
+
+---
 ### `apply_scan_cells(cells, width, height, origin_x, origin_y, hit, miss, clamp, scratch, hits, misses)`
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** la grilla, sus dimensiones, la celda del sensor, los incrementos de impacto y de espacio libre, el límite de saturación, el buffer reutilizable y los dos vectores de salida.
+- **Salida:** ninguna; deja en hits y misses los índices tocados.
+- Primero suma el incremento de impacto en cada celda extremo de rayo.
+- Después traza los rayos desde el sensor y suma el incremento de espacio libre.
+- Toca cada celda una sola vez por scan.
+- Satura los valores en más y menos clamp.
+
+<!--
+Que los impactos vayan antes que los rayos no es un detalle de orden: es lo que le da prioridad al impacto. Una celda marcada como ocupada por un rayo puede estar atravesada por otro, y sin esta prioridad el segundo rayo la borraría. Como la marca de "ya visitada" es única por scan, el mismo mecanismo resuelve la deduplicación y la prioridad.
+
+La celda del sensor se saltea explícitamente: el robot no observa su propia posición como espacio libre a través de un rayo.
+
+El buffer usa épocas en vez de limpiarse: guarda un contador por celda y lo compara contra el de este scan. Así no hay que recorrer toda la grilla en cada inserción. Cuando el contador llega al máximo de 32 bits, ahí sí limpia todo y vuelve a empezar.
+-->
 
 ## [loop_belief.hpp](../belugaslam_core/include/belugaslam_core/loop_belief.hpp)
 
+Decide si un loop closure se acepta. La pregunta no es si el loop encaja geométricamente, sino cuánto deforma la trayectoria que ya se tenía y si el conjunto de hipótesis está de acuerdo.
+
+---
+### `wrap_angle(angle)`
+- **Entrada:** un ángulo en radianes.
+- **Salida:** el mismo ángulo en el rango de menos pi a pi.
+
+---
+### `aligned_trajectory_change(prior, trial)`
+- **Entrada:** la trayectoria antes del loop y la misma trayectoria después de aplicarlo.
+- **Salida:** el RMSE de traslación y de rotación entre las dos, o inválido si no se pudo alinear.
+- Alinea la trayectoria de prueba contra la anterior con una transformación rígida.
+- Mide cuánto se movió cada pose después de esa alineación.
+- Devuelve inválido si las trayectorias tienen distinto largo, menos de tres poses, algún valor no finito o extensión casi nula.
+
+<!--
+La alineación es SE(2) y no una similitud: no ajusta escala. Un LiDAR mide metros, así que la escala es conocida. Permitir que la alineación la ajuste dejaría pasar un loop que colapsa o estira el mapa, porque el estiramiento se absorbería en el factor de escala en vez de aparecer como error.
+
+Alinear antes de medir es lo que separa "el loop movió el mapa entero" de "el loop deformó el mapa". Lo primero es inofensivo, porque el marco global es arbitrario; lo segundo es el daño que hay que detectar.
+
+El corte por extensión menor a 1e-8 evita dividir por cero cuando el robot casi no se movió: sin desplazamiento no hay forma de determinar la rotación de la alineación.
+-->
+
+---
+### `trajectory_compatibility(change, translation_scale, rotation_scale)`
+- **Entrada:** la deformación medida y las escalas de tolerancia de traslación y rotación.
+- **Salida:** un número entre 0 y 1.
+- Convierte la deformación en compatibilidad con una gaussiana sobre los dos errores normalizados.
+- Devuelve 0 si la deformación es inválida o si alguna escala no es positiva.
+
+<!--
+Las escalas son loop_translation_scale y loop_rotation_scale. No son umbrales duros: fijan a qué deformación la compatibilidad cae a exp(-0.5), o sea alrededor de 0.61. La decisión de aceptar la toma el umbral de creencia sobre el valor marginalizado.
+-->
+
+---
+### `normalize_masses(masses)`
+- **Entrada:** las masas de las hipótesis, sin normalizar.
+- **Salida:** las mismas masas sumando 1, o todos ceros si la suma es cero.
+- Lanza excepción si alguna masa es negativa o no finita, o si la suma desborda.
+
+---
+### `marginalize_compatibilities(masses, compatibility)`
+- **Entrada:** las masas de las hipótesis y la compatibilidad de cada una con el loop.
+- **Salida:** la evidencia pesada por masa, la de la hipótesis MAP y la uniforme.
+- Recorta cada compatibilidad al rango 0 a 1 y trata como 0 las que no son finitas.
+- Lanza excepción si los dos arreglos tienen distinto largo.
+
+<!--
+Una hipótesis que no soporta el loop, o para la que no se pudo evaluar, entra con compatibilidad cero y sigue contando en el denominador. Renormalizar solo sobre las que sí lo soportan convertiría una masa posterior mínima en certeza: si una sola hipótesis de peso 0.01 acepta el loop, renormalizar daría evidencia 1.
+
+Devuelve las tres variantes para que el modo del verificador elija cuál mirar. La pesada es la que corresponde al posterior; la MAP y la uniforme están para comparar.
+-->
+
+---
+### `allocate_particle_quotas(masses, budget)`
+- **Entrada:** las masas de las hipótesis y el total de partículas disponibles.
+- **Salida:** cuántas partículas le tocan a cada hipótesis.
+- Le da al menos una partícula a cada hipótesis y reparte el resto proporcional a la masa.
+- Asigna las partículas sobrantes por resto decreciente.
+- Lanza excepción si el presupuesto es menor que la cantidad de hipótesis.
+
+<!--
+La cuota mínima es una asignación de cómputo, no masa de creencia. El llamador tiene que darle a cada partícula del modo h un peso W_h dividido su cuota; si no, una hipótesis casi descartada ganaría peso solo por tener su partícula garantizada.
+
+El reparto por resto decreciente (método de Hamilton) hace que la suma de las cuotas dé exactamente el presupuesto, cosa que redondear cada una por separado no garantiza.
+-->
+
 ## [loop_search.hpp](../belugaslam_core/include/belugaslam_core/loop_search.hpp)
+
+Busca dónde encaja un scan dentro de un submapa ya construido. Es el paso de recuperación del loop closure: propone poses candidatas, que después verifica el resto del sistema.
+
+---
+### `LoopFieldView::sample(x, y)`
+- **Entrada:** una coordenada en el marco del submapa.
+- **Salida:** la distancia al obstáculo más cercano y el puntaje de esa posición.
+- Interpola bilinealmente entre los centros de las cuatro celdas vecinas.
+- Devuelve distancia infinita y puntaje cero fuera de la grilla.
+
+<!--
+Interpolar en centros de celda y no en esquinas elimina las mesetas de media celda que aparecen al puntuar por índice redondeado. Sin eso el refinamiento fino se queda trabado: varias poses distintas dan exactamente el mismo puntaje.
+
+La vista no copia nada, solo referencia los arreglos ya cacheados en el submapa. Por eso el submapa tiene que seguir vivo mientras se use la vista.
+-->
+
+---
+### `score_loop_scan(field, scan, pose)`
+- **Entrada:** el campo del submapa, el scan y la pose candidata.
+- **Salida:** el puntaje medio y la fracción de puntos que caen cerca de un obstáculo.
+- Transforma cada punto del scan a la pose candidata y lo consulta contra el campo.
+- Cuenta como superposición los puntos a 30 cm o menos de un obstáculo.
+
+---
+### `separated_loop_modes(a, b, distance, angle)`
+- **Entrada:** dos poses y los umbrales de separación.
+- **Salida:** true si están suficientemente separadas como para ser modos distintos.
+
+---
+### `search_loop_modes(initial, options, score)`
+- **Entrada:** la pose inicial, las opciones de búsqueda y la función que puntúa una pose.
+- **Salida:** hasta max_modes poses candidatas, ordenadas por puntaje.
+- Barre una grilla gruesa alrededor de la pose inicial y descarta lo que no llega al umbral de superposición.
+- Se queda con hasta beam_width semillas separadas entre sí.
+- Refina cada semilla siete niveles, partiendo el paso a la mitad en cada uno.
+- Devuelve solo las que superan los umbrales de puntaje y superposición, y que están separadas entre sí.
+- Lanza excepción si alguna opción está fuera de rango.
+
+<!--
+El trabajo es fijo por ventana de búsqueda: como mucho 41x41x47 poses gruesas, ocho caminos de refinamiento y siete niveles. No depende del tamaño del mapa ni de la trayectoria, así que el costo del loop closure no crece a lo largo de la corrida.
+
+Es una heurística acotada, no una búsqueda con garantía de óptimo. No hay branch and bound: nada asegura que la mejor pose de la ventana esté entre las devueltas.
+
+Cada semilla gruesa conserva su propio camino de refinamiento. Sin eso, dos semillas que convergen a la misma pose fina consumirían dos de las ocho ranuras y se perderían modos alternativos, que es justo lo que hay que detectar para saber si el loop es ambiguo.
+
+El desempate por distancia al centro de la ventana existe para que una dirección geométricamente plana no elija una esquina de la ventana solo porque se enumeró primero. Es desempate, no evidencia.
+-->
+
+---
+### `LoopQueryLedger::consume(query)`
+- **Entrada:** la secuencia del scan consultado.
+- **Salida:** true si es la primera vez que se consume.
+- Registra que la evidencia de ese scan ya se usó para decidir loop o no loop.
+
+<!--
+La decisión de un scan se consume una sola vez para toda la creencia, incluidos los descendientes que decidieron no cerrar el loop. La evidencia pertenece a la creencia viva y no a una rama individual: si cada rama pudiera volver a consumirla, el mismo scan sumaría evidencia varias veces.
+
+Guarda un entero por evento consumido, igual que el grafo. No retiene el scan.
+-->
 
 ## [motion_filter.hpp](../belugaslam_core/include/belugaslam_core/motion_filter.hpp)
 
+Decide si un scan merece entrar al mapa. Es el umbral de keyframe: sin él cada scan crearía un nodo del grafo y el problema crecería sin necesidad mientras el robot está quieto.
+
+---
+### `motion_filter_accepts(elapsed_seconds, translation, rotation, max_time_seconds, max_translation, max_rotation)`
+- **Entrada:** el tiempo, la traslación y la rotación desde el último scan insertado, y los tres umbrales.
+- **Salida:** true si el scan se inserta.
+- Acepta si se superó cualquiera de los tres umbrales.
+- Acepta también si el tiempo transcurrido es negativo.
+
+<!--
+El desplazamiento se mide contra la última pose INSERTADA y después del scan matching, no contra el scan anterior ni contra la predicción de odometría. Si se midiera contra el scan anterior, un robot que avanza despacio nunca insertaría nada.
+
+Aceptar cuando el tiempo es negativo es deliberado: un timestamp que retrocede abre un intervalo de inserción nuevo en vez de dejar el filtro trabado esperando un tiempo que ya pasó.
+
+La comparación es estricta (>) en los tres umbrales, así que un desplazamiento exactamente igual al umbral se considera "similar" y se rechaza. Es el mismo criterio que MotionFilter::IsSimilar de Cartographer.
+-->
+
 ## [output_selection.hpp](../belugaslam_core/include/belugaslam_core/output_selection.hpp)
+
+Elige cuál de las hipótesis se publica. La decisión es sobre poses ya calculadas: no corre un paso del filtro ni promedia hipótesis.
+
+---
+### `select_output_pose(hypotheses)`
+- **Entrada:** las hipótesis con masa positiva, cada una con su identificador, su masa y su posición.
+- **Salida:** el índice de la hipótesis MAP, el de mínimo riesgo, y el riesgo de cada una.
+- La MAP es la de mayor masa; los empates se resuelven por identificador más chico.
+- El riesgo de una hipótesis es la suma de las distancias al cuadrado a todas las demás, pesada por sus masas.
+- Arranca la búsqueda de mínimo riesgo desde la MAP, así un empate exacto conserva la pose ya publicada.
+
+<!--
+Publicar una hipótesis existente en vez del promedio de todas es a propósito: el promedio de dos poses separadas cae en un lugar donde no hay mapa, y la pose publicada quedaría desalineada del mapa que se publica junto a ella. Publicar una hipótesis entera mantiene pose y mapa consistentes.
+
+El "riesgo" es una pérdida cuadrática interna en metros cuadrados sobre las posiciones de las hipótesis. NO es el RMSE contra ground truth ni una estimación de él: no hay ninguna referencia externa en el cálculo.
+
+Los acumuladores son long double y hay un chequeo de desborde, porque la suma pesada de cuadrados crece rápido si dos hipótesis se separan mucho.
+
+El llamador tiene que pasar las hipótesis ordenadas por identificador estable, si no los empates de riesgo se resuelven según el orden de llegada y la corrida deja de ser reproducible.
+-->
 
 ## [particle_proposal.hpp](../belugaslam_core/include/belugaslam_core/particle_proposal.hpp)
 
+Las dos operaciones aleatorias del filtro de partículas: elegir entre las propuestas de movimiento de una partícula, y elegir qué partículas sobreviven al remuestreo.
+
+---
+### `select_motion_proposal(logs, generator)`
+- **Entrada:** los log-likelihood de las propuestas de una partícula y el generador aleatorio.
+- **Salida:** el índice elegido y el log de la evidencia incremental.
+- Elige una propuesta al azar, con probabilidad proporcional a su verosimilitud.
+- Devuelve como evidencia el log de la verosimilitud MEDIA, no la de la elegida.
+- Lanza excepción si el conjunto está vacío o si alguna verosimilitud no es finita.
+
+<!--
+Que la evidencia sea la media y no el máximo es lo que hace que el filtro siga siendo correcto. La propuesta se eligió mirando el sensor, así que ya está sesgada hacia lo que el sensor prefiere; usar su verosimilitud como peso contaría esa información dos veces. La media es el estimador insesgado de la verosimilitud marginal bajo la propuesta.
+
+Con una sola propuesta la media es esa misma propuesta y el resultado es exactamente el filtro bootstrap.
+
+La resta del máximo antes de exponenciar evita el desborde: los log-likelihood de un scan completo son números muy negativos y exp() de eso daría cero.
+-->
+
+---
+### `systematic_indices(weights, count, generator)`
+- **Entrada:** los pesos de las partículas, cuántas hay que sacar y el generador aleatorio.
+- **Salida:** los índices elegidos, con repetición.
+- Usa un solo desplazamiento aleatorio y recorre la distribución acumulada a paso fijo.
+- Acepta pesos sin normalizar y saltea los de peso cero.
+- Lanza excepción si algún peso es negativo o no finito, o si la masa total es cero.
+
+<!--
+El remuestreo sistemático tiene menos varianza que sacar cada partícula por separado de una categórica: con una sola extracción aleatoria, una partícula de peso w recibe siempre floor(N*w) o ceil(N*w) copias, nunca menos ni más. Con extracciones independientes podría recibir cero por azar.
+
+Como el desplazamiento es uno solo para toda la población, las copias quedan correlacionadas entre sí. Eso es aceptable acá porque el paso siguiente vuelve a aplicar el modelo de movimiento, que las separa.
+-->
+
 ## [particle.hpp](../belugaslam_core/include/belugaslam_core/particle.hpp)
 
+La grilla de log-odds que usan los submapas, con las dos operaciones que cambian su tamaño: agrandarla cuando un scan se sale, y recortarla cuando el submapa se termina.
+
+---
 ### `crop_to_known_cells(margin_cells)`
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** cuántas celdas de espacio desconocido dejar alrededor de lo observado.
+- **Salida:** true si la grilla cambió de tamaño.
+- Busca la caja de celdas observadas, o sea las que tienen log-odds distinto de cero.
+- Recorta la grilla a esa caja más el margen.
+- Solo mueve el origen: las celdas que quedan conservan sus coordenadas.
+
+<!--
+Es la contraparte de [grow_to_include(min_x, min_y, max_x, max_y)](#grow_to_includemin_x-min_y-max_x-max_y). Mientras el submapa está activo la grilla se agranda hasta donde lleguen los scans, que a lo largo de un submapa entero es mucho más de lo que el sensor llegó a observar. Se llama al terminar el submapa, igual que ComputeCroppedGrid() en Cartographer.
+
+Que solo mueva el origen es lo que mantiene válidas las poses y las restricciones medidas contra ese submapa. Si el recorte reindexara las celdas, todas las restricciones del grafo apuntarían al lugar equivocado.
+
+El margen existe para que una consulta apenas afuera de una pared caiga en una celda real y no se salga de la grilla.
+-->
 
 ---
 ### `grow_to_include(min_x, min_y, max_x, max_y)`
-- **Entrada:** 
-- **Salida:** 
+- **Entrada:** la caja en coordenadas del marco de la grilla que tiene que quedar adentro.
+- **Salida:** true si la grilla cambió de tamaño.
+- No hace nada si la caja ya entra.
+- Agranda en bloques de 32 celdas, no en la cantidad exacta que falta.
+- Solo mueve el origen: las celdas existentes conservan sus coordenadas.
+- Corta en 4000 celdas por lado.
+
+<!--
+Agrandar de a bloques evita reasignar la grilla en cada scan cuando el robot avanza despacio y el borde se corre de a poco.
+
+El límite de 4000 celdas por lado es una defensa contra una pose divergente: sin él, una partícula que se fue lejos pediría una grilla enorme y el proceso se quedaría sin memoria.
+-->
 
 ## [pose_graph_cost.hpp](../belugaslam_core/include/belugaslam_core/pose_graph_cost.hpp)
 
+Envuelve el residuo del grafo para Ceres. Ofrece las dos variantes, la analítica y la de diferenciación automática, para poder compararlas entre sí.
+
+---
+### `AnalyticPoseGraphCost::Evaluate(p, r, j)`
+- **Entrada:** los dos bloques de parámetros, y los punteros de salida del residuo y las jacobianas.
+- **Salida:** false si el residuo no es finito.
+- Delega todo en [PoseGraphResidual::evaluate(a, b, r, ja, jb)](#posegraphresidualevaluatea-b-r-ja-jb).
+- Acepta que Ceres pida el residuo sin jacobianas, o solo una de las dos.
+
+---
+### `PoseGraphEdgeError::operator()(pose_i, pose_j, residuals)`
+- **Entrada:** las dos poses de la arista y el puntero de salida del residuo.
+- **Salida:** siempre true.
+- Calcula el mismo residuo que la versión analítica, pero con tipos genéricos para que Ceres lo derive solo.
+
+<!--
+Existe para verificar la versión analítica, no para producción: hay un test que compara residuo y jacobianas de las dos y exige que coincidan en 1e-10. Si alguien toca las derivadas escritas a mano, ese test lo detecta.
+-->
+
+---
+### `PoseGraphEdgeError::Create(dx, dy, dtheta, weight_translation, weight_rotation, offset_x, offset_y, offset_angle, use_analytic)`
+- **Entrada:** la medición de la arista, sus pesos, el offset rígido y qué variante construir.
+- **Salida:** la función de costo lista para agregar al problema de Ceres.
+- Devuelve la variante analítica o la de diferenciación automática según el último argumento.
+
+<!--
+El llamador cede la propiedad del puntero a Ceres, que lo libera al destruir el problema. Por eso hay new sin delete.
+
+Cuál se usa lo decide el parámetro pgo_analytic_jacobians. La analítica es más rápida; la otra queda como referencia y para el test de equivalencia.
+-->
+
 ## [pose_graph_residual.hpp](../belugaslam_core/include/belugaslam_core/pose_graph_residual.hpp)
 
+El residuo de una arista del grafo de poses, con sus derivadas escritas a mano. Está separado de [pose_graph_cost.hpp](../belugaslam_core/include/belugaslam_core/pose_graph_cost.hpp) para poder testearlo sin depender de Ceres.
+
+---
+### `PoseGraphResidual::evaluate(a, b, r, ja, jb)`
+- **Entrada:** las dos poses [x, y, yaw] de la arista y los punteros de salida del residuo y las dos jacobianas.
+- **Salida:** false si algún residuo no es finito.
+- Calcula la pose de b en el marco de a y la compara contra la medición de la arista.
+- Aplica el offset rígido al extremo a antes de comparar.
+- Pesa los dos residuos de traslación y el de rotación por separado.
+- Escribe las jacobianas solo si le pasaron los punteros.
+
+<!--
+El residuo angular pasa por atan2(sin, cos) en vez de restarse directo. Sin eso, una diferencia de 359 grados contaría como un error enorme en vez de uno de un grado, y el solver la corregiría dando toda la vuelta.
+
+El offset rígido existe para que varios submapas compartan una sola variable del grafo: cada uno entra con su desplazamiento fijo respecto del grupo. El offset se rota al construirlo, no en cada evaluación.
+
+Las jacobianas son constantes respecto de b y solo dependen del ángulo de a. Por eso el bloque jb no tiene términos cruzados.
+-->
+
+---
+### `weighted_loop_residual_squared(translation_error, rotation_error, translation_weight, rotation_weight)`
+- **Entrada:** los errores de traslación y rotación de un loop, y sus pesos.
+- **Salida:** la suma de los dos errores pesados al cuadrado.
+
+<!--
+Es el mismo criterio de escala que usa el residuo de las aristas, expuesto aparte para que la verificación de loops mida con la misma vara que el optimizador. Si verificación y optimización usaran escalas distintas, un loop podría pasar la verificación y después empeorar el costo del grafo.
+-->
+
+## [proposal_pose.hpp](../belugaslam_core/include/belugaslam_core/proposal_pose.hpp)
+
+Lectura alternativa de la pose de una hipótesis: en vez de quedarse con la pose del scan matching, usa la media de toda la nube de propuestas pesadas. Es opcional y está detrás de varios chequeos, porque la media solo tiene sentido si la nube es unimodal y concentrada.
+
+---
+### `normalized_proposal_weights(cloud)`
+- **Entrada:** la nube de propuestas con su log-peso.
+- **Salida:** los pesos normalizados, o vacío si la nube no sirve.
+- Devuelve vacío si algún log-peso es NaN o más infinito, o si alguna pose no es finita.
+- Resta el máximo antes de exponenciar.
+
+<!--
+Un log-peso de menos infinito sí se acepta: es una propuesta imposible, que queda con peso cero. Más infinito no, porque no hay forma de normalizar contra él.
+-->
+
+---
+### `proposal_second_moment(cloud, weights, center)`
+- **Entrada:** la nube, sus pesos normalizados y el centro respecto del cual medir.
+- **Salida:** la matriz 3x3 de segundo momento, en orden por filas.
+- Envuelve la diferencia de ángulo antes de acumular.
+
+---
+### `summarize_proposal_poses(cloud, weights, reference, translation_window, rotation_window)`
+- **Entrada:** la nube, sus pesos, una pose de referencia y las ventanas de traslación y rotación.
+- **Salida:** la media, la covarianza, el ESS, la masa local y los desvíos de posición y de ángulo.
+- Acumula todo relativo a la pose de referencia.
+- Promedia el ángulo de forma circular, no aritmética.
+- Mide como masa local la fracción de peso que cae dentro de las dos ventanas.
+
+<!--
+Acumular relativo a la referencia y no en coordenadas absolutas evita la cancelación catastrófica: lejos del origen del mundo, las poses son números grandes y casi iguales, y restarlos al final pierde precisión.
+
+El promedio circular es necesario porque los ángulos dan la vuelta: el promedio aritmético de 179 y -179 grados da cero, cuando la respuesta es 180.
+
+La masa local es el indicador de unimodalidad. Si la nube tiene dos grupos separados, la masa local baja aunque el ESS siga alto, y la media caería entre los dos grupos, en un lugar donde no hay ninguna propuesta.
+-->
+
+---
+### `check_proposal_pose(summary, field, scan, prediction, frontend_score, tracking, minimum_ess, minimum_local_mass, maximum_log_drop)`
+- **Entrada:** el resumen de la nube, el campo del submapa, el scan, la predicción de odometría, el puntaje del frontend, las opciones de tracking y los tres umbrales.
+- **Salida:** si se acepta la media, el motivo, y el puntaje de la media contra el mapa.
+- Rechaza si el ESS es bajo, si la nube es difusa o multimodal, o si la media se fue de la ventana de movimiento.
+- Puntúa la media contra el mapa nativo y la rechaza si ajusta peor que el frontend por más de maximum_log_drop.
+- Devuelve el motivo del rechazo como texto, para diagnóstico.
+
+<!--
+Los chequeos seleccionan qué lectura publicar; NO modifican los pesos de las propuestas ni podan las colas. La distribución posterior queda igual: lo único que cambia es qué número se reporta como pose de la hipótesis.
+
+El último chequeo es independiente de los anteriores: vuelve a medir la media contra el mapa, en vez de confiar en los estadísticos de la nube. Una nube puede ser concentrada y estar concentrada en el lugar equivocado.
+
+Lo controla el parámetro frontend_pose_mode, que por defecto vale "frontend", o sea que toda esta ruta está apagada salvo que se pida explícitamente proposal_mean.
+-->
+
+---
 ## [robust_tracking.hpp](../belugaslam_core/include/belugaslam_core/robust_tracking.hpp)
+
+El scan matching del frontend. Alinea cada scan contra el submapa de su hipótesis partiendo de la predicción de odometría, y decide si el resultado es confiable. También tiene la búsqueda de recuperación para cuando el tracking se pierde.
+
+---
+### `tracking_score(field, scan, pose, options)`
+- **Entrada:** el campo de distancias del submapa, el scan, la pose a evaluar y las opciones.
+- **Salida:** el log-likelihood medio, la superposición y la cantidad de inliers.
+- Transforma cada punto del scan a la pose y mide su distancia al obstáculo más cercano.
+- Combina una gaussiana sobre esa distancia con una probabilidad fija de outlier.
+- Cuenta como inlier todo punto a menos de inlier_distance.
+
+<!--
+El término de outlier es lo que hace robusta la métrica: sin él, un solo punto lejano manda el log-likelihood a menos infinito y arruina la pose entera. Con él, cada punto aporta como mucho el log de la probabilidad de outlier.
+
+Devuelve el log-likelihood MEDIO, no la suma. Así el valor no depende de cuántos puntos tenga el scan y se pueden comparar scans de distinto largo.
+-->
+
+---
+### `tracking_objective(field, scan, pose, prior, options)`
+- **Entrada:** el campo, el scan, la pose a evaluar, la pose previa de odometría y las opciones.
+- **Salida:** el costo a minimizar.
+- Suma el log-likelihood negativo de [tracking_score(field, scan, pose, options)](#tracking_scorefield-scan-pose-options) y una penalización gaussiana por alejarse de la predicción.
+
+<!--
+La penalización usa prior_translation_sigma y prior_rotation_sigma. Es la que impide que el matcher tire la pose a cualquier lado cuando el scan tiene poca estructura, por ejemplo en un pasillo largo donde deslizarse a lo largo no cambia el puntaje.
+-->
+
+---
+### `solve_tracking_system(matrix, rhs, solution)`
+- **Entrada:** la matriz 3x3 del sistema, el lado derecho y el vector de salida.
+- **Salida:** false si el sistema es singular o la solución no es finita.
+- Resuelve por eliminación gaussiana con pivoteo parcial.
+
+<!--
+Toma la matriz y el lado derecho por copia porque los modifica al eliminar. Rechaza pivotes menores a 1e-14, que es lo que pasa cuando la geometría del scan no restringe alguna dirección.
+-->
+
+---
+### `match_tracking_scan(field, scan, prior, options, seed)`
+- **Entrada:** el campo, el scan, la predicción de odometría, las opciones y opcionalmente una pose semilla.
+- **Salida:** la pose alineada, su puntaje, si se acepta, y el costo inicial y final.
+- Usa la semilla como punto de partida solo si mejora el costo y cae dentro de la ventana de movimiento.
+- Itera hasta max_iterations resolviendo el sistema linealizado.
+- Rechaza el resultado si no llega al mínimo de puntos, de superposición, o si se salió de la ventana.
+- Si rechaza, devuelve la predicción de odometría sin tocar.
+
+<!--
+La ventana max_translation y max_rotation acota cuánto puede moverse la pose respecto de la predicción. Es lo que evita que un scan ambiguo teletransporte al robot.
+
+Cuando el matching falla, devolver la predicción de odometría en vez de la mejor pose encontrada es deliberado: propagar odometría sola es más seguro que propagar un alineamiento que no pasó los chequeos.
+-->
+
+---
+### `select_tracking_points(scan, limit)`
+- **Entrada:** el scan completo y el máximo de puntos.
+- **Salida:** el scan submuestreado.
+- Toma puntos espaciados de forma pareja a lo largo del scan.
+
+<!--
+El submuestreo es determinista, por índice, y no aleatorio: dos llamadas con el mismo scan dan los mismos puntos, cosa necesaria para que la corrida sea reproducible.
+
+El límite por defecto es 180 puntos. El costo del matching es lineal en la cantidad de puntos y multiplica por iteraciones y por partículas, así que este número es de los que más pesan en el tiempo por scan.
+-->
+
+---
+### `recover_tracking_scan(field, scan, prior, normal, recovery)`
+- **Entrada:** el campo, el scan, la última pose confiable, las opciones normales y las de recuperación.
+- **Salida:** la pose recuperada y si se acepta.
+- Ensancha la ventana de movimiento y afloja la penalización de odometría.
+- Barre 11 posiciones por eje alrededor de la pose previa y ordena las semillas por costo.
+- Refina las semillas separadas entre sí y compara los modos que compiten.
+- Rechaza si dos modos quedan demasiado parecidos en costo.
+
+<!--
+Está separado del tracking normal a propósito. Aflojar la regularización de odometría es peligroso durante la operación normal, porque deja que el matcher se vaya; solo se justifica cuando ya se sabe que el tracking se perdió.
+
+El margen de ambigüedad hace que un pasillo simétrico, donde dos poses opuestas explican igual de bien el scan, no produzca una recuperación con una pose elegida al azar entre las dos.
+
+El resultado no se inserta en el mapa de inmediato: el llamador tiene que corroborarlo en scans posteriores, tantos como diga confirmations. Una recuperación equivocada que se inserta contamina el submapa de forma irreversible.
+
+El barrido es de 11 posiciones por eje, o sea trabajo máximo fijo, independiente del tamaño de la trayectoria.
+-->
 
 ## [submap.hpp](../belugaslam_core/include/belugaslam_core/submap.hpp)
 
 Define el modelo de datos del mapa: qué es un submapa, cómo se le insertan los scans, y las estructuras del grafo de poses (nodos de trayectoria y restricciones). La estructura que contiene a todas las demás es `Hypothesis`. Cada una tiene sus propios submapas, su propio grafo de trayectoria y su propio estado de tracking.
 
 ---
-### `insert_scan_into_submap_grid(grid, T_submap_sensor, scan, params, hit_scratch, miss_scratch, reusable_updates)`
+### `insert_scan_into_submap_grid(grid, T_submap_robot, scan, params, hit_scratch, miss_scratch, reusable_updates)`
 - **Entrada:** la grilla del submapa, la pose del robot en el marco del submapa, el scan en coordenadas del robot, los parámetros de inserción y buffers reutilizables.
 - **Salida:** ninguna.
-- Agranda la grilla primero, para cubrir el origen del sensor y todos los impactos.
+- Agranda la grilla primero, para cubrir la pose del robot y todos los impactos.
 - Fuerza a libre las celdas dentro del radio del robot, antes de aplicar el scan.
 - Convierte cada punto del scan a índices de celda y llama a [apply_scan_cells(cells, width, height, origin_x, origin_y, hit, miss, clamp, scratch, hits, misses)](#apply_scan_cellscells-width-height-origin_x-origin_y-hit-miss-clamp-scratch-hits-misses), que marca los impactos y traza los rayos de espacio libre.
 
 <!--
-El parámetro se llama T_submap_sensor y el comentario dice que el scan viene en el marco del sensor, pero las dos cosas son incorrectas: el sitio de llamada pasa T_s_r (submapa ← robot) y el scan ya viene en base_link porque laser_to_cartesian() aplicó la extrínseca. La matemática está bien, porque los dos argumentos están en el mismo marco; el error es de nombre.
+La pose y el scan están los dos en el marco del robot (base_link), no en el del sensor: laser_to_cartesian() ya aplicó la extrínseca del láser antes de que el scan llegue acá. El origen de los rayos es entonces la posición del robot, no la del láser, que es una aproximación válida mientras el láser esté cerca del centro del robot.
+
+Hasta el 9 de septiembre de 2026 el parámetro se llamaba T_submap_sensor y las dos líneas de \param decían "sensor". El nombre estaba mal pero la matemática no, porque la pose y el scan siempre estuvieron en el mismo marco.
 -->
 
 ---
@@ -231,7 +761,9 @@ El parámetro se llama T_submap_sensor y el comentario dice que el scan viene en
 - Descarta el campo de distancias, que queda desactualizado apenas se escriba la grilla.
 
 <!--
-Usa shared_ptr::unique(), que está obsoleto desde C++17 y eliminado en C++20. Hoy compila porque el proyecto usa cxx_std_17. El reemplazo equivalente es use_count() != 1.
+La comprobación de dueño único es use_count() != 1. Antes era shared_ptr::unique(), que está deprecado desde C++17 y eliminado en C++20: compilaba solo porque el proyecto pide cxx_std_17, y habría dejado de compilar al subir el estándar. Se cambió el 9 de septiembre de 2026; las dos formas son equivalentes.
+
+La copia perezosa es lo que permite que las hipótesis compartan submapas sin copiarlos: recién cuando una va a escribir se separa del resto.
 -->
 
 ---
