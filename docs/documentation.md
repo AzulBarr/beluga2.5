@@ -50,7 +50,6 @@ La versión no const solo la usan los tests.
 ### get_active_hypotheses_count()
 - **Entrada:** ninguna.
 - **Salida:** cuántas hipótesis hay activas.
-- Es la métrica que dice si el sistema está dudando: 1 es una sola interpretación del entorno, más de 1 significa que un cierre de lazo ambiguo o una divergencia espacial abrió ramas.
 
 <!--
 Se registra en el CSV, y como se lee después de resample() arrastra el mismo desfase que el conteo de partículas.
@@ -130,6 +129,33 @@ publish_visualization() no redibuja los marcadores en cada tick: compara el tama
 - Igual que [loop_closure_poses()](#loop_closure_poses): solo crece y existe para RViz.
 
 
+
+---
+### final_trajectory()
+- **Entrada:** ninguna.
+- **Salida:** un punto por cada scan procesado de la hipótesis seleccionada, con la pose que se publicó en ese momento y la pose después de la optimización.
+- Los keyframes toman la pose de su nodo del grafo; los scans intermedios se apoyan en el submapa contra el que se registraron.
+- Pensada para llamarse una sola vez, al final del recorrido.
+
+<!--
+La diferencia entre las dos poses es todo lo que el PGO corrigió después de haber publicado la pose. Medir RMSE contra output_x/output_y de performance.csv usa solo la columna online, así que ningún cierre de lazo llega al resultado.
+
+Se guarda una muestra (TrajectorySample) por scan procesado y no se podan nunca: de los nodos viejos solo se libera la nube de puntos, no la pose. Por eso al final del dataset está la trayectoria completa y alcanza con leerla una vez.
+
+La muestra guarda T_submap_robot, así que cuando el PGO mueve el submapa la pose se mueve con él. La pose online se guarda aparte, en frontend_pose, porque T_global_local cambia en cada optimización y después no se puede reconstruir.
+
+Devuelve la trayectoria de una sola hipótesis, la que quedó seleccionada al final. La trayectoria publicada durante el recorrido puede saltar entre hipótesis, así que las dos poses de una misma fila no siempre vienen de la misma cadena de decisiones.
+-->
+
+---
+### scan_sequence_count()
+- **Entrada:** ninguna.
+- **Salida:** cuántos scans numeró el core; el próximo va a recibir ese número como secuencia.
+- Sirve para saber qué secuencia le tocó al scan recién procesado.
+
+<!--
+No coincide con la cuenta de scans recibidos del nodo: el core numera solo los que llegan a update_occupancy_grid() con puntos y timestamp válidos, no los que se descartan antes.
+-->
 
 ---
 ## [grid_config.hpp](../belugaslam_core/include/belugaslam_core/grid_config.hpp)
@@ -521,6 +547,7 @@ Se activa cada vez que se recibe un scan. Registra métricas de latencia y desca
 - Ejecuta el ciclo del filtro: [sample_motion_model(u)](#sample_motion_modelu), [measurement_model_map(z)](#measurement_model_mapz), [update_occupancy_grid(z, stamp)](#update_occupancy_gridz-stamp), [post_update(finished_events)](#post_updatefinished_events) y [resample()](#resample).
 - Mide la innovación de la pose de salida (diferencia entre la pose predicha por odometría y la que devuelve el filtro) y detecta si cambió la hipótesis ganadora.
 - Calcula la covarianza y publica pose y TF con [compute_se2_covariance()](#compute_se2_covariance), [publish_best_pose(stamp)](#publish_best_posestamp) y [broadcast_map_to_odom(stamp, current_odom)](#broadcast_map_to_odomstamp-current_odom).
+- Guarda el timestamp del scan junto con la secuencia que le asignó el core, que necesita [write_final_trajectory()](#write_final_trajectory) para fechar la trayectoria del final. Solo lo hace si se pidió ese archivo.
 - Registra los tiempos de cada etapa y los contadores en el CSV de performance con [record_performance(stamp, status, start, timing)](#record_performancestamp-status-start-timing).
 
 <!--
@@ -688,6 +715,24 @@ Dividir por log(N).
 - **Entrada:** timestamp del scan.
 - **Salida:** ninguna.
 - Igual que [publish_loop_closure_markers(stamp)](#publish_loop_closure_markersstamp), pero con las poses de [spatial_split_poses()](#spatial_split_poses). Publica en `/spatial_split_markers` esferas rojas.
+
+---
+### `write_final_trajectory()`
+- **Entrada:** ninguna.
+- **Salida:** ninguna.
+- No hace nada si el parámetro `final_trajectory_path` está vacío.
+- Pide la trayectoria del recorrido con [final_trajectory()](#final_trajectory) y la escribe en un CSV: una fila por scan con secuencia, timestamp, submapa, pose online y pose optimizada.
+- Se llama desde el destructor del nodo, cuando termina el recorrido.
+
+<!--
+El archivo se abre al arrancar, no al escribir: si la ruta no sirve, el nodo falla antes de procesar el dataset en vez de después.
+
+El destructor atrapa las excepciones porque una que se escape de un destructor aborta el proceso. Si el proceso se mata con SIGKILL el archivo queda vacío; ros2 launch manda SIGINT primero, así que en un recorrido normal alcanza.
+
+Los timestamps salen de scan_sequence_stamps_, que laser_callback llena con el stamp de cada scan y la secuencia que le asignó el core. Las filas cuya secuencia nunca recibió un stamp se saltean: no hay contra qué compararlas.
+
+tools/evaluate_trajectory.py lee este CSV. Con el subcomando export-final lo pasa a TUM, y en compare se elige la columna agregando #online o #optimized al final de la ruta.
+-->
 
 
 

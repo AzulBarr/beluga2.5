@@ -53,6 +53,7 @@
   <arg name="scan_queue_depth" default="50"/>
   <arg name="scan_reliable" default="false"/>
   <arg name="performance_diagnostics_path" default=""/>
+  <arg name="final_trajectory_path" default=""/>
 
   <arg name="tracking_sigma" default="0.15"/>
   <arg name="tracking_outlier_probability" default="0.05"/>
@@ -136,6 +137,7 @@
     <arg name="scan_queue_depth" value="$(var scan_queue_depth)"/>
     <arg name="scan_reliable" value="$(var scan_reliable)"/>
     <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
+    <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
     <arg name="tracking_sigma" value="$(var tracking_sigma)"/>
     <arg name="tracking_outlier_probability" value="$(var tracking_outlier_probability)"/>
     <arg name="tracking_translation_prior_sigma" value="$(var tracking_translation_prior_sigma)"/>

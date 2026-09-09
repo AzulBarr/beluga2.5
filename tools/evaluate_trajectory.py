@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Planar trajectory RMSE and fixed-time RPE on common reference timestamps.
 
-Input estimates: TUM files or the recovery revision's performance CSV.
+Input estimates: TUM files, the recovery revision's performance CSV, or the node's
+final-trajectory CSV, which holds the online and the pose-graph-optimized trajectory.
 No scale fitting, automatic clock shifting, or per-segment realignment.
 """
 import argparse
@@ -77,10 +78,39 @@ def load_performance(path):
     return validate(poses)
 
 
-def load_estimate(path):
+FINAL_COLUMNS = ('online', 'optimized')
+
+
+def load_final(path, column='optimized'):
+    """Read one trajectory out of the node's final_trajectory_path CSV."""
+    if column not in FINAL_COLUMNS:
+        raise ValueError(f'Column must be one of {FINAL_COLUMNS}')
+    poses = []
+    with Path(path).open(newline='') as stream:
+        reader = csv.DictReader(stream)
+        needed = {'sequence', 'stamp_ns'} | {f'{column}_{k}' for k in ('x', 'y', 'yaw')}
+        if not needed <= set(reader.fieldnames or []):
+            raise ValueError(f'CSV lacks the {column} trajectory; expected a final_trajectory_path file')
+        for row in reader:
+            poses.append(Pose(int(row['stamp_ns']),
+                              *(float(row[f'{column}_{k}']) for k in ('x', 'y', 'yaw'))))
+    return validate(poses)
+
+
+def split_column(path):
+    """A trailing #online or #optimized picks one trajectory of a final CSV."""
+    head, separator, column = path.rpartition('#')
+    return (head, column) if separator and column in FINAL_COLUMNS else (path, None)
+
+
+def load_estimate(path, column=None):
     with Path(path).open() as stream:
-        first = stream.readline()
-    return load_performance(path) if 'stamp_ns' in first.split(',') else load_tum(path)
+        fields = [f.strip() for f in stream.readline().split(',')]
+    if 'optimized_x' in fields:
+        return load_final(path, column or 'optimized')
+    if column:
+        raise ValueError(f'{path} is not a final-trajectory CSV, so #{column} does not apply')
+    return load_performance(path) if 'stamp_ns' in fields else load_tum(path)
 
 
 def write_tum(path, poses):
@@ -180,6 +210,7 @@ def compare(reference, estimates, max_diff_s=.05, alignment='se2', rpe_delta_s=1
               'notes': ['All runs use the same reference indices; missing poses and coverage are reported separately.',
                         'Metrics are planar XY translation and wrapped yaw. No scale fitting or per-segment realignment.',
                         'These are online estimates if /best_pose is used. Compare the same trajectory type and body frame for every method.',
+                        'The optimized column of a final-trajectory CSV is the trajectory after pose graph optimisation, read at the end of the run; it is not what the robot could have known online.',
                         'Time synchronization is explicit; reference provenance and independent ground-truth accuracy must be established.',
                         'Low matched-pose RMSE does not excuse missing coverage or establish map accuracy.']}
     for name, poses in estimates.items():
@@ -211,9 +242,12 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     export = commands.add_parser('export-csv')
     export.add_argument('csv'); export.add_argument('tum')
+    final = commands.add_parser('export-final')
+    final.add_argument('csv'); final.add_argument('tum')
+    final.add_argument('--column', choices=FINAL_COLUMNS, default='optimized')
     evaluate = commands.add_parser('compare')
     evaluate.add_argument('--reference', required=True)
-    evaluate.add_argument('--estimate', action='append', required=True, help='Unique name=path (TUM or new performance CSV)')
+    evaluate.add_argument('--estimate', action='append', required=True, help='Unique name=path (TUM, performance CSV, or final-trajectory CSV; append #online or #optimized to pick one of its two trajectories)')
     evaluate.add_argument('--reference-time-offset', default='0', help='Known offset in seconds ADDED to reference stamps; never fitted')
     evaluate.add_argument('--max-diff', type=float, default=.05)
     evaluate.add_argument('--alignment', choices=('se2', 'origin', 'none'), default='se2')
@@ -224,13 +258,16 @@ def main():
         if args.command == 'export-csv':
             poses = load_performance(args.csv); write_tum(args.tum, poses)
             print(f'Exported {len(poses)} online poses to {args.tum}')
+        elif args.command == 'export-final':
+            poses = load_final(args.csv, args.column); write_tum(args.tum, poses)
+            print(f'Exported {len(poses)} {args.column} poses to {args.tum}')
         else:
             estimates = {}
             for item in args.estimate:
                 name, separator, path = item.partition('=')
                 if not separator or not name or name in estimates:
                     raise ValueError('Estimates require unique name=path entries')
-                estimates[name] = load_estimate(path)
+                estimates[name] = load_estimate(*split_column(path))
             report = compare(load_tum(args.reference, nanoseconds(args.reference_time_offset)), estimates,
                              args.max_diff, args.alignment, args.rpe_delta)
             report['reference_time_offset_s'] = args.reference_time_offset

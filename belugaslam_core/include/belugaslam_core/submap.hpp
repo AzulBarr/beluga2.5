@@ -340,6 +340,10 @@ struct TrajectorySample {
   std::uint64_t sequence = 0;
   SubmapId submap_id = 0;
   Sophus::SE2d T_submap_robot;
+  // The pose the frontend published for this scan, in the global frame of that moment.
+  // PGO never rewrites it, so it keeps the uncorrected trajectory next to the corrected
+  // one that T_submap_robot yields through its submap.
+  Sophus::SE2d frontend_pose;
 };
 
 enum class ConstraintTag { kIntraSubmap, kInterSubmap };

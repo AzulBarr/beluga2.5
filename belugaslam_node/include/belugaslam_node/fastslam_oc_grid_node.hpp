@@ -1,6 +1,7 @@
 #ifndef __BELUGASLAM_NODE_HPP__
 #define __BELUGASLAM_NODE_HPP__
 
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -46,6 +47,11 @@ public:
     /// Constructor.
     BelugaSLAMNode();
     ~BelugaSLAMNode() {
+        // An exception escaping a destructor aborts the process; a failed export must not.
+        try { write_final_trajectory(); }
+        catch (const std::exception& error) {
+            RCLCPP_ERROR(get_logger(), "Final trajectory not written: %s", error.what());
+        }
     }
 
 private:
@@ -77,7 +83,9 @@ private:
     void broadcast_map_to_odom(const rclcpp::Time& stamp, const state_type& current_odom);
     
     //void save_map();
-    //void save_trajectory();
+
+    /// Writes the run trajectory, online and optimized, once the run is over.
+    void write_final_trajectory();
 
     /**
      * \brief Converts polar laser readings to Cartesian coordinates in the robot's local frame.
@@ -155,6 +163,10 @@ private:
     std::uint64_t map_publications_ = 0, scans_received_ = 0, scans_processed_ = 0;
     std::uint64_t tf_errors_ = 0, empty_scans_ = 0, out_of_order_scans_ = 0;
     std::ofstream performance_csv_;
+    std::ofstream final_trajectory_csv_;
+    // Scan sequence -> stamp of the scan the core gave that sequence to. The core
+    // counts only the scans it inserted, so this cannot be derived from scans_received_.
+    std::vector<std::int64_t> scan_sequence_stamps_;
     struct ScanTiming {
         double tf_convert_ms = 0.0, motion_ms = 0.0, matching_ms = 0.0;
         double insertion_ms = 0.0, backend_ms = 0.0, resample_ms = 0.0, pose_publish_ms = 0.0;

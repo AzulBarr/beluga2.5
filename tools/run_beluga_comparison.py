@@ -38,6 +38,7 @@ def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=Tr
         f'performance_diagnostics_path:={run / "performance.csv"}',
         f'tracking_diagnostics_path:={run / "tracking.csv"}',
         f'loop_diagnostics_path:={run / "loops.csv"}',
+        f'final_trajectory_path:={run / "final_trajectory.csv"}',
     ]
 
 

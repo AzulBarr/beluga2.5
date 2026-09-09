@@ -69,6 +69,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("scan_queue_depth", 50);
     this->declare_parameter("scan_reliable", false);
     this->declare_parameter("performance_diagnostics_path", "");
+    this->declare_parameter("final_trajectory_path", "");
 
     declare_parameter("tracking_sigma", 0.15);
     declare_parameter("tracking_outlier_probability", 0.05);
@@ -231,6 +232,13 @@ void BelugaSLAMNode::setup_slam() {
     trajectory_max_poses_ = static_cast<std::size_t>(get_parameter("trajectory_max_poses").as_int());
     if (uncertainty_map_publish_interval < 0)
         throw std::invalid_argument("uncertainty_map_publish_interval must be nonnegative (0 disables it)");
+    const auto final_trajectory_path = get_parameter("final_trajectory_path").as_string();
+    if (!final_trajectory_path.empty()) {
+        // Opened now, written at shutdown: a run that cannot write its trajectory
+        // should fail before processing the dataset, not after.
+        final_trajectory_csv_.open(final_trajectory_path);
+        if (!final_trajectory_csv_) throw std::runtime_error("Cannot open final_trajectory_path");
+    }
     const auto performance_path = get_parameter("performance_diagnostics_path").as_string();
     if (!performance_path.empty()) {
         performance_csv_.open(performance_path);
@@ -356,6 +364,15 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         last_processed_stamp_ns_ = stamp.nanoseconds();
         has_processed_scan_ = true;
         ++scans_processed_;
+        // The core assigns a sequence only to scans it actually inserted, so pair the
+        // stamp with the sequence it just took instead of assuming they stay in step.
+        if (final_trajectory_csv_.is_open()) {
+            const auto assigned = slam_->scan_sequence_count();
+            if (assigned > scan_sequence_stamps_.size()) {
+                scan_sequence_stamps_.resize(assigned, 0);
+                scan_sequence_stamps_.back() = stamp.nanoseconds();
+            }
+        }
         record_performance(stamp, "processed", start, timing);
     } catch (const tf2::TransformException& ex) {
         ++tf_errors_;
@@ -402,6 +419,32 @@ void BelugaSLAMNode::record_performance(const rclcpp::Time& stamp, const char* s
         static_cast<unsigned long long>(scans_processed_), static_cast<unsigned long long>(scans_received_),
         static_cast<unsigned long long>(tf_errors_), static_cast<unsigned long long>(empty_scans_),
         static_cast<unsigned long long>(out_of_order_scans_), last_map_ms_);
+}
+
+void BelugaSLAMNode::write_final_trajectory() {
+    if (!final_trajectory_csv_.is_open() || !slam_) return;
+    // Read once, at the end: every loop closure the run ever accepted is already in
+    // the optimized poses, including the ones that corrected scans logged long before.
+    const auto trajectory = slam_->final_trajectory();
+    final_trajectory_csv_ << std::setprecision(17)
+        << "sequence,stamp_ns,submap,online_x,online_y,online_yaw,optimized_x,optimized_y,optimized_yaw\n";
+    std::size_t written = 0;
+    for (const auto& point : trajectory) {
+        // Scans the core sequenced but the node never stamped, and any sequence from a
+        // discarded hypothesis, have no timestamp to evaluate against.
+        if (point.sequence >= scan_sequence_stamps_.size()) continue;
+        const auto stamp_ns = scan_sequence_stamps_[point.sequence];
+        if (stamp_ns == 0) continue;
+        final_trajectory_csv_ << point.sequence << ',' << stamp_ns << ',' << point.submap_id << ','
+            << point.online.translation().x() << ',' << point.online.translation().y() << ','
+            << point.online.so2().log() << ','
+            << point.optimized.translation().x() << ',' << point.optimized.translation().y() << ','
+            << point.optimized.so2().log() << '\n';
+        ++written;
+    }
+    final_trajectory_csv_.flush();
+    RCLCPP_INFO(get_logger(), "Final trajectory: %zu poses written (hypothesis %zu, %zu samples held)",
+                written, slam_->best_hypothesis_id(), trajectory.size());
 }
 
 void BelugaSLAMNode::publish_visualization() {

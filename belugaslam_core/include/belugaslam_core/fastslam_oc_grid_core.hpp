@@ -877,7 +877,7 @@ public:
     void record_trajectory_sample(SubmapList& graph, const state_type& pose, std::uint64_t sequence) {
         const auto reference = graph.matching_submap();
         if (!reference) return;
-        graph.trajectory_samples.push_back({sequence, reference->id(), reference->global_pose().inverse() * pose});
+        graph.trajectory_samples.push_back({sequence, reference->id(), reference->global_pose().inverse() * pose, pose});
     }
 
     struct BackendTiming {
@@ -1296,6 +1296,42 @@ public:
     [[nodiscard]] std::size_t best_hypothesis_id() const {
         return best_hypothesis_ ? best_hypothesis_->id : hypotheses_.front()->id;
     }
+
+    /// One processed scan of the selected hypothesis, before and after optimisation.
+    struct FinalTrajectoryPoint {
+        std::uint64_t sequence = 0;
+        SubmapId submap_id = 0;
+        state_type online;     ///< what the frontend published at that scan
+        state_type optimized;  ///< the same scan carried through every later PGO
+    };
+
+    /** Trajectory of the selected hypothesis over the whole run.
+     *
+     * The online poses are a replay of what was published; the optimized ones are read
+     * back through the pose graph, so every loop closure that has landed since is
+     * already in them. Keyframes take their own optimized node pose, and the scans
+     * between keyframes ride on the submap they were recorded against. Meant to be
+     * called once at the end of a run, not per scan.
+     */
+    [[nodiscard]] std::vector<FinalTrajectoryPoint> final_trajectory() const {
+        std::vector<FinalTrajectoryPoint> trajectory;
+        const auto hypothesis = best_hypothesis_ ? best_hypothesis_
+            : (hypotheses_.empty() ? nullptr : hypotheses_.front());
+        if (!hypothesis) return trajectory;
+        const auto& graph = hypothesis->submaps;
+        trajectory.reserve(graph.trajectory_samples.size());
+        for (const auto& sample : graph.trajectory_samples) {
+            state_type optimized;
+            // Samples recorded against a submap that no longer exists have no
+            // optimized pose to report; there is nothing to interpolate them from.
+            if (!graph.pose_at_sequence(sample.sequence, optimized)) continue;
+            trajectory.push_back({sample.sequence, sample.submap_id, sample.frontend_pose, optimized});
+        }
+        return trajectory;
+    }
+
+    /// Number of scans the core has processed; the next one takes this sequence.
+    [[nodiscard]] std::uint64_t scan_sequence_count() const { return next_scan_sequence_; }
     [[nodiscard]] const std::string& output_selection_mode() const { return params_.output_selection_mode; }
     [[nodiscard]] std::size_t map_hypothesis_id() const { return map_hypothesis_id_; }
     // Expected squared position losses under frontend point poses, not ground-truth errors.

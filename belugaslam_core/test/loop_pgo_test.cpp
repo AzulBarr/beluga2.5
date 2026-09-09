@@ -230,4 +230,41 @@ TEST(LoopPgoTest, PoseOnlyCloneDetachesBeforePixelInsertion) {
   EXPECT_FLOAT_EQ(submap->grid().at(10,10), 1.2F);
   SamePose(submap->global_pose(), Pose());
 }
+
+TEST(LoopPgoTest, FinalTrajectoryReportsOptimizedPosesAndKeepsTheOnlineOnes) {
+  auto slam = MakeSlam(); const auto h = BuildPrior(*slam);
+  auto& graph = h->submaps;
+  const auto before = slam->final_trajectory();
+  ASSERT_GE(before.size(), 2U);
+  // Nothing has been optimized yet, so both trajectories still agree scan by scan.
+  for (const auto& point : before) SamePose(point.optimized, point.online);
+
+  graph.node_submap_constraints.push_back({graph.history.front()->id(), graph.trajectory_nodes.back().id,
+      Pose(0.1, 0.0), 10, 12, ConstraintTag::kInterSubmap, 1, 1, 0, 8});
+  ASSERT_TRUE(slam->optimize_pose_graph(h, true, graph.node_submap_constraints.size() - 1));
+
+  const auto optimized = slam->final_trajectory();
+  ASSERT_EQ(optimized.size(), before.size());
+  for (std::size_t i = 0; i < optimized.size(); ++i) {
+    EXPECT_EQ(optimized[i].sequence, before[i].sequence);
+    // The online pose is the record of what the run published; nothing rewrites it.
+    SamePose(optimized[i].online, before[i].online);
+    Sophus::SE2d pose;
+    ASSERT_TRUE(graph.pose_at_sequence(optimized[i].sequence, pose));
+    SamePose(optimized[i].optimized, pose);
+  }
+
+  // A submap that moves carries every scan recorded against it. That is what lets a
+  // loop closure correct poses the run had already published.
+  const auto shift = Pose(3.0, -2.0, 0.5);
+  for (auto& submap : graph.history) submap->set_global_pose(shift * submap->global_pose());
+  for (auto& submap : graph.active_submaps) submap->set_global_pose(shift * submap->global_pose());
+  for (auto& node : graph.trajectory_nodes) node.global_pose = shift * node.global_pose;
+  const auto shifted = slam->final_trajectory();
+  ASSERT_EQ(shifted.size(), optimized.size());
+  for (std::size_t i = 0; i < shifted.size(); ++i) {
+    SamePose(shifted[i].online, optimized[i].online);
+    SamePose(shifted[i].optimized, shift * optimized[i].optimized);
+  }
+}
 }  // namespace

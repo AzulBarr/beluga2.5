@@ -153,6 +153,7 @@ def generate_launch_description():
     declare_scan_queue_depth = DeclareLaunchArgument('scan_queue_depth', default_value='50', description='DDS queue depth to absorb short bursts; does not raise processing throughput')
     declare_scan_reliable = DeclareLaunchArgument('scan_reliable', default_value='false', description='Request reliable scan delivery only with a reliable publisher')
     declare_performance_diagnostics_path = DeclareLaunchArgument('performance_diagnostics_path', default_value='', description='Optional per-scan timing and rejection CSV')
+    declare_final_trajectory_path = DeclareLaunchArgument('final_trajectory_path', default_value='', description='Optional CSV with the online and pose-graph-optimized trajectory, written when the run ends')
 
     declare_tracking_sigma = DeclareLaunchArgument('tracking_sigma', default_value='0.15', description='See QUALITY_REVIEW.md for tracking_sigma')
     declare_tracking_outlier_probability = DeclareLaunchArgument('tracking_outlier_probability', default_value='0.05', description='See QUALITY_REVIEW.md for tracking_outlier_probability')
@@ -256,6 +257,7 @@ def generate_launch_description():
             "scan_queue_depth": ParameterValue(LaunchConfiguration('scan_queue_depth'), value_type=int),
             "scan_reliable": ParameterValue(LaunchConfiguration('scan_reliable'), value_type=bool),
             "performance_diagnostics_path": ParameterValue(LaunchConfiguration('performance_diagnostics_path'), value_type=str),
+            "final_trajectory_path": ParameterValue(LaunchConfiguration('final_trajectory_path'), value_type=str),
             "tracking_sigma": ParameterValue(LaunchConfiguration('tracking_sigma'), value_type=float),
             "tracking_outlier_probability": ParameterValue(LaunchConfiguration('tracking_outlier_probability'), value_type=float),
             "tracking_translation_prior_sigma": ParameterValue(LaunchConfiguration('tracking_translation_prior_sigma'), value_type=float),
@@ -357,6 +359,7 @@ def generate_launch_description():
     declare_scan_queue_depth,
     declare_scan_reliable,
     declare_performance_diagnostics_path,
+    declare_final_trajectory_path,
     declare_tracking_sigma,
     declare_tracking_outlier_probability,
     declare_tracking_translation_prior_sigma,
