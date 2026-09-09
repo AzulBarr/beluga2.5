@@ -148,6 +148,11 @@ BelugaSLAMNode::~BelugaSLAMNode() {
             std::cerr<<"[TRAJECTORY EXPORT] "<<error.what()<<std::endl;
         }
     }
+    // An exception escaping a destructor aborts the process; a failed export must not.
+    try { write_final_trajectory(); }
+    catch (const std::exception& error) {
+        std::cerr<<"[TRAJECTORY EXPORT] final trajectory not written: "<<error.what()<<std::endl;
+    }
 }
 
 void BelugaSLAMNode::setup_slam() {

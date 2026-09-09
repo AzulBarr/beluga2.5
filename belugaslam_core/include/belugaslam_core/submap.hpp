@@ -344,6 +344,9 @@ struct TrajectorySample {
   // PGO never rewrites it, so it keeps the uncorrected trajectory next to the corrected
   // one that T_submap_robot yields through its submap.
   Sophus::SE2d frontend_pose;
+  // Stamp of the scan this sample came from, so a trajectory read back from the graph
+  // can be dated without asking the node for its sequence-to-stamp record.
+  std::int64_t stamp_ns = 0;
 };
 
 enum class ConstraintTag { kIntraSubmap, kInterSubmap };

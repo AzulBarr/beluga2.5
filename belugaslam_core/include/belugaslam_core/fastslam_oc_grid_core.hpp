@@ -968,7 +968,7 @@ public:
     void record_trajectory_sample(SubmapList& graph, const state_type& pose, std::uint64_t sequence, std::int64_t stamp_ns=0) {
         const auto reference = graph.matching_submap();
         if (!reference) return;
-        graph.trajectory_samples.push_back({sequence, reference->id(), reference->global_pose().inverse() * pose, stamp_ns});
+        graph.trajectory_samples.push_back({sequence, reference->id(), reference->global_pose().inverse() * pose, pose, stamp_ns});
     }
 
     struct BackendTiming {
