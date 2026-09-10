@@ -27,13 +27,13 @@ import zipfile
 
 
 def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=True,
-                   particles=30, frontend_pose_mode='frontend', workers=2, replay_rate=1.0, loop_update_mode='heuristic', tracking_matcher='distance'):
+                   particles=30, frontend_pose_mode='frontend', workers=2, replay_rate=1.0, loop_update_mode='heuristic', tracking_matcher='distance', tracking_prior_mode='fixed'):
     return [
         'ros2', 'launch', 'belugaslam_example', 'intel_dataset_belugaslam.xml',
         'use_sim_time:=true', 'record_bag:=false', f'replay_rate:={replay_rate}',
         f'random_seed:={seed}', f'worker_threads:={workers}', 'min_particles:=5',
         f'max_particles:={particles}', f'max_hypotheses:={max_hypotheses}',
-        f'frontend_pose_mode:={frontend_pose_mode}', f'tracking_matcher:={tracking_matcher}',
+        f'frontend_pose_mode:={frontend_pose_mode}', f'tracking_matcher:={tracking_matcher}', f'tracking_prior_mode:={tracking_prior_mode}',
         'enable_loop_closure:=true', 'enable_pgo:=true',
         f'pgo_analytic_jacobians:={str(analytic).lower()}',
         f'loop_robust_polish:={str(polish).lower()}',
@@ -288,6 +288,7 @@ def record_source_identity(workspace, run):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--tracking-prior-mode', choices=['fixed', 'odometry'], default='fixed')
     parser.add_argument('--tracking-matcher', choices=['distance', 'probability_ceres'], default='distance')
     parser.add_argument('--loop-update-mode', choices=['bayes', 'heuristic'], default='heuristic')
     parser.add_argument('--verifier', choices=['belief', 'map'], default='belief')
@@ -330,7 +331,7 @@ def main():
     run = Path(tempfile.mkdtemp(prefix=prefix, dir=args.output_root.resolve()))
     command = launch_command(run, args.verifier, args.max_hypotheses, args.seed,
                              args.pgo_analytic_jacobians, args.loop_robust_polish,
-                             args.particles, args.frontend_pose_mode, args.workers, args.replay_rate, args.loop_update_mode, args.tracking_matcher)
+                             args.particles, args.frontend_pose_mode, args.workers, args.replay_rate, args.loop_update_mode, args.tracking_matcher, args.tracking_prior_mode)
     meta = {'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'command': command, 'workspace': str(args.workspace), 'captures': {},
             'drain_seconds': args.drain_seconds, 'ground_truth_used': False}
@@ -394,6 +395,7 @@ def main():
     meta['parameter_validation'] = validate_parameters(run / 'parameters.yaml', {
         'loop_update_mode': args.loop_update_mode,
         'tracking_matcher': args.tracking_matcher,
+        'tracking_prior_mode': args.tracking_prior_mode,
         'loop_verifier_mode': args.verifier, 'output_selection_mode': 'pose_risk',
         'pgo_analytic_jacobians': args.pgo_analytic_jacobians,
         'loop_robust_polish': args.loop_robust_polish,

@@ -24,7 +24,7 @@ class ProbabilityReplayTests(unittest.TestCase):
 import json,sys
 from pathlib import Path
 from decimal import Decimal
-assert len(sys.argv)==15, sys.argv
+assert len(sys.argv)==18, sys.argv
 source,out=Path(sys.argv[1]),Path(sys.argv[2])
 stamps=[int(row.split()[0]) for row in source.read_text().splitlines()]
 (out/'arguments.json').write_text(json.dumps(sys.argv[3:]))
@@ -68,6 +68,33 @@ stamps=[int(row.split()[0]) for row in source.read_text().splitlines()]
     def test_ros_runner_forwards_selected_matcher(self):
         command = launch_command(self.root,'belief',4,42,tracking_matcher='probability_ceres')
         self.assertIn('tracking_matcher:=probability_ceres',command)
+
+    def test_prior_comparison_preserves_step_one_and_changes_only_prior_mode(self):
+        result = self.invoke('--prior-comparison','--tracking-matcher','probability_ceres')
+        self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+        status = json.loads(next((self.root/'runs').glob('*/run_status.json')).read_text())
+        self.assertTrue(status['complete'])
+        runs = [status['runs'][m] for m in ('ceres_fixed','ceres_odometry')]
+        commands = [run['command'] for run in runs]
+        self.assertEqual([i for i,(a,b) in enumerate(zip(*commands)) if a!=b],[2,15])
+        self.assertEqual([run['tracking_prior_mode'] for run in runs],['fixed','odometry'])
+        self.assertTrue(all(run['tracking_matcher']=='probability_ceres' for run in runs))
+
+    def test_prior_comparison_rejects_removing_step_one(self):
+        result = self.invoke('--prior-comparison','--tracking-matcher','distance')
+        self.assertEqual(result.returncode,2)
+        self.assertIn('requires --tracking-matcher probability_ceres',result.stderr)
+
+    def test_prior_sigma_is_validated_before_replay(self):
+        result = self.invoke('--tracking-odom-translation-sigma','0')
+        self.assertEqual(result.returncode,2)
+        self.assertFalse((self.root/'runs').exists())
+
+    def test_ros_runner_keeps_both_changes_enabled(self):
+        command = launch_command(self.root,'belief',4,42,tracking_matcher='probability_ceres',
+                                 tracking_prior_mode='odometry')
+        self.assertIn('tracking_matcher:=probability_ceres',command)
+        self.assertIn('tracking_prior_mode:=odometry',command)
 
 
 if __name__ == '__main__':

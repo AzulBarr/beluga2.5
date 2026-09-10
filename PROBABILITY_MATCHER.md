@@ -1,5 +1,8 @@
 # Prueba de precisión de pose: probability_ceres
 
+La revisión posterior del punto 2 está en [ADAPTIVE_PRIOR.md](ADAPTIVE_PRIOR.md).
+Este documento describe el punto 1 con `tracking_prior_mode:=fixed`.
+
 Esta revisión incorpora un refinamiento local Ceres sobre probabilidades de ocupación
 interpoladas. Incluye la actualización bayesiana jerárquica de la entrega anterior.
 Es una variante experimental para comparar con `distance`, que sigue siendo el

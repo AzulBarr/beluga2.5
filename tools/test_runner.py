@@ -145,7 +145,7 @@ from pathlib import Path
 a=sys.argv[1:]
 if a[:2]==['node','list']:sys.exit(0)
 if a[:2]==['param','dump']:
- print('/belugaslam:\\n  ros__parameters:\\n    tracking_matcher: distance\\n    loop_update_mode: heuristic\\n    output_selection_mode: pose_risk\\n    loop_verifier_mode: map\\n    pgo_analytic_jacobians: true\\n    loop_robust_polish: true\\n    max_hypotheses: 4\\n    max_particles: 30\\n    random_seed: 42\\n    enable_pgo: true\\n    enable_loop_closure: true\\n    frontend_pose_mode: proposal_mean\\n    worker_threads: 2');sys.exit(0)
+ print('/belugaslam:\\n  ros__parameters:\\n    tracking_prior_mode: fixed\\n    tracking_matcher: distance\\n    loop_update_mode: heuristic\\n    output_selection_mode: pose_risk\\n    loop_verifier_mode: map\\n    pgo_analytic_jacobians: true\\n    loop_robust_polish: true\\n    max_hypotheses: 4\\n    max_particles: 30\\n    random_seed: 42\\n    enable_pgo: true\\n    enable_loop_closure: true\\n    frontend_pose_mode: proposal_mean\\n    worker_threads: 2');sys.exit(0)
 if a[:2]==['topic','echo']:
  assert '--full-length' in a
  print('info:\\n  width: 1\\n  height: 1\\n  resolution: 0.05\\ndata:\\n- 0');sys.exit(0)

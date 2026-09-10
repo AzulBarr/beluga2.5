@@ -25,6 +25,20 @@ void* beluga_probability_create(const float* cells,int w,int h,double res,double
   } catch(...) {return nullptr;}
 }
 void beluga_probability_destroy(void* pointer) {delete static_cast<Fixture*>(pointer);}
+int beluga_probability_set_odometry_prior(void* pointer,const double* delta,
+                                         double translation_sigma,double rotation_sigma) {
+  if (!pointer) return 0;
+  try {
+    auto& f=*static_cast<Fixture*>(pointer);
+    belugaslam::OdometryPriorOptions options;
+    options.translation_sigma=translation_sigma;options.rotation_sigma=rotation_sigma;
+    const auto prior=belugaslam::odometry_tracking_prior({delta[0],delta[1],delta[2]},
+                                                       f.prior.yaw-delta[2],options);
+    f.tracking.prior_sqrt_information=prior.sqrt_information;
+    f.tracking.use_full_prior=true;
+    return 1;
+  } catch (...) {return 0;}
+}
 int beluga_probability_evaluate(void* pointer,const double* delta,double* residuals,double* jacobian) {
   if(!pointer) return 0;
   const auto& f=*static_cast<Fixture*>(pointer);
@@ -33,8 +47,10 @@ int beluga_probability_evaluate(void* pointer,const double* delta,double* residu
 int beluga_probability_warm_start(void* pointer,double* pose) {
   if(!pointer) return 0;
   const auto& f=*static_cast<Fixture*>(pointer);
-  const auto result=belugaslam::match_tracking_scan(f.distance,f.scan,f.prior,f.tracking);
-  pose[0]=result.pose.x;pose[1]=result.pose.y;pose[2]=result.pose.yaw;
-  return result.accepted;
+  const auto result=belugaslam::probability_tracking_initial_pose(f.probability,f.distance,f.scan,
+                                                                f.prior,f.tracking,f.options);
+  pose[0]=result.x;pose[1]=result.y;pose[2]=result.yaw;
+  const auto score=belugaslam::tracking_score(f.distance,f.scan,result,f.tracking);
+  return score.inliers>=f.tracking.min_points && score.overlap>=f.tracking.min_overlap;
 }
 }

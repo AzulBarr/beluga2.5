@@ -89,6 +89,9 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("performance_diagnostics_path", "");
     this->declare_parameter("final_trajectory_path", "");
 
+    declare_parameter("tracking_prior_mode", std::string("fixed"));
+    declare_parameter("tracking_odom_translation_sigma", 0.10);
+    declare_parameter("tracking_odom_rotation_sigma", 0.05);
     declare_parameter("tracking_matcher", std::string("distance"));
     declare_parameter("tracking_occupied_space_weight", 5.0);
     declare_parameter("tracking_voxel_size", 0.05);
@@ -322,6 +325,12 @@ void BelugaSLAMNode::setup_slam() {
                "map_publications,last_map_ms,visualization_ticks,last_visualization_ms,local_only_pgo_skips,loop_cache_bytes,selected_hypothesis,selection_changed,tracking_status,weak_scans,output_innovation_m,output_innovation_rad,output_x,output_y,output_yaw,output_selection_mode,map_hypothesis,map_position_risk_m2,selected_position_risk_m2,polish_solves,polish_work_ms\n";
     }
 
+    params.tracking_prior_mode = get_parameter("tracking_prior_mode").as_string();
+    params.odometry_prior.translation_sigma = get_parameter("tracking_odom_translation_sigma").as_double();
+    params.odometry_prior.rotation_sigma = get_parameter("tracking_odom_rotation_sigma").as_double();
+    params.odometry_prior.alpha1=a1; params.odometry_prior.alpha2=a2;
+    params.odometry_prior.alpha3=a3; params.odometry_prior.alpha4=a4;
+    params.odometry_prior.rotation_distance_threshold=motion_threshold;
     params.tracking_matcher = get_parameter("tracking_matcher").as_string();
     params.probability_matching.occupied_space_weight = get_parameter("tracking_occupied_space_weight").as_double();
     params.probability_matching.voxel_size = get_parameter("tracking_voxel_size").as_double();

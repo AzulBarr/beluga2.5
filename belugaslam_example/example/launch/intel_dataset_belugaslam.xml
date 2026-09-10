@@ -70,6 +70,9 @@
   <arg name="performance_diagnostics_path" default=""/>
   <arg name="final_trajectory_path" default=""/>
 
+  <arg name="tracking_prior_mode" default="fixed"/>
+  <arg name="tracking_odom_translation_sigma" default="0.10"/>
+  <arg name="tracking_odom_rotation_sigma" default="0.05"/>
   <arg name="tracking_matcher" default="distance"/>
   <arg name="tracking_occupied_space_weight" default="5.0"/>
   <arg name="tracking_voxel_size" default="0.05"/>
@@ -172,6 +175,9 @@
     <arg name="scan_reliable" value="$(var scan_reliable)"/>
     <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
     <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
+    <arg name="tracking_prior_mode" value="$(var tracking_prior_mode)"/>
+    <arg name="tracking_odom_translation_sigma" value="$(var tracking_odom_translation_sigma)"/>
+    <arg name="tracking_odom_rotation_sigma" value="$(var tracking_odom_rotation_sigma)"/>
     <arg name="tracking_matcher" value="$(var tracking_matcher)"/>
     <arg name="tracking_occupied_space_weight" value="$(var tracking_occupied_space_weight)"/>
     <arg name="tracking_voxel_size" value="$(var tracking_voxel_size)"/>

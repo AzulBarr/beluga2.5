@@ -34,5 +34,15 @@ int main() {
         rejected.final_cost==rejected.initial_cost,"rejection did not retain prediction");
   const auto score=tracking_score(distance,scan,prior,tracking);
   check(rejected.score.mean_log_likelihood==score.mean_log_likelihood,"rejected score describes discarded pose");
-  std::cout<<"PASS: native C++ Ceres adapter matching, determinism and rejection\n";
+  tracking.min_points=12;
+  tracking.use_full_prior=true;
+  tracking.prior_sqrt_information=odometry_tracking_prior({.2,.02,.04},-.04,{}).sqrt_information;
+  const auto adaptive=match_probability_scan(probability,distance,scan,prior,tracking,options);
+  check(adaptive.accepted && adaptive.final_cost<adaptive.initial_cost,"adaptive Ceres match failed");
+  check(std::hypot(adaptive.pose.x-truth.x,adaptive.pose.y-truth.y)<.03,"adaptive translation error");
+  const auto seeded=match_probability_scan(probability,distance,scan,prior,tracking,options,&truth);
+  check(seeded.accepted,"explicit seed failed");
+  check(std::abs(seeded.final_cost-probability_tracking_objective(probability,scan,seeded.pose,prior,tracking,options))<1e-12,
+        "proposal seed changed prior centre or covariance");
+  std::cout<<"PASS: native C++ Ceres adapter matching, determinism, rejection and adaptive prior\n";
 }

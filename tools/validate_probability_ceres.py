@@ -33,7 +33,7 @@ class OccupancyCost(pyceres.CostFunction):
         return bool(ok)
 
 
-def run(lib, truth, prior, repeats=1, outliers=0, corridor=False):
+def run(lib, truth, prior, repeats=1, outliers=0, corridor=False, odometry=None):
     w, res, origin = 160, .05, -4.
     cells = np.zeros((w,w), dtype=np.float32)
     world = []
@@ -60,6 +60,9 @@ def run(lib, truth, prior, repeats=1, outliers=0, corridor=False):
                                           w,w,res,origin,origin,pointer(scan),len(scan),pointer(prior))
     assert handle
     try:
+        if odometry is not None:
+            motion = np.array(odometry, dtype=np.float64)
+            assert lib.beluga_probability_set_odometry_prior(handle,pointer(motion),.10,.05)
         warm = np.empty(3)
         assert lib.beluga_probability_warm_start(handle,pointer(warm))
         delta = warm-prior
@@ -105,6 +108,8 @@ def main():
     lib.beluga_probability_warm_start.argtypes = [ct.c_void_p,dp]
     lib.beluga_probability_warm_start.restype = ct.c_int
     lib.beluga_probability_destroy.argtypes = [ct.c_void_p]
+    lib.beluga_probability_set_odometry_prior.argtypes = [ct.c_void_p,dp,ct.c_double,ct.c_double]
+    lib.beluga_probability_set_odometry_prior.restype = ct.c_int
     truth = np.array([.14,-.09,.023])
     baseline = run(lib,truth,[0,0,0])
     repeat = run(lib,truth,[0,0,0],repeats=4)
@@ -113,6 +118,12 @@ def main():
                'outliers': run(lib,truth,[0,0,0],outliers=60),
                'yaw_branch': run(lib,np.array([.14,-.09,-3.12]),[0,0,3.13]),
                'corridor': run(lib,np.array([.04,0,0]),[0,.1,0],corridor=True)}
+    adaptive = run(lib,truth,[0,0,0],odometry=[.2,.02,.04])
+    duplicate = run(lib,truth,[0,0,0],repeats=4,odometry=[.2,.02,.04])
+    assert np.max(np.abs(np.array(adaptive['pose'])-duplicate['pose'])) < 1e-7
+    results.update(odometry_prior=adaptive, odometry_duplicated_beams=duplicate,
+                   odometry_yaw_branch=run(lib,np.array([.14,-.09,-3.12]),[0,0,3.13],odometry=[.2,.02,.04]),
+                   odometry_corridor=run(lib,np.array([.04,0,0]),[0,.1,0],corridor=True,odometry=[0,0,0]))
     print(json.dumps({'passed': len(results), 'native_ceres_fixtures': results}, indent=2))
 
 

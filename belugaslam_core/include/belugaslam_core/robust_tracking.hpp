@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 #include "loop_belief.hpp"
+#include "odometry_tracking_prior.hpp"
 
 namespace belugaslam {
 using ScanPoints = std::vector<std::pair<double, double>>;
@@ -24,7 +25,25 @@ struct TrackingOptions {
   double prior_information_scale = 1.0;
   std::size_t min_points = 12, max_points = 180;
   int max_iterations = 20;
+  // Per-call frontend prior, in the matching submap frame. Configuration keeps
+  // this false; the core enables it after transporting the odometry covariance.
+  bool use_full_prior = false;
+  PriorMatrix3 prior_sqrt_information{};
+
 };
+inline std::array<double,3> full_tracking_prior_residual(const double* delta,const TrackingOptions& o) {
+  std::array<double,3> residual{};
+  const double scale=std::sqrt(o.prior_information_scale);
+  for(int i=0;i<3;++i) for(int j=0;j<3;++j)
+    residual[i]+=scale*o.prior_sqrt_information[3*i+j]*delta[j];
+  return residual;
+}
+inline PriorMatrix3 full_tracking_prior_information(const TrackingOptions& o) {
+  PriorMatrix3 information{};
+  for(int i=0;i<3;++i) for(int j=0;j<3;++j) for(int k=0;k<3;++k)
+    information[3*i+j]+=o.prior_information_scale*o.prior_sqrt_information[3*k+i]*o.prior_sqrt_information[3*k+j];
+  return information;
+}
 struct FieldSample { double distance = 1.0, dx = 0.0, dy = 0.0; };
 
 // A bounded chamfer distance field in cell-center coordinates, shared read-only
@@ -94,6 +113,12 @@ inline TrackingScore tracking_score(const TrackingField& field, const ScanPoints
 }
 inline double tracking_objective(const TrackingField& f,const ScanPoints& z,const PoseSample2& p,
                                  const PoseSample2& prior,const TrackingOptions& o) {
+  if (o.use_full_prior) {
+    const double delta[]={p.x-prior.x,p.y-prior.y,wrap_angle(p.yaw-prior.yaw)};
+    const auto residual=full_tracking_prior_residual(delta,o);
+    return -tracking_score(f,z,p,o).mean_log_likelihood+
+        .5*(residual[0]*residual[0]+residual[1]*residual[1]+residual[2]*residual[2]);
+  }
   const double dx=(p.x-prior.x)/o.prior_translation_sigma, dy=(p.y-prior.y)/o.prior_translation_sigma;
   const double da=wrap_angle(p.yaw-prior.yaw)/o.prior_rotation_sigma;
   // Cost units are per beam. A scale of 1/B gives the Gaussian-prior MAP
@@ -169,11 +194,20 @@ inline TrackingResult match_tracking_scan(const TrackingField& field,const ScanP
       }
     }
     const std::array<double,3> delta{pose.x-prior.x,pose.y-prior.y,wrap_angle(pose.yaw-prior.yaw)};
-    for (int a=0;a<3;++a) {
-      const double sigma=a==2?o.prior_rotation_sigma:o.prior_translation_sigma;
-      const double information=o.prior_information_scale/(sigma*sigma);
-      H[a][a]+=information;g[a]+=delta[a]*information;
-      H[a][a]+=damping*std::max(1.0,H[a][a]);g[a]=-g[a];
+    if (o.use_full_prior) {
+      const auto information=full_tracking_prior_information(o);
+      for(int a=0;a<3;++a) for(int b=0;b<3;++b) {
+        H[a][b]+=information[3*a+b]; g[a]+=information[3*a+b]*delta[b];
+      }
+      for(int a=0;a<3;++a) { H[a][a]+=damping*std::max(1.0,H[a][a]); g[a]=-g[a]; }
+    } else {
+      // Keep the fixed-prior path numerically unchanged for the step-1 baseline.
+      for (int a=0;a<3;++a) {
+        const double sigma=a==2?o.prior_rotation_sigma:o.prior_translation_sigma;
+        const double information=o.prior_information_scale/(sigma*sigma);
+        H[a][a]+=information;g[a]+=delta[a]*information;
+        H[a][a]+=damping*std::max(1.0,H[a][a]);g[a]=-g[a];
+      }
     }
     if (!solve_tracking_system(H,g,step)) break;
     PoseSample2 candidate{pose.x+step[0],pose.y+step[1],wrap_angle(pose.yaw+step[2])};
@@ -222,6 +256,9 @@ inline TrackingResult recover_tracking_scan(const TrackingField& field,const Sca
                                             const PoseSample2& prior,const TrackingOptions& normal,
                                             const RecoveryOptions& recovery) {
   TrackingOptions o=normal;
+  // Broad recovery deliberately retains its loose fixed prior. It is not a
+  // normal local step; applying the odometry floor here would suppress recovery.
+  o.use_full_prior=false;
   o.max_translation=recovery.translation_window; o.max_rotation=recovery.rotation_window;
   o.prior_translation_sigma=std::max(o.prior_translation_sigma,o.max_translation);
   o.prior_rotation_sigma=std::max(o.prior_rotation_sigma,o.max_rotation);

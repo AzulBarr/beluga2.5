@@ -173,6 +173,9 @@ def generate_launch_description():
     declare_performance_diagnostics_path = DeclareLaunchArgument('performance_diagnostics_path', default_value='', description='Optional per-scan timing and rejection CSV')
     declare_final_trajectory_path = DeclareLaunchArgument('final_trajectory_path', default_value='', description='Optional CSV with the online and pose-graph-optimized trajectory, written when the run ends')
 
+    declare_tracking_prior_mode = DeclareLaunchArgument('tracking_prior_mode', default_value='fixed', description='See ADAPTIVE_PRIOR.md')
+    declare_tracking_odom_translation_sigma = DeclareLaunchArgument('tracking_odom_translation_sigma', default_value='0.10', description='See ADAPTIVE_PRIOR.md')
+    declare_tracking_odom_rotation_sigma = DeclareLaunchArgument('tracking_odom_rotation_sigma', default_value='0.05', description='See ADAPTIVE_PRIOR.md')
     declare_tracking_matcher = DeclareLaunchArgument('tracking_matcher', default_value='distance', description='See PROBABILITY_MATCHER.md')
     declare_tracking_occupied_space_weight = DeclareLaunchArgument('tracking_occupied_space_weight', default_value='5.0', description='See PROBABILITY_MATCHER.md')
     declare_tracking_voxel_size = DeclareLaunchArgument('tracking_voxel_size', default_value='0.05', description='See PROBABILITY_MATCHER.md')
@@ -298,6 +301,9 @@ def generate_launch_description():
             "scan_reliable": ParameterValue(LaunchConfiguration('scan_reliable'), value_type=bool),
             "performance_diagnostics_path": ParameterValue(LaunchConfiguration('performance_diagnostics_path'), value_type=str),
             "final_trajectory_path": ParameterValue(LaunchConfiguration('final_trajectory_path'), value_type=str),
+            "tracking_prior_mode": ParameterValue(LaunchConfiguration('tracking_prior_mode'), value_type=str),
+            "tracking_odom_translation_sigma": ParameterValue(LaunchConfiguration('tracking_odom_translation_sigma'), value_type=float),
+            "tracking_odom_rotation_sigma": ParameterValue(LaunchConfiguration('tracking_odom_rotation_sigma'), value_type=float),
             "tracking_matcher": ParameterValue(LaunchConfiguration('tracking_matcher'), value_type=str),
             "tracking_occupied_space_weight": ParameterValue(LaunchConfiguration('tracking_occupied_space_weight'), value_type=float),
             "tracking_voxel_size": ParameterValue(LaunchConfiguration('tracking_voxel_size'), value_type=float),
@@ -423,6 +429,9 @@ def generate_launch_description():
     declare_scan_reliable,
     declare_performance_diagnostics_path,
     declare_final_trajectory_path,
+    declare_tracking_prior_mode,
+    declare_tracking_odom_translation_sigma,
+    declare_tracking_odom_rotation_sigma,
     declare_tracking_matcher,
     declare_tracking_occupied_space_weight,
     declare_tracking_voxel_size,

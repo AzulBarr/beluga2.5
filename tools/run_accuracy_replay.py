@@ -76,6 +76,11 @@ def main():
     parser.add_argument('--loops', choices=['belief', 'map', 'geometry', 'off'], default='belief')
     parser.add_argument('--loop-update-mode', choices=['bayes', 'heuristic'], default='bayes')
     parser.add_argument('--frontend-pose-mode', choices=['frontend', 'proposal_seed', 'proposal_mean'], default='proposal_seed')
+    parser.add_argument('--tracking-prior-mode', choices=['fixed', 'odometry'], default='fixed')
+    parser.add_argument('--tracking-odom-translation-sigma', type=float, default=.10)
+    parser.add_argument('--tracking-odom-rotation-sigma', type=float, default=.05)
+    parser.add_argument('--prior-comparison', action='store_true',
+                        help='Step 1 vs steps 1+2: fresh Ceres runs with fixed and odometry priors')
     parser.add_argument('--tracking-matcher', choices=['distance', 'probability_ceres'], default='distance')
     parser.add_argument('--tracking-occupied-space-weight', type=float, default=5.)
     parser.add_argument('--tracking-voxel-size', type=float, default=.05)
@@ -91,6 +96,12 @@ def main():
     parser.add_argument('--output-root', type=Path, default=Path.home()/'beluga_accuracy_runs')
     parser.add_argument('--suite', action='store_true', help='Three separate fresh runs: submaps without loops, belief N30, belief at requested N')
     args = parser.parse_args()
+    if args.prior_comparison and (args.matcher_comparison or args.suite or
+                                 args.frontend_pose_mode != 'frontend' or args.tracking_matcher != 'probability_ceres'):
+        parser.error('--prior-comparison requires --tracking-matcher probability_ceres --frontend-pose-mode frontend, without --suite or --matcher-comparison')
+    if any(not math.isfinite(v) or not 1e-6 <= v <= 10 for v in
+           (args.tracking_odom_translation_sigma, args.tracking_odom_rotation_sigma)):
+        parser.error('Odometry prior sigmas must be finite and in [1e-6,10]')
     if args.matcher_comparison and (args.suite or args.frontend_pose_mode != 'frontend'):
         parser.error('--matcher-comparison requires --frontend-pose-mode frontend and cannot be combined with --suite')
     if (not math.isfinite(args.tracking_occupied_space_weight) or args.tracking_occupied_space_weight <= 0 or
@@ -140,20 +151,28 @@ def main():
         if args.matcher_comparison:
             settings = [(mode, args.particles, args.hypotheses, args.loops, mode)
                         for mode in ('distance', 'probability_ceres')]
+        settings = [(*setting, args.tracking_prior_mode) for setting in settings]
+        if args.prior_comparison:
+            settings = [(f'ceres_{mode}', args.particles, args.hypotheses, args.loops, 'probability_ceres', mode)
+                        for mode in ('fixed', 'odometry')]
         estimates = {}
         print(f'Diagnostics: {folder}\nInput scans per run: {len(records)}', flush=True)
         try:
-            for name, particles, hypotheses, loops, matcher in settings:
+            for name, particles, hypotheses, loops, matcher, prior_mode in settings:
                 run = folder/name; run.mkdir()
                 command = [str(args.binary), str(input_path), str(run), str(particles), str(hypotheses),
                            str(args.seed), loops, args.frontend_pose_mode, str(args.effective_beams), str(args.submap_scans),
                            str(args.prior_information_scale), args.loop_update_mode, matcher,
-                           str(args.tracking_occupied_space_weight), str(args.tracking_voxel_size)]
+                           str(args.tracking_occupied_space_weight), str(args.tracking_voxel_size), prior_mode,
+                           str(args.tracking_odom_translation_sigma), str(args.tracking_odom_rotation_sigma)]
                 info = {'command': command, 'complete': False, 'particles': particles, 'hypotheses': hypotheses,
                         'loops': loops, 'loop_update_mode': args.loop_update_mode, 'frontend_pose_mode': args.frontend_pose_mode,
                         'effective_beams': args.effective_beams, 'submap_scans': args.submap_scans,
                         'prior_information_scale': args.prior_information_scale,
                         'tracking_matcher': matcher,
+                        'tracking_prior_mode': prior_mode,
+                        'tracking_odom_translation_sigma': args.tracking_odom_translation_sigma,
+                        'tracking_odom_rotation_sigma': args.tracking_odom_rotation_sigma,
                         'tracking_occupied_space_weight': args.tracking_occupied_space_weight,
                         'tracking_voxel_size': args.tracking_voxel_size,
                         'seed': args.seed, 'range_max': 30., 'worker_threads': 2,

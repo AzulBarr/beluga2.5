@@ -38,8 +38,8 @@ inline TrackingResult match_probability_scan(const ProbabilityField& probability
   result.pose = prior;
   if (scan.empty() || distance.occupied_cells() == 0) return result;
   result.initial_cost = probability_tracking_objective(probability,scan,prior,prior,tracking,options);
-  auto pose = prior;
-  double cost = result.initial_cost;
+  auto pose = probability_tracking_initial_pose(probability,distance,scan,prior,tracking,options,seed);
+  double cost = probability_tracking_objective(probability,scan,pose,prior,tracking,options);
   const auto within_bounds = [&](const PoseSample2& p) {
     return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.yaw) &&
         std::hypot(p.x-prior.x,p.y-prior.y) <= tracking.max_translation &&
@@ -52,9 +52,6 @@ inline TrackingResult match_probability_scan(const ProbabilityField& probability
     const double candidate = probability_tracking_objective(probability,scan,p,prior,tracking,options);
     if (std::isfinite(candidate) && candidate < cost) { pose = p; cost = candidate; }
   };
-  const auto warm = match_tracking_scan(distance,scan,prior,tracking,seed);
-  if (warm.accepted) consider(warm.pose);
-  if (seed) consider(*seed);
   double delta[] = {pose.x-prior.x, pose.y-prior.y, wrap_angle(pose.yaw-prior.yaw)};
   ceres::Problem problem;
   problem.AddResidualBlock(new ProbabilityTrackingCost(probability,scan,prior,tracking,options), nullptr, delta);

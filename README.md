@@ -1,3 +1,5 @@
+> Latest update: [ADAPTIVE_PRIOR.md](ADAPTIVE_PRIOR.md) adds the motion-dependent full covariance prior (step 2) while keeping probability-grid Ceres matching (step 1). Includes a fixed-vs-odometry prior comparison and exact build/run commands.
+
 > Latest frontend experiment: [PROBABILITY_MATCHER.md](PROBABILITY_MATCHER.md) adds `tracking_matcher:=probability_ceres`, spatial filtering and an automatic A/B replay. Read the compilation limits and test commands there. `distance` remains the default.
 
 > Bayesian update: [BAYESIAN_UPDATE.md](BAYESIAN_UPDATE.md) implements hierarchical masses and delayed loop evidence. The Intel launch now defaults to `loop_update_mode:=bayes`. Read its build/test status and commands before running. Earlier review files describe historical revisions.

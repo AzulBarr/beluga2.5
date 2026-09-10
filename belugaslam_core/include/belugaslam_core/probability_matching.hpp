@@ -122,6 +122,15 @@ inline bool evaluate_probability_match(const ProbabilityField& field, const Scan
       jacobian[3*i+2] = scale*(v.dx*ry - v.dy*rx);
     }
   }
+  if (tracking.use_full_prior) {
+    const auto r=full_tracking_prior_residual(delta,tracking);
+    for(int a=0;a<3;++a) {
+      residuals[scan.size()+a]=r[a];
+      if (jacobian) for(int b=0;b<3;++b)
+        jacobian[3*(scan.size()+a)+b]=std::sqrt(tracking.prior_information_scale)*tracking.prior_sqrt_information[3*a+b];
+    }
+    return true;
+  }
   for (int a = 0; a < 3; ++a) {
     const double weight = std::sqrt(tracking.prior_information_scale) /
         (a == 2 ? tracking.prior_rotation_sigma : tracking.prior_translation_sigma);
@@ -142,6 +151,36 @@ inline double probability_tracking_objective(const ProbabilityField& field, cons
   double cost = 0;
   for (double r : residuals) cost += 0.5*r*r;
   return cost;
+}
+
+// A tight motion prior can shrink the distance matcher's attraction basin.
+// Retain its step-1 initialization as an additional candidate in adaptive mode.
+// Every candidate is scored with the SAME final occupancy objective and prior;
+// the extra search neither changes the prior centre nor enters PF evidence.
+inline PoseSample2 probability_tracking_initial_pose(const ProbabilityField& probability,
+    const TrackingField& distance,const ScanPoints& scan,const PoseSample2& prior,
+    const TrackingOptions& tracking,const ProbabilityMatchingOptions& options,
+    const PoseSample2* seed=nullptr) {
+  auto pose=prior;
+  double cost=probability_tracking_objective(probability,scan,prior,prior,tracking,options);
+  const auto consider=[&](const PoseSample2& p) {
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.yaw) ||
+        std::hypot(p.x-prior.x,p.y-prior.y)>tracking.max_translation ||
+        std::abs(wrap_angle(p.yaw-prior.yaw))>tracking.max_rotation) return;
+    const auto score=tracking_score(distance,scan,p,tracking);
+    if (score.inliers<tracking.min_points || score.overlap<tracking.min_overlap) return;
+    const double candidate=probability_tracking_objective(probability,scan,p,prior,tracking,options);
+    if (std::isfinite(candidate) && candidate<cost) {pose=p;cost=candidate;}
+  };
+  const auto warm=match_tracking_scan(distance,scan,prior,tracking,seed);
+  if (warm.accepted) consider(warm.pose);
+  if (tracking.use_full_prior) {
+    auto baseline=tracking;baseline.use_full_prior=false;
+    const auto previous=match_tracking_scan(distance,scan,prior,baseline,seed);
+    if (previous.accepted) consider(previous.pose);
+  }
+  if (seed) consider(*seed);
+  return pose;
 }
 
 }  // namespace belugaslam

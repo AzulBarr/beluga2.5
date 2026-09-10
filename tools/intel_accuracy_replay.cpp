@@ -8,8 +8,8 @@
 namespace fs=std::filesystem;
 int main(int argc,char** argv) {
   try {
-    if(argc<11 || argc>15) throw std::invalid_argument(
-      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size]]]]");
+    if(argc<11 || argc>18) throw std::invalid_argument(
+      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size [fixed|odometry [odom_translation_sigma [odom_rotation_sigma]]]]]]]");
     const fs::path input=argv[1], output=argv[2];
     if(!fs::is_directory(output)) throw std::invalid_argument("Output directory must exist");
     FastSLAMParams params;
@@ -27,6 +27,13 @@ int main(int argc,char** argv) {
     if(argc>=13) params.tracking_matcher=argv[12];
     if(argc>=14) params.probability_matching.occupied_space_weight=std::stod(argv[13]);
     if(argc>=15) params.probability_matching.voxel_size=std::stod(argv[14]);
+    if(argc>=16) params.tracking_prior_mode=argv[15];
+    if(argc>=17) params.odometry_prior.translation_sigma=std::stod(argv[16]);
+    if(argc>=18) params.odometry_prior.rotation_sigma=std::stod(argv[17]);
+    // Keep these coefficients identical to the PF MotionModel constructed below.
+    params.odometry_prior.alpha1=.1;params.odometry_prior.alpha2=.05;
+    params.odometry_prior.alpha3=.1;params.odometry_prior.alpha4=.05;
+    params.odometry_prior.rotation_distance_threshold=.01;
     params.loop_bayes_diagnostics_path=(output/"bayes.csv").string();
     params.output_selection_mode="pose_risk";params.worker_threads=2;
     params.loop_diagnostics_path=(output/"loops.csv").string();

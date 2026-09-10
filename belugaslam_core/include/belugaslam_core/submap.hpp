@@ -685,6 +685,8 @@ struct Hypothesis {
   std::size_t tracking_failures = 0;
   std::string tracking_status = "bootstrap";
   double tracking_log_likelihood = 0.0, tracking_correction = 0.0;
+  belugaslam::PriorMatrix3 tracking_prior_covariance{};
+  bool tracking_prior_evaluated = false;
   bool has_pending_recovery = false;
   Sophus::SE2d recovery_pose;
   SubmapId recovery_reference = 0, tracking_reference = 0;

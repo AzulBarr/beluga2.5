@@ -194,6 +194,8 @@ struct FastSLAMParams {
     belugaslam::TrackingOptions tracking;
     std::string tracking_matcher = "distance";  // distance or probability_ceres (experimental)
     belugaslam::ProbabilityMatchingOptions probability_matching;
+    std::string tracking_prior_mode = "fixed";  // fixed (step 1) or odometry (steps 1+2)
+    belugaslam::OdometryPriorOptions odometry_prior;
     belugaslam::RecoveryOptions recovery;
     std::size_t motion_proposal_samples = 8;
     double map_resolution = GRID_RESOLUTION;
@@ -248,6 +250,9 @@ public:
 
       params_.loop_bayes.validate();
       params_.probability_matching.validate();
+      params_.odometry_prior.validate();
+      if (params_.tracking_prior_mode != "fixed" && params_.tracking_prior_mode != "odometry")
+          throw std::invalid_argument("tracking_prior_mode must be fixed or odometry");
       if (params_.tracking_matcher != "distance" && params_.tracking_matcher != "probability_ceres")
           throw std::invalid_argument("tracking_matcher must be distance or probability_ceres");
       if (params_.loop_update_mode != "bayes" && params_.loop_update_mode != "heuristic")
@@ -297,7 +302,7 @@ public:
           tracking_diagnostics_.open(params_.tracking_diagnostics_path);
           if (!tracking_diagnostics_) throw std::runtime_error("Cannot open tracking_diagnostics_path");
           tracking_diagnostics_ << std::setprecision(17)
-              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points\n";
+              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points,tracking_prior_mode,prior_evaluated,prior_cov_xx,prior_cov_xy,prior_cov_xyaw,prior_cov_yy,prior_cov_yyaw,prior_cov_yawyaw\n";
       }
       params_.submap_num_range_data = std::max(1, params_.submap_num_range_data);
       params_.max_points_per_scan_node =
@@ -528,23 +533,52 @@ public:
      * 
      * \param measurement Measurement data. 
      */
+    belugaslam::GaussianTrackingPrior frontend_motion_prior(const belugaslam::PoseSample2& prior) const {
+        if (params_.tracking_prior_mode == "fixed")
+            return belugaslam::fixed_tracking_prior(params_.tracking.prior_translation_sigma,
+                                                    params_.tracking.prior_rotation_sigma);
+        const double turn=last_odom_delta_.so2().log();
+        return belugaslam::odometry_tracking_prior(
+            {last_odom_delta_.translation().x(),last_odom_delta_.translation().y(),turn},
+            belugaslam::wrap_angle(prior.yaw-turn),params_.odometry_prior);
+    }
+
+    belugaslam::TrackingOptions frontend_tracking_options(const belugaslam::PoseSample2& prior,
+        belugaslam::TrackingOptions options) const {
+        if (params_.tracking_prior_mode == "odometry") {
+            options.prior_sqrt_information=frontend_motion_prior(prior).sqrt_information;
+            options.use_full_prior=true;
+        }
+        return options;
+    }
+
+    void record_tracking_prior(const std::shared_ptr<Hypothesis>& h,
+        const belugaslam::PoseSample2& prior) const {
+        h->tracking_prior_covariance=frontend_motion_prior(prior).covariance;
+        // Diagnostics report the effective covariance of the regularizer.
+        for(auto& v:h->tracking_prior_covariance) v/=params_.tracking.prior_information_scale;
+        h->tracking_prior_evaluated=true;
+    }
+
     belugaslam::TrackingResult match_frontend_scan(const Submap& submap, const measurement_type& scan,
         const belugaslam::PoseSample2& prior, const belugaslam::TrackingOptions& options,
         const belugaslam::PoseSample2* seed = nullptr) const {
         const auto field = submap.tracking_field();
+        const auto configured=frontend_tracking_options(prior,options);
         if (params_.tracking_matcher == "probability_ceres")
             return belugaslam::match_probability_scan(*submap.probability_field(), *field, scan, prior,
-                                                      options, params_.probability_matching, seed);
-        return belugaslam::match_tracking_scan(*field,scan,prior,options,seed);
+                                                      configured, params_.probability_matching, seed);
+        return belugaslam::match_tracking_scan(*field,scan,prior,configured,seed);
     }
 
     double frontend_objective(const Submap& submap, const measurement_type& scan,
         const belugaslam::PoseSample2& pose, const belugaslam::PoseSample2& prior,
         const belugaslam::TrackingOptions& options) const {
+        const auto configured=frontend_tracking_options(prior,options);
         if (params_.tracking_matcher == "probability_ceres")
             return belugaslam::probability_tracking_objective(*submap.probability_field(),scan,pose,prior,
-                                                              options,params_.probability_matching);
-        return belugaslam::tracking_objective(*submap.tracking_field(),scan,pose,prior,options);
+                                                              configured,params_.probability_matching);
+        return belugaslam::tracking_objective(*submap.tracking_field(),scan,pose,prior,configured);
     }
 
     struct TrackingReference {
@@ -566,6 +600,7 @@ public:
         };
         h->local_pose = predicted; h->tracking_overlap = 0; h->tracking_log_likelihood = 0;
         h->tracking_correction = 0;
+        h->tracking_prior_evaluated=false; h->tracking_prior_covariance={};
         h->tracking_usable = !reference.field || reference.field->occupied_cells()==0;
         if (h->tracking_usable) {
             h->tracking_status="bootstrap"; h->tracking_failures=0; h->has_pending_recovery=false;
@@ -573,6 +608,7 @@ public:
         }
         h->tracking_reference=submap->id();
         const auto initial = submap->global_pose().inverse()*predicted;
+        record_tracking_prior(h,pose_sample(initial));
         const auto normal = match_frontend_scan(*submap,scan,pose_sample(initial),params_.tracking);
         h->tracking_usable=normal.accepted; h->tracking_overlap=normal.score.overlap;
         h->tracking_log_likelihood=normal.score.mean_log_likelihood;
@@ -604,6 +640,7 @@ public:
                     h->tracking_status="recovery_pending"; h->tracking_usable=false;
                     if (h->recovery_confirmations>=params_.recovery.confirmations) {
                         h->local_pose=pose; h->tracking_usable=true; h->tracking_status="recovered";
+                        record_tracking_prior(h,pose_sample(recovery_map->global_pose().inverse()*expected));
                         h->tracking_overlap=confirmation.score.overlap;
                         h->tracking_log_likelihood=confirmation.score.mean_log_likelihood;
                         h->tracking_failures=0;h->has_pending_recovery=false;
@@ -867,7 +904,11 @@ public:
                     << h->submaps.trajectory_nodes.size() << ',' << h->submaps.history.size()+h->submaps.active_submaps.size() << ','
                     << h->pose_source << ',' << h->proposal_pose_decision << ',' << h->proposal_ess << ',' << h->proposal_local_mass << ','
                     << h->proposal_position_std << ',' << h->proposal_yaw_std << ',' << h->proposal_mean_offset << ','
-                    << params_.tracking_matcher << ',' << frontend_scan.size() << '\n';
+                    << params_.tracking_matcher << ',' << frontend_scan.size() << ',' << params_.tracking_prior_mode << ','
+                    << h->tracking_prior_evaluated << ',' << h->tracking_prior_covariance[0] << ','
+                    << h->tracking_prior_covariance[1] << ',' << h->tracking_prior_covariance[2] << ','
+                    << h->tracking_prior_covariance[4] << ',' << h->tracking_prior_covariance[5] << ','
+                    << h->tracking_prior_covariance[8] << '\n';
             }
             if (next_scan_sequence_ % 100 == 0) tracking_diagnostics_.flush();
         }
