@@ -76,6 +76,11 @@ def main():
     parser.add_argument('--loops', choices=['belief', 'map', 'geometry', 'off'], default='belief')
     parser.add_argument('--loop-update-mode', choices=['bayes', 'heuristic'], default='bayes')
     parser.add_argument('--frontend-pose-mode', choices=['frontend', 'proposal_seed', 'proposal_mean'], default='proposal_seed')
+    parser.add_argument('--tracking-matcher', choices=['distance', 'probability_ceres'], default='distance')
+    parser.add_argument('--tracking-occupied-space-weight', type=float, default=5.)
+    parser.add_argument('--tracking-voxel-size', type=float, default=.05)
+    parser.add_argument('--matcher-comparison', action='store_true',
+                        help='Fresh distance and probability_ceres runs with identical settings; requires frontend readout')
     parser.add_argument('--effective-beams', type=float, default=20.)
     parser.add_argument('--prior-information-scale', type=float, default=1.,
                         help='Matcher regularization: 1 preserves the prior; .05 is the experimental 20-beam MAP interpretation')
@@ -86,6 +91,11 @@ def main():
     parser.add_argument('--output-root', type=Path, default=Path.home()/'beluga_accuracy_runs')
     parser.add_argument('--suite', action='store_true', help='Three separate fresh runs: submaps without loops, belief N30, belief at requested N')
     args = parser.parse_args()
+    if args.matcher_comparison and (args.suite or args.frontend_pose_mode != 'frontend'):
+        parser.error('--matcher-comparison requires --frontend-pose-mode frontend and cannot be combined with --suite')
+    if (not math.isfinite(args.tracking_occupied_space_weight) or args.tracking_occupied_space_weight <= 0 or
+            not math.isfinite(args.tracking_voxel_size) or not 0 <= args.tracking_voxel_size <= 1):
+        parser.error('Require a positive occupied-space weight and voxel size in [0, 1] metres')
     if args.loop_update_mode == 'bayes' and args.loops not in ('belief', 'off'):
         parser.error('Use --loop-update-mode heuristic for the legacy MAP/geometry ablations')
     if not 5 <= args.particles <= 10000 or not 1 <= args.hypotheses <= args.particles or not 1 <= args.seed < 2**32:
@@ -126,18 +136,26 @@ def main():
             settings = [('submaps_no_lc', args.particles, 1, 'off'),
                         ('belief_n30', 30, args.hypotheses, 'belief'),
                         (f'belief_n{args.particles}', args.particles, args.hypotheses, 'belief')]
+        settings = [(name, n, h, loops, args.tracking_matcher) for name, n, h, loops in settings]
+        if args.matcher_comparison:
+            settings = [(mode, args.particles, args.hypotheses, args.loops, mode)
+                        for mode in ('distance', 'probability_ceres')]
         estimates = {}
         print(f'Diagnostics: {folder}\nInput scans per run: {len(records)}', flush=True)
         try:
-            for name, particles, hypotheses, loops in settings:
+            for name, particles, hypotheses, loops, matcher in settings:
                 run = folder/name; run.mkdir()
                 command = [str(args.binary), str(input_path), str(run), str(particles), str(hypotheses),
                            str(args.seed), loops, args.frontend_pose_mode, str(args.effective_beams), str(args.submap_scans),
-                           str(args.prior_information_scale), args.loop_update_mode]
+                           str(args.prior_information_scale), args.loop_update_mode, matcher,
+                           str(args.tracking_occupied_space_weight), str(args.tracking_voxel_size)]
                 info = {'command': command, 'complete': False, 'particles': particles, 'hypotheses': hypotheses,
                         'loops': loops, 'loop_update_mode': args.loop_update_mode, 'frontend_pose_mode': args.frontend_pose_mode,
                         'effective_beams': args.effective_beams, 'submap_scans': args.submap_scans,
                         'prior_information_scale': args.prior_information_scale,
+                        'tracking_matcher': matcher,
+                        'tracking_occupied_space_weight': args.tracking_occupied_space_weight,
+                        'tracking_voxel_size': args.tracking_voxel_size,
                         'seed': args.seed, 'range_max': 30., 'worker_threads': 2,
                         'alpha1': .1, 'alpha2': .05, 'alpha3': .1, 'alpha4': .05}
                 status['runs'][name] = info

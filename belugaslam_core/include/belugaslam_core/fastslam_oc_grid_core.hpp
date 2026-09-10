@@ -33,6 +33,7 @@
 
 #include "particle.hpp"
 #include "submap.hpp"
+#include "ceres_probability_tracking.hpp"
 #include "motion_filter.hpp"
 
 /// Beluga Core & Models
@@ -191,6 +192,8 @@ struct FastSLAMParams {
     int worker_threads = 2;  // bounded total concurrency, including the caller
     bool verbose_backend = false;
     belugaslam::TrackingOptions tracking;
+    std::string tracking_matcher = "distance";  // distance or probability_ceres (experimental)
+    belugaslam::ProbabilityMatchingOptions probability_matching;
     belugaslam::RecoveryOptions recovery;
     std::size_t motion_proposal_samples = 8;
     double map_resolution = GRID_RESOLUTION;
@@ -244,6 +247,9 @@ public:
                           params.spatial_resolution_theta} {
 
       params_.loop_bayes.validate();
+      params_.probability_matching.validate();
+      if (params_.tracking_matcher != "distance" && params_.tracking_matcher != "probability_ceres")
+          throw std::invalid_argument("tracking_matcher must be distance or probability_ceres");
       if (params_.loop_update_mode != "bayes" && params_.loop_update_mode != "heuristic")
           throw std::invalid_argument("loop_update_mode must be bayes or heuristic");
       if (params_.loop_update_mode=="bayes" && params_.loop_verifier_mode!="belief")
@@ -291,7 +297,7 @@ public:
           tracking_diagnostics_.open(params_.tracking_diagnostics_path);
           if (!tracking_diagnostics_) throw std::runtime_error("Cannot open tracking_diagnostics_path");
           tracking_diagnostics_ << std::setprecision(17)
-              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m\n";
+              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points\n";
       }
       params_.submap_num_range_data = std::max(1, params_.submap_num_range_data);
       params_.max_points_per_scan_node =
@@ -522,6 +528,25 @@ public:
      * 
      * \param measurement Measurement data. 
      */
+    belugaslam::TrackingResult match_frontend_scan(const Submap& submap, const measurement_type& scan,
+        const belugaslam::PoseSample2& prior, const belugaslam::TrackingOptions& options,
+        const belugaslam::PoseSample2* seed = nullptr) const {
+        const auto field = submap.tracking_field();
+        if (params_.tracking_matcher == "probability_ceres")
+            return belugaslam::match_probability_scan(*submap.probability_field(), *field, scan, prior,
+                                                      options, params_.probability_matching, seed);
+        return belugaslam::match_tracking_scan(*field,scan,prior,options,seed);
+    }
+
+    double frontend_objective(const Submap& submap, const measurement_type& scan,
+        const belugaslam::PoseSample2& pose, const belugaslam::PoseSample2& prior,
+        const belugaslam::TrackingOptions& options) const {
+        if (params_.tracking_matcher == "probability_ceres")
+            return belugaslam::probability_tracking_objective(*submap.probability_field(),scan,pose,prior,
+                                                              options,params_.probability_matching);
+        return belugaslam::tracking_objective(*submap.tracking_field(),scan,pose,prior,options);
+    }
+
     struct TrackingReference {
         std::shared_ptr<const Submap> submap;
         std::shared_ptr<const belugaslam::TrackingField> field;
@@ -548,7 +573,7 @@ public:
         }
         h->tracking_reference=submap->id();
         const auto initial = submap->global_pose().inverse()*predicted;
-        const auto normal = belugaslam::match_tracking_scan(*reference.field,scan,pose_sample(initial),params_.tracking);
+        const auto normal = match_frontend_scan(*submap,scan,pose_sample(initial),params_.tracking);
         h->tracking_usable=normal.accepted; h->tracking_overlap=normal.score.overlap;
         h->tracking_log_likelihood=normal.score.mean_log_likelihood;
         h->local_pose=submap->global_pose()*from_sample(normal.pose);
@@ -569,7 +594,7 @@ public:
                 auto options=params_.tracking;
                 options.min_overlap=std::max(options.min_overlap,params_.recovery.min_overlap);
                 const auto field=recovery_map->tracking_field();
-                const auto confirmation=belugaslam::match_tracking_scan(*field,scan,
+                const auto confirmation=match_frontend_scan(*recovery_map,scan,
                     pose_sample(recovery_map->global_pose().inverse()*expected),options);
                 const auto pose=recovery_map->global_pose()*from_sample(confirmation.pose);
                 const auto difference=expected.inverse()*pose;
@@ -613,7 +638,7 @@ public:
             if (choice->id()!=submap->id()) {
                 auto options=params_.tracking;
                 options.min_overlap=std::max(options.min_overlap,params_.recovery.min_overlap);
-                attempt=belugaslam::match_tracking_scan(*field,scan,prior,options);
+                attempt=match_frontend_scan(*choice,scan,prior,options);
             }
             if (!attempt.accepted) attempt=belugaslam::recover_tracking_scan(*field,scan,prior,params_.tracking,params_.recovery);
             if (!attempt.accepted || attempt.score.mean_log_likelihood<h->tracking_log_likelihood+0.05) continue;
@@ -703,8 +728,8 @@ public:
                     auto options=params_.tracking;
                     options.min_overlap=std::max(options.min_overlap,params_.recovery.min_overlap);
                     const auto prior=sample(inverse*ref.prediction);
-                    const auto refined=belugaslam::match_tracking_scan(*ref.field,scan,prior,options,&summary.mean);
-                    const double original_cost=belugaslam::tracking_objective(*ref.field,scan,frontend,prior,options);
+                    const auto refined=match_frontend_scan(*ref.submap,scan,prior,options,&summary.mean);
+                    const double original_cost=frontend_objective(*ref.submap,scan,frontend,prior,options);
                     h->proposal_pose_decision="frontend_cost_retained";
                     if (refined.accepted && refined.final_cost+1e-10<original_cost) {
                         h->local_pose=transform*state_type{Sophus::SO2d{refined.pose.yaw},
@@ -736,8 +761,13 @@ public:
         measurement_type finite_scan;
         for (const auto& beam : z) if (std::isfinite(beam.first) && std::isfinite(beam.second)) finite_scan.push_back(beam);
         const auto sparse = belugaslam::select_tracking_points(finite_scan, params_.tracking.max_points);
+        // Spatial filtering is frontend-only. PF predictive evidence retains its
+        // original beam subset and likelihood model in both A/B modes.
+        const auto frontend_scan = params_.tracking_matcher == "probability_ceres" ?
+            belugaslam::probability_tracking_points(finite_scan,params_.probability_matching.voxel_size,
+                                                    params_.tracking.max_points) : sparse;
         std::map<std::size_t, TrackingReference> references;
-        for (auto& h : hypotheses_) references.emplace(h->id,track_hypothesis(h,sparse));
+        for (auto& h : hypotheses_) references.emplace(h->id,track_hypothesis(h,frontend_scan));
         if (motion_proposals_.size() != particles_.size()) motion_proposals_.resize(particles_.size());
         std::vector<std::vector<double>> proposal_logs(particles_.size());
         parallel_indices(particles_.size(), [&](std::size_t i) {
@@ -757,7 +787,7 @@ public:
         // The frontend uses its live tracking map. Inference during a validation
         // event uses ONLY the frozen historical map, on the SAME motion-prior
         // proposals. No scan-matcher optimum enters predictive evidence.
-        estimate_proposal_poses(sparse,references,proposal_logs);
+        estimate_proposal_poses(frontend_scan,references,proposal_logs);
         const bool future_scan = bayes_event_.active && next_scan_sequence_ >= bayes_event_.first_sequence &&
             bayes_event_.last_sequence != next_scan_sequence_;
         measurement_type common_scan;
@@ -836,7 +866,8 @@ public:
                     << (hypothesis_mean_pose(h).translation()-h->local_pose.translation()).norm() << ','
                     << h->submaps.trajectory_nodes.size() << ',' << h->submaps.history.size()+h->submaps.active_submaps.size() << ','
                     << h->pose_source << ',' << h->proposal_pose_decision << ',' << h->proposal_ess << ',' << h->proposal_local_mass << ','
-                    << h->proposal_position_std << ',' << h->proposal_yaw_std << ',' << h->proposal_mean_offset << '\n';
+                    << h->proposal_position_std << ',' << h->proposal_yaw_std << ',' << h->proposal_mean_offset << ','
+                    << params_.tracking_matcher << ',' << frontend_scan.size() << '\n';
             }
             if (next_scan_sequence_ % 100 == 0) tracking_diagnostics_.flush();
         }

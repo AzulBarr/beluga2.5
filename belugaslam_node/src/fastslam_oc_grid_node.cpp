@@ -89,6 +89,9 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("performance_diagnostics_path", "");
     this->declare_parameter("final_trajectory_path", "");
 
+    declare_parameter("tracking_matcher", std::string("distance"));
+    declare_parameter("tracking_occupied_space_weight", 5.0);
+    declare_parameter("tracking_voxel_size", 0.05);
     declare_parameter("tracking_sigma", 0.15);
     declare_parameter("tracking_outlier_probability", 0.05);
     declare_parameter("tracking_translation_prior_sigma", 0.50);
@@ -319,6 +322,9 @@ void BelugaSLAMNode::setup_slam() {
                "map_publications,last_map_ms,visualization_ticks,last_visualization_ms,local_only_pgo_skips,loop_cache_bytes,selected_hypothesis,selection_changed,tracking_status,weak_scans,output_innovation_m,output_innovation_rad,output_x,output_y,output_yaw,output_selection_mode,map_hypothesis,map_position_risk_m2,selected_position_risk_m2,polish_solves,polish_work_ms\n";
     }
 
+    params.tracking_matcher = get_parameter("tracking_matcher").as_string();
+    params.probability_matching.occupied_space_weight = get_parameter("tracking_occupied_space_weight").as_double();
+    params.probability_matching.voxel_size = get_parameter("tracking_voxel_size").as_double();
     params.tracking.sigma = static_cast<decltype(params.tracking.sigma)>(get_parameter("tracking_sigma").as_double());
     params.tracking.outlier_probability = static_cast<decltype(params.tracking.outlier_probability)>(get_parameter("tracking_outlier_probability").as_double());
     params.tracking.prior_translation_sigma = static_cast<decltype(params.tracking.prior_translation_sigma)>(get_parameter("tracking_translation_prior_sigma").as_double());

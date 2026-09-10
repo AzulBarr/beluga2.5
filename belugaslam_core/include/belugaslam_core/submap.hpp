@@ -20,6 +20,7 @@
 #include "belugaslam_core/particle.hpp"
 #include "belugaslam_core/grid_update.hpp"
 #include "belugaslam_core/robust_tracking.hpp"
+#include "belugaslam_core/probability_matching.hpp"
 #include "belugaslam_core/derived_cache.hpp"
 
 using SubmapId = std::uint64_t;
@@ -143,7 +144,7 @@ public:
   LogOddsGrid& mutable_grid() {
     if (is_finished_) throw std::runtime_error("Attempted to mutate a finished submap grid");
     if (grid_.use_count() != 1) grid_ = std::make_shared<LogOddsGrid>(*grid_);
-    tracking_field_.reset();
+    tracking_field_.reset(); probability_field_.reset();
     return *grid_;
   }
 
@@ -154,6 +155,11 @@ public:
     if (!tracking_field_) tracking_field_ = std::make_shared<belugaslam::TrackingField>(
         grid_->data(), grid_->width(), grid_->height(), grid_->resolution(), grid_->origin_x(), grid_->origin_y());
     return tracking_field_;
+  }
+  [[nodiscard]] std::shared_ptr<const belugaslam::ProbabilityField> probability_field() const {
+    if (!probability_field_) probability_field_ = std::make_shared<belugaslam::ProbabilityField>(
+        grid_->data(), grid_->width(), grid_->height(), grid_->resolution(), grid_->origin_x(), grid_->origin_y());
+    return probability_field_;
   }
   [[nodiscard]] const Sophus::SE2d& global_pose() const { return global_pose_; }
   void set_global_pose(const Sophus::SE2d& pose) { global_pose_ = pose; }
@@ -182,7 +188,7 @@ public:
     if (is_finished_) return;
     if (grid_.use_count() != 1) grid_ = std::make_shared<LogOddsGrid>(*grid_);
     grid_->crop_to_known_cells(kCropMarginCells);
-    tracking_field_.reset();
+    tracking_field_.reset(); probability_field_.reset();
     is_finished_ = true;
     compute_radial_signature();
     loop_cache_ = std::make_shared<belugaslam::DerivedCache<LoopMatchingData>>();
@@ -205,7 +211,7 @@ public:
     return loop_cache_ ? loop_cache_->statistics() : std::pair<std::size_t,std::uint64_t>{0,0};
   }
   void release_loop_cache() const { if (loop_cache_) loop_cache_->release(); }
-  void release_tracking_field() const { tracking_field_.reset(); }
+  void release_tracking_field() const { tracking_field_.reset(); probability_field_.reset(); }
 
   /** Distance to the closest occupied cell in local submap coordinates. */
   [[nodiscard]] float distance_at(double x, double y) const {
@@ -317,6 +323,7 @@ private:
   std::uint64_t anchor_sequence_ = 0;
   std::shared_ptr<LogOddsGrid> grid_;
   mutable std::shared_ptr<const belugaslam::TrackingField> tracking_field_;
+  mutable std::shared_ptr<const belugaslam::ProbabilityField> probability_field_;
   int num_insertions_;
   bool is_finished_;
   SubmapRole role_;

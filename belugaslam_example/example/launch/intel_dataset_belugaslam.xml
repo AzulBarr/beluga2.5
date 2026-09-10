@@ -70,6 +70,9 @@
   <arg name="performance_diagnostics_path" default=""/>
   <arg name="final_trajectory_path" default=""/>
 
+  <arg name="tracking_matcher" default="distance"/>
+  <arg name="tracking_occupied_space_weight" default="5.0"/>
+  <arg name="tracking_voxel_size" default="0.05"/>
   <arg name="tracking_sigma" default="0.15"/>
   <arg name="tracking_outlier_probability" default="0.05"/>
   <arg name="tracking_translation_prior_sigma" default="0.50"/>
@@ -169,6 +172,9 @@
     <arg name="scan_reliable" value="$(var scan_reliable)"/>
     <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
     <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
+    <arg name="tracking_matcher" value="$(var tracking_matcher)"/>
+    <arg name="tracking_occupied_space_weight" value="$(var tracking_occupied_space_weight)"/>
+    <arg name="tracking_voxel_size" value="$(var tracking_voxel_size)"/>
     <arg name="tracking_sigma" value="$(var tracking_sigma)"/>
     <arg name="tracking_outlier_probability" value="$(var tracking_outlier_probability)"/>
     <arg name="tracking_translation_prior_sigma" value="$(var tracking_translation_prior_sigma)"/>

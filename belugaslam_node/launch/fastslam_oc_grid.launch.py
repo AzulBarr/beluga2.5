@@ -173,6 +173,9 @@ def generate_launch_description():
     declare_performance_diagnostics_path = DeclareLaunchArgument('performance_diagnostics_path', default_value='', description='Optional per-scan timing and rejection CSV')
     declare_final_trajectory_path = DeclareLaunchArgument('final_trajectory_path', default_value='', description='Optional CSV with the online and pose-graph-optimized trajectory, written when the run ends')
 
+    declare_tracking_matcher = DeclareLaunchArgument('tracking_matcher', default_value='distance', description='See PROBABILITY_MATCHER.md')
+    declare_tracking_occupied_space_weight = DeclareLaunchArgument('tracking_occupied_space_weight', default_value='5.0', description='See PROBABILITY_MATCHER.md')
+    declare_tracking_voxel_size = DeclareLaunchArgument('tracking_voxel_size', default_value='0.05', description='See PROBABILITY_MATCHER.md')
     declare_tracking_sigma = DeclareLaunchArgument('tracking_sigma', default_value='0.15', description='See QUALITY_REVIEW.md for tracking_sigma')
     declare_tracking_outlier_probability = DeclareLaunchArgument('tracking_outlier_probability', default_value='0.05', description='See QUALITY_REVIEW.md for tracking_outlier_probability')
     declare_tracking_translation_prior_sigma = DeclareLaunchArgument('tracking_translation_prior_sigma', default_value='0.50', description='See QUALITY_REVIEW.md for tracking_translation_prior_sigma')
@@ -295,6 +298,9 @@ def generate_launch_description():
             "scan_reliable": ParameterValue(LaunchConfiguration('scan_reliable'), value_type=bool),
             "performance_diagnostics_path": ParameterValue(LaunchConfiguration('performance_diagnostics_path'), value_type=str),
             "final_trajectory_path": ParameterValue(LaunchConfiguration('final_trajectory_path'), value_type=str),
+            "tracking_matcher": ParameterValue(LaunchConfiguration('tracking_matcher'), value_type=str),
+            "tracking_occupied_space_weight": ParameterValue(LaunchConfiguration('tracking_occupied_space_weight'), value_type=float),
+            "tracking_voxel_size": ParameterValue(LaunchConfiguration('tracking_voxel_size'), value_type=float),
             "tracking_sigma": ParameterValue(LaunchConfiguration('tracking_sigma'), value_type=float),
             "tracking_outlier_probability": ParameterValue(LaunchConfiguration('tracking_outlier_probability'), value_type=float),
             "tracking_translation_prior_sigma": ParameterValue(LaunchConfiguration('tracking_translation_prior_sigma'), value_type=float),
@@ -417,6 +423,9 @@ def generate_launch_description():
     declare_scan_reliable,
     declare_performance_diagnostics_path,
     declare_final_trajectory_path,
+    declare_tracking_matcher,
+    declare_tracking_occupied_space_weight,
+    declare_tracking_voxel_size,
     declare_tracking_sigma,
     declare_tracking_outlier_probability,
     declare_tracking_translation_prior_sigma,

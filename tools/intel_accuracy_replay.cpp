@@ -8,8 +8,8 @@
 namespace fs=std::filesystem;
 int main(int argc,char** argv) {
   try {
-    if(argc!=11 && argc!=12) throw std::invalid_argument(
-      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic]");
+    if(argc<11 || argc>15) throw std::invalid_argument(
+      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size]]]]");
     const fs::path input=argv[1], output=argv[2];
     if(!fs::is_directory(output)) throw std::invalid_argument("Output directory must exist");
     FastSLAMParams params;
@@ -23,7 +23,10 @@ int main(int argc,char** argv) {
     params.frontend_pose_mode=argv[7];params.tracking.effective_beams=std::stod(argv[8]);
     params.submap_num_range_data=std::stoi(argv[9]);
     params.tracking.prior_information_scale=std::stod(argv[10]);
-    if(argc==12) params.loop_update_mode=argv[11];
+    if(argc>=12) params.loop_update_mode=argv[11];
+    if(argc>=13) params.tracking_matcher=argv[12];
+    if(argc>=14) params.probability_matching.occupied_space_weight=std::stod(argv[13]);
+    if(argc>=15) params.probability_matching.voxel_size=std::stod(argv[14]);
     params.loop_bayes_diagnostics_path=(output/"bayes.csv").string();
     params.output_selection_mode="pose_risk";params.worker_threads=2;
     params.loop_diagnostics_path=(output/"loops.csv").string();
