@@ -139,6 +139,16 @@ def generate_launch_description():
     declare_loop_max_fit_translation = DeclareLaunchArgument('loop_max_fit_translation', default_value='0.30', description='Maximum trial loop residual in meters')
     declare_loop_max_fit_rotation = DeclareLaunchArgument('loop_max_fit_rotation', default_value='0.12', description='Maximum trial loop residual in radians')
     declare_loop_branch_prior = DeclareLaunchArgument('loop_branch_prior', default_value='0.5', description='Total prior mass assigned to categorical loop alternatives')
+    declare_loop_update_mode = DeclareLaunchArgument('loop_update_mode', default_value='bayes', description='Bayesian future-scan evidence or legacy heuristic ablation')
+    declare_loop_bayes_min_scans = DeclareLaunchArgument('loop_bayes_min_scans', default_value='10', description='Minimum usable FUTURE scans before deciding a loop')
+    declare_loop_bayes_max_scans = DeclareLaunchArgument('loop_bayes_max_scans', default_value='30', description='Maximum future scan attempts before reporting undecided')
+    declare_loop_bayes_accept_probability = DeclareLaunchArgument('loop_bayes_accept_probability', default_value='0.95', description='Model posterior threshold for retaining the loop alternatives')
+    declare_loop_bayes_reject_probability = DeclareLaunchArgument('loop_bayes_reject_probability', default_value='0.05', description='Model posterior threshold for retaining no-loop alternatives')
+    declare_loop_bayes_beta = DeclareLaunchArgument('loop_bayes_beta', default_value='0.1', description='Validation likelihood temperature times tracking_effective_beams')
+    declare_loop_bayes_min_known_fraction = DeclareLaunchArgument('loop_bayes_min_known_fraction', default_value='0.35', description='Minimum fraction of beams observed in every frozen reference')
+    declare_loop_geometry_min_compatibility = DeclareLaunchArgument('loop_geometry_min_compatibility', default_value='0.01', description='Trajectory compatibility gate; never a probability multiplier')
+    declare_hypothesis_prune_mass = DeclareLaunchArgument('hypothesis_prune_mass', default_value='1e-06', description='Mass pruning outside pending or undecided loop events')
+    declare_loop_bayes_diagnostics_path = DeclareLaunchArgument('loop_bayes_diagnostics_path', default_value='', description='Sequential hypothesis evidence CSV output path')
     declare_loop_null_compatibility = DeclareLaunchArgument('loop_null_compatibility', default_value='0.2', description='Compatibility factor for the no-loop alternative')
     declare_loop_max_verifications = DeclareLaunchArgument('loop_max_verifications', default_value='6', description='Maximum fixed candidates evaluated over the belief per event')
     declare_loop_trajectory_samples = DeclareLaunchArgument('loop_trajectory_samples', default_value='200', description='Maximum timestamp-aligned poses in trajectory verification')
@@ -252,6 +262,16 @@ def generate_launch_description():
             "loop_max_fit_translation": ParameterValue(LaunchConfiguration('loop_max_fit_translation'), value_type=float),
             "loop_max_fit_rotation": ParameterValue(LaunchConfiguration('loop_max_fit_rotation'), value_type=float),
             "loop_branch_prior": ParameterValue(LaunchConfiguration('loop_branch_prior'), value_type=float),
+            "loop_update_mode": ParameterValue(LaunchConfiguration('loop_update_mode'), value_type=str),
+            "loop_bayes_min_scans": ParameterValue(LaunchConfiguration('loop_bayes_min_scans'), value_type=int),
+            "loop_bayes_max_scans": ParameterValue(LaunchConfiguration('loop_bayes_max_scans'), value_type=int),
+            "loop_bayes_accept_probability": ParameterValue(LaunchConfiguration('loop_bayes_accept_probability'), value_type=float),
+            "loop_bayes_reject_probability": ParameterValue(LaunchConfiguration('loop_bayes_reject_probability'), value_type=float),
+            "loop_bayes_beta": ParameterValue(LaunchConfiguration('loop_bayes_beta'), value_type=float),
+            "loop_bayes_min_known_fraction": ParameterValue(LaunchConfiguration('loop_bayes_min_known_fraction'), value_type=float),
+            "loop_geometry_min_compatibility": ParameterValue(LaunchConfiguration('loop_geometry_min_compatibility'), value_type=float),
+            "hypothesis_prune_mass": ParameterValue(LaunchConfiguration('hypothesis_prune_mass'), value_type=float),
+            "loop_bayes_diagnostics_path": ParameterValue(LaunchConfiguration('loop_bayes_diagnostics_path'), value_type=str),
             "loop_null_compatibility": ParameterValue(LaunchConfiguration('loop_null_compatibility'), value_type=float),
             "loop_max_verifications": ParameterValue(LaunchConfiguration('loop_max_verifications'), value_type=int),
             "loop_trajectory_samples": ParameterValue(LaunchConfiguration('loop_trajectory_samples'), value_type=int),
@@ -364,6 +384,17 @@ def generate_launch_description():
     declare_loop_max_fit_translation,
     declare_loop_max_fit_rotation,
     declare_loop_branch_prior,
+    declare_loop_update_mode,
+    declare_loop_bayes_min_scans,
+    declare_loop_bayes_max_scans,
+    declare_loop_bayes_accept_probability,
+    declare_loop_bayes_reject_probability,
+    declare_loop_bayes_beta,
+    declare_loop_bayes_min_known_fraction,
+    declare_loop_geometry_min_compatibility,
+    declare_hypothesis_prune_mass,
+    declare_loop_bayes_diagnostics_path,
+
     declare_loop_null_compatibility,
     declare_loop_max_verifications,
     declare_loop_trajectory_samples,

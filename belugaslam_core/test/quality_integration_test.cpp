@@ -178,9 +178,10 @@ TEST(QualityIntegration, PruningRefreshesOutputAfterPopulationInstallation) {
   slam->install_population({{parent,parent,.6,Pose(),true},{other,parent,.4,Pose(),true}},30);
   slam->post_update({},{});ASSERT_EQ(slam->best_hypothesis_id(),parent->id);
   for(auto&& particle:slam->particles()) {
-    if(std::get<2>(particle)==parent)std::get<1>(particle)=beluga::Weight(0);
-    else std::get<0>(particle)=Pose(20);
+    if(std::get<2>(particle)==other)std::get<0>(particle)=Pose(20);
   }
+  parent->log_mass=-std::numeric_limits<double>::infinity();
+  slam->normalize_hypothesis_masses();
   slam->resample();
   EXPECT_EQ(slam->get_active_hypotheses_count(),1U);
   EXPECT_EQ(slam->best_hypothesis_id(),other->id);

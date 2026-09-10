@@ -1,3 +1,5 @@
+> Latest update: [BAYESIAN_UPDATE.md](BAYESIAN_UPDATE.md) implements hierarchical masses and delayed loop evidence. The Intel launch now defaults to `loop_update_mode:=bayes`. Read its build/test status and commands before running. Earlier review files describe historical revisions.
+
 > Current pose-accuracy revision: see [RMSE_REVISION_20260909.md](RMSE_REVISION_20260909.md) for fixes, architecture limitations, validation and replay instructions. Earlier review files describe historical revisions.
 
 # Beluga-SLAM

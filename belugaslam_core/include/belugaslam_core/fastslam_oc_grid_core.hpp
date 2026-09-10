@@ -20,6 +20,7 @@
 #include <tbb/parallel_for.h>
 #include <tbb/task_arena.h>
 #include "loop_belief.hpp"
+#include "hierarchical_bayes.hpp"
 #include "particle_proposal.hpp"
 #include "proposal_pose.hpp"
 #include "output_selection.hpp"
@@ -67,9 +68,21 @@ using state_type = Sophus::SE2d;
 /// Particle type, containing pose, weight, and a reference to its hypothesis.
 using FastSLAMParticle = std::tuple<
     state_type,
-    beluga::Weight,
-    std::shared_ptr<Hypothesis>
+    beluga::Weight,                 // derived LINEAR conditional weight, for Beluga views
+    std::shared_ptr<Hypothesis>,
+    double                         // authoritative normalized LOG conditional weight
 >;
+
+// Keep the legacy tuple interface for Beluga; inference owns the log weight.
+template<class Particle>
+inline void set_conditional_log_weight(Particle&& p, double log_weight) {
+    std::get<3>(p) = log_weight;
+    std::get<1>(p) = beluga::Weight(std::exp(log_weight));
+}
+template<class Particle>
+inline double joint_particle_weight(const Particle& p) {
+    return std::exp(std::get<2>(p)->log_mass + std::get<3>(p));
+}
 
 // Compile-time override remains available, but loop closure is enabled by default.
 #ifndef BELUGASLAM_ENABLE_LOOP_CLOSURE
@@ -148,7 +161,12 @@ struct FastSLAMParams {
     double loop_max_fit_translation = 0.30;
     double loop_max_fit_rotation = 0.12;
     double loop_branch_prior = 0.5;
-    double loop_null_compatibility = 0.2;
+    double loop_null_compatibility = 0.2; // legacy heuristic mode only
+    std::string loop_update_mode = "bayes"; // bayes or heuristic (controlled ablation)
+    belugaslam::SequentialLoopOptions loop_bayes;
+    double loop_geometry_min_compatibility = 0.01; // gate, never a probability
+    double hypothesis_prune_mass = 1.e-6;
+    std::string loop_bayes_diagnostics_path;
     std::size_t loop_max_verifications = 6;
     std::size_t loop_trajectory_samples = 200;
     std::size_t loop_min_points = 30;
@@ -225,6 +243,20 @@ public:
                           params.spatial_resolution_y,
                           params.spatial_resolution_theta} {
 
+      params_.loop_bayes.validate();
+      if (params_.loop_update_mode != "bayes" && params_.loop_update_mode != "heuristic")
+          throw std::invalid_argument("loop_update_mode must be bayes or heuristic");
+      if (params_.loop_update_mode=="bayes" && params_.loop_verifier_mode!="belief")
+          throw std::invalid_argument("Bayesian mode requires loop_verifier_mode=belief; use loop_update_mode=heuristic for the legacy MAP/uniform/geometry ablations");
+      if (!(params_.loop_geometry_min_compatibility >= 0 && params_.loop_geometry_min_compatibility <= 1) ||
+          !(params_.hypothesis_prune_mass >= 0 && params_.hypothesis_prune_mass < .05))
+          throw std::invalid_argument("Invalid geometry gate or hypothesis pruning threshold");
+      if (!params_.loop_bayes_diagnostics_path.empty()) {
+          bayes_diagnostics_.open(params_.loop_bayes_diagnostics_path);
+          if (!bayes_diagnostics_) throw std::runtime_error("Cannot open loop_bayes_diagnostics_path");
+          bayes_diagnostics_ << std::setprecision(17)
+              << "sequence,event_id,hypothesis,association,prior_mass,posterior_mass,log_mass,log_evidence,evidence_scans,attempted_scans,common_beams,loop_probability,status\n";
+      }
       if (params_.worker_threads < 1) throw std::invalid_argument("worker_threads must be positive");
       if (params_.output_selection_mode != "map" && params_.output_selection_mode != "pose_risk")
           throw std::invalid_argument("output_selection_mode must be map or pose_risk");
@@ -328,7 +360,7 @@ public:
       particles_.resize(params_.max_particles);
       for (auto&& p : particles_) {
         std::get<0>(p) = state_type{};
-        std::get<1>(p) = beluga::Weight(1.0 / particles_.size());
+        set_conditional_log_weight(p, -std::log(static_cast<double>(particles_.size())));
         std::get<2>(p) = initial_hypothesis;  // All particles share the same hypothesis
       }
       // Start at the configured default extent, so the first publications before any
@@ -700,7 +732,10 @@ public:
 
     void measurement_model_map(const measurement_type& z) {
         if (z.empty()) return;
-        const auto sparse = belugaslam::select_tracking_points(z, params_.tracking.max_points);
+        if (bayes_event_.active && bayes_event_.last_sequence==next_scan_sequence_) return;
+        measurement_type finite_scan;
+        for (const auto& beam : z) if (std::isfinite(beam.first) && std::isfinite(beam.second)) finite_scan.push_back(beam);
+        const auto sparse = belugaslam::select_tracking_points(finite_scan, params_.tracking.max_points);
         std::map<std::size_t, TrackingReference> references;
         for (auto& h : hypotheses_) references.emplace(h->id,track_hypothesis(h,sparse));
         if (motion_proposals_.size() != particles_.size()) motion_proposals_.resize(particles_.size());
@@ -719,24 +754,77 @@ public:
                     {pose.translation().x(), pose.translation().y(), pose.so2().log()}, params_.tracking).mean_log_likelihood;
             }
         });
+        // The frontend uses its live tracking map. Inference during a validation
+        // event uses ONLY the frozen historical map, on the SAME motion-prior
+        // proposals. No scan-matcher optimum enters predictive evidence.
         estimate_proposal_poses(sparse,references,proposal_logs);
-        std::vector<double> logs(particles_.size());
-        double maximum = -std::numeric_limits<double>::infinity();
-        // RNG draws and reductions use a fixed serial order. Selection remains
-        // stochastic; particles are not all pushed onto their nearest optimizer mode.
-        for (std::size_t i = 0; i < particles_.size(); ++i) {
-            auto&& p = *(particles_.begin() + i);
-            const auto choice = belugaslam::select_motion_proposal(proposal_logs[i], rng_);
-            std::get<0>(p) = motion_proposals_[i][choice.index];
-            const double prior = static_cast<double>(std::get<1>(p));
-            logs[i] = prior > 0 ? std::log(prior) + choice.log_evidence : -std::numeric_limits<double>::infinity();
-            maximum = std::max(maximum, logs[i]);
+        const bool future_scan = bayes_event_.active && next_scan_sequence_ >= bayes_event_.first_sequence &&
+            bayes_event_.last_sequence != next_scan_sequence_;
+        measurement_type common_scan;
+        if (future_scan) {
+            // Use one common beam subset. Unknown space in one branch must not
+            // be treated as a measured obstacle mismatch in another branch.
+            for (const auto& beam : sparse) {
+                bool known=true;
+                for (const auto& h : hypotheses_) {
+                    const auto& predicted=references.at(h->id).prediction;
+                    known = known && h->validation_map && h->validation_map->observed_endpoint(
+                        {predicted.translation().x(),predicted.translation().y(),predicted.so2().log()},beam);
+                }
+                if (known) common_scan.push_back(beam);
+            }
         }
-        double total = 0;
-        if (std::isfinite(maximum)) for (auto& value : logs) { value = std::exp(value - maximum); total += value; }
-        for (std::size_t i = 0; i < particles_.size(); ++i)
-            std::get<1>(*(particles_.begin()+i)) = beluga::Weight(total > 0 ? logs[i]/total : 1.0/particles_.size());
+        const bool validation_usable = future_scan && common_scan.size() >= params_.tracking.min_points &&
+            common_scan.size() >= params_.loop_bayes.min_known_fraction * sparse.size();
+        if (bayes_event_.active && !validation_usable) {
+            // An uninformative scan is missing evidence at BOTH hierarchy levels.
+            // The independent frontend can still track using its live map.
+            for (auto& logs : proposal_logs) std::fill(logs.begin(),logs.end(),0.0);
+        }
+        if (validation_usable) {
+            parallel_indices(particles_.size(), [&](std::size_t i) {
+                const auto& h=std::get<2>(*(particles_.begin()+i));
+                for (std::size_t k=0; k<motion_proposals_[i].size(); ++k) {
+                    const auto& pose=motion_proposals_[i][k];
+                    proposal_logs[i][k]=h->validation_map->log_likelihood(common_scan,
+                        {pose.translation().x(),pose.translation().y(),pose.so2().log()},params_.tracking,params_.loop_bayes.beta);
+                }
+            });
+        }
+        const auto prior_masses=hypothesis_masses();
+        std::map<std::size_t,std::vector<std::size_t>> indices;
+        std::vector<double> increments(particles_.size());
+        // Fixed serial RNG order. Keep the proposal MEAN likelihood normalizer,
+        // then the conditional-particle normalizer, then normalize graph masses.
+        for (std::size_t i=0; i<particles_.size(); ++i) {
+            auto&& particle=*(particles_.begin()+i);
+            const auto choice=belugaslam::select_motion_proposal(proposal_logs[i],rng_);
+            std::get<0>(particle)=motion_proposals_[i][choice.index];
+            increments[i]=choice.log_evidence;
+            indices[std::get<2>(particle)->id].push_back(i);
+        }
+        for (const auto& h : hypotheses_) {
+            const auto& members=indices.at(h->id);
+            std::vector<double> prior, likelihood;
+            for (auto i : members) { prior.push_back(std::get<3>(*(particles_.begin()+i))); likelihood.push_back(increments[i]); }
+            const auto update=belugaslam::update_conditional(prior,likelihood);
+            for (std::size_t j=0; j<members.size(); ++j)
+                set_conditional_log_weight(*(particles_.begin()+members[j]), update.log_weights[j]);
+            h->predictive_log_evidence=0;
+            // Missing common coverage gives no graph evidence. Outside a loop
+            // window the pre-insertion tracking evidence updates ordinary modes.
+            // An undecided window keeps its graph masses until another event.
+            if (validation_usable || (!bayes_event_.active && !bayes_unresolved_)) {
+                h->log_mass += update.log_evidence;
+                h->predictive_log_evidence=update.log_evidence;
+            }
+            // During validation the PF used a different sensor model from the
+            // frontend readout. Report its actual conditional particle moment.
+            if (bayes_event_.active) cache_particle_pose_covariance(h);
+        }
+        normalize_hypothesis_masses();
         motion_proposals_.clear();
+        if (future_scan) finish_bayesian_scan(validation_usable,common_scan.size(),prior_masses);
         if (tracking_diagnostics_.is_open()) {
             const auto masses = hypothesis_masses();
             for (const auto& h : hypotheses_) {
@@ -1073,12 +1161,12 @@ public:
         // A baseline solve is needed before verification, not before a search that
         // may produce no candidate. All hypothesis priors are still frozen AFTER it.
         const auto retrieval_start = std::chrono::steady_clock::now();
-        const auto candidates = params_.enable_loop_closure && params_.enable_pgo
+        const auto candidates = !bayes_event_.active && params_.enable_loop_closure && params_.enable_pgo
             ? retrieve_loop_candidates(finished_events) : std::vector<LoopCandidate>{};
         backend_timing_.retrieval_ms = elapsed_ms(retrieval_start);
         backend_timing_.candidates = candidates.size();
         const auto pgo_start = std::chrono::steady_clock::now();
-        if (params_.enable_pgo) {
+        if (params_.enable_pgo && !bayes_event_.active) {
             for (auto& hypothesis : hypotheses_) {
                 const auto node_count = hypothesis->submaps.trajectory_nodes.size();
                 const auto inter_count = hypothesis->submaps.inter_constraint_count();
@@ -1124,14 +1212,10 @@ public:
             double mass = 0.0;
             state_type fallback_pose{};
         };
-        // Stable IDs preserve MAP tie-breaking and deterministic risk ties.
+        // Stable IDs preserve MAP tie-breaking. Integer particle quotas do not vote.
         std::map<std::size_t, OutputCandidate> candidates;
-        for (const auto& p : particles_) {
-            auto& candidate = candidates[std::get<2>(p)->id];
-            const double weight = static_cast<double>(std::get<1>(p));
-            candidate.hypothesis = std::get<2>(p);
-            candidate.mass += weight;
-        }
+        const auto masses = hypothesis_masses();
+        for (const auto& h : hypotheses_) candidates[h->id] = {h, masses.at(h->id), state_type{}};
         for (auto& [id,candidate]:candidates) {
             if (!candidate.hypothesis->has_local_pose)
                 candidate.fallback_pose=hypothesis_mean_pose(candidate.hypothesis);
@@ -1187,15 +1271,24 @@ public:
         Sophus::SE2d correction;
         bool no_loop = true;
         std::size_t candidate_index = std::numeric_limits<std::size_t>::max();
+        double log_mass = std::numeric_limits<double>::quiet_NaN(); // optional exact mass for resampling
     };
 
     [[nodiscard]] std::map<std::size_t, double> hypothesis_masses() const {
-        std::map<std::size_t, double> masses;
-        for (const auto& p : particles_) masses[std::get<2>(p)->id] += static_cast<double>(std::get<1>(p));
-        double total = 0.0;
-        for (const auto& [id, mass] : masses) total += mass;
-        if (total > 0.0) for (auto& [id, mass] : masses) mass /= total;
+        std::vector<double> logs;
+        for (const auto& h : hypotheses_) logs.push_back(h->log_mass);
+        const double normalizer = belugaslam::log_sum_exp(logs);
+        if (!std::isfinite(normalizer)) throw std::logic_error("No hypothesis mass");
+        std::map<std::size_t,double> masses;
+        for (const auto& h : hypotheses_) masses[h->id] = std::exp(h->log_mass-normalizer);
         return masses;
+    }
+
+    void normalize_hypothesis_masses() {
+        std::vector<double> logs;
+        for (const auto& h : hypotheses_) logs.push_back(h->log_mass);
+        belugaslam::normalize_log_weights(logs);
+        for (std::size_t i=0; i<hypotheses_.size(); ++i) hypotheses_[i]->log_mass=logs[i];
     }
 
     // Conditional resampling preserves the continuous mass W_h even when each
@@ -1203,10 +1296,19 @@ public:
     // source particles when creating a loop branch.
     void install_population(const std::vector<PopulationBranch>& branches, std::size_t budget) {
         if (branches.empty()) return;
-        std::vector<double> raw_masses;
-        for (const auto& branch : branches) raw_masses.push_back(branch.mass);
-        const auto masses = belugaslam::normalize_masses(raw_masses);
-        const auto quotas = belugaslam::allocate_particle_quotas(raw_masses, budget);
+        if (budget<branches.size()) throw std::invalid_argument("Particle budget cannot represent every hypothesis");
+        std::set<std::size_t> ids;
+        std::vector<double> log_masses;
+        for (const auto& branch : branches) {
+            if (!branch.hypothesis || !branch.source || !ids.insert(branch.hypothesis->id).second ||
+                !std::isfinite(branch.mass) || branch.mass<0)
+                throw std::invalid_argument("Invalid population branch");
+            log_masses.push_back(std::isnan(branch.log_mass) ? std::log(branch.mass) : branch.log_mass);
+        }
+        belugaslam::normalize_log_weights(log_masses);
+        std::vector<double> masses;
+        for (double l : log_masses) masses.push_back(std::exp(l));
+        const auto quotas = belugaslam::allocate_particle_quotas(masses, budget);
         std::vector<FastSLAMParticle> buffer;
         buffer.reserve(budget);
         for (std::size_t h = 0; h < branches.size(); ++h) {
@@ -1223,12 +1325,14 @@ public:
             const auto selected = belugaslam::systematic_indices(weights, quotas[h], rng_);
             for (std::size_t n = 0; n < quotas[h]; ++n) {
                 buffer.emplace_back(branch.correction * poses[selected[n]],
-                    beluga::Weight(masses[h] / quotas[h]), branch.hypothesis);
+                    beluga::Weight(1.0 / quotas[h]), branch.hypothesis, -std::log(static_cast<double>(quotas[h])));
             }
         }
         particles_.assign(buffer.begin(), buffer.end());
         hypotheses_.clear();
-        for (const auto& branch : branches) {
+        for (std::size_t i=0; i<branches.size(); ++i) {
+            const auto& branch=branches[i];
+            branch.hypothesis->log_mass=log_masses[i];
             hypotheses_.push_back(branch.hypothesis);
             next_hypothesis_id_ = std::max(next_hypothesis_id_, branch.hypothesis->id + 1);
         }
@@ -1252,7 +1356,7 @@ public:
     void resample() {
         std::vector<double> weights;
         for (const auto& p : particles_) weights.push_back(static_cast<double>(std::get<1>(p)));
-        detect_and_split_modes(weights);
+        if (!bayes_event_.active && !bayes_unresolved_) detect_and_split_modes(weights);
         // Split populations need conditional moments of their new memberships.
         // Cache before resampling, which otherwise adds avoidable reporting noise.
         for (const auto& h:hypotheses_) if (!h->has_pose_covariance) cache_particle_pose_covariance(h);
@@ -1260,14 +1364,20 @@ public:
         std::vector<PopulationBranch> branches;
         for (const auto& h : hypotheses_) {
             const auto it = masses.find(h->id);
-            if (it != masses.end() && it->second > 1.0e-12) branches.push_back({h, h, it->second, state_type{}, true});
+            if (it != masses.end() && (bayes_event_.active || bayes_unresolved_ || it->second > params_.hypothesis_prune_mass)) {
+                branches.push_back({h, h, it->second, state_type{}, true});
+                branches.back().log_mass=h->log_mass;
+            }
         }
         std::stable_sort(branches.begin(), branches.end(), [](const auto& a, const auto& b) { return a.mass > b.mass; });
         if (branches.size() > params_.max_hypotheses) branches.resize(params_.max_hypotheses);
-        if (branches.empty()) { refresh_output_selection(); return; }
+        if (branches.empty()) {
+            const auto h=*std::max_element(hypotheses_.begin(),hypotheses_.end(),[](const auto& a,const auto& b) {return a->log_mass<b->log_mass;});
+            branches.push_back({h,h,1.0,state_type{},true});
+        }
         double sum = 0.0, squares = 0.0;
         for (const auto& p : particles_) {
-            const double w = static_cast<double>(std::get<1>(p));
+            const double w = joint_particle_weight(p);
             sum += w; squares += w * w;
         }
         const double ess = squares > 0.0 ? sum * sum / squares : 0.0;
@@ -1300,6 +1410,7 @@ public:
         }
 
         for (auto& hypothesis : hypotheses_snapshot) {
+            const double original_log_mass = hypothesis->log_mass;
             const auto& indices = hypothesis_particle_indices[hypothesis->id];
             if (indices.empty()) continue;
 
@@ -1337,17 +1448,9 @@ public:
             std::vector<Hypothesis::PendingSplit> next_pending;
             bool is_first_spatial_cluster = true;
             for (const auto& [scid, scweight] : sorted_s_clusters) {
-                // Remove numerically empty clusters; an arbitrary 5% cutoff would
-                // erase secondary support before the belief verifier can use it.
-                if (!(s_total_weight > 0.0) || scweight <= 1.0e-12 * s_total_weight) {
-                    // Kill particles in small modes to avoid polluting the main hypothesis
-                    for (size_t local_idx : s_cluster_to_indices[scid]) {
-                        size_t global_idx = indices[local_idx];
-                        std::get<1>(*(particles_.begin() + global_idx)) = beluga::Weight(0.0);
-                        weights_view[global_idx] = 0.0;
-                    }
-                    continue;
-                }
+                // Leave negligible support in the parent. Particle count must
+                // never silently remove or create probability at a spatial fork.
+                if (!(s_total_weight > 0.0) || scweight <= 1.0e-12 * s_total_weight) continue;
 
                 std::shared_ptr<Hypothesis> target_hypothesis = hypothesis;
 
@@ -1432,7 +1535,22 @@ public:
                 }
             }
             hypothesis->pending_splits = std::move(next_pending);
+            // Partition this parent's probability, then renormalize each child locally.
+            std::map<std::size_t,std::vector<std::size_t>> memberships;
+            for (auto i : indices) memberships[std::get<2>(*(particles_.begin()+i))->id].push_back(i);
+            for (const auto& [id, members] : memberships) {
+                std::vector<double> logs;
+                for (auto i : members) logs.push_back(std::get<3>(*(particles_.begin()+i)));
+                const double fraction = belugaslam::normalize_log_weights(logs);
+                std::get<2>(*(particles_.begin()+members.front()))->log_mass = original_log_mass + fraction;
+                for (std::size_t j=0; j<members.size(); ++j) {
+                    auto&& particle=*(particles_.begin()+members[j]);
+                    set_conditional_log_weight(particle, logs[j]);
+                    weights_view[members[j]]=std::exp(logs[j]);
+                }
+            }
         }
+        normalize_hypothesis_masses();
     }
 
     /// Converts world coordinates to grid indices and linear index for map access.
@@ -1717,6 +1835,151 @@ public:
         bool eligible = false, selected = false;
     };
 
+    [[nodiscard]] bool bayesian_loop_pending() const { return bayes_event_.active; }
+    [[nodiscard]] const std::string& last_bayesian_loop_status() const { return last_bayes_status_; }
+    [[nodiscard]] double last_bayesian_loop_probability() const { return last_bayes_probability_; }
+
+    // Transactional: build all snapshots and verify the full population fits
+    // before mutating any live parent. No parent mode is dropped to make room.
+    bool begin_bayesian_loop_event(LoopVerification& report,
+        const std::vector<std::shared_ptr<Hypothesis>>& parents,
+        const std::vector<double>& masses, std::uint64_t event_id) {
+        if (parents.size()!=masses.size() || parents.size()!=report.trials.size())
+            throw std::invalid_argument("Mismatched loop event population");
+        if (bayes_event_.active) return false;
+        std::vector<bool> eligible;
+        std::size_t children=0;
+        for (const auto& trial : report.trials) {
+            eligible.push_back(trial.usable && trial.hypothesis &&
+                trial.compatibility >= params_.loop_geometry_min_compatibility);
+            children += eligible.back();
+        }
+        auto deferred = [&](const char* reason) {
+            last_bayes_status_=reason;
+            for (auto& trial : report.trials) if (trial.usable) trial.status=reason;
+            return false;
+        };
+        if (!children) return deferred("bayes_deferred_geometry");
+        if (parents.size()+children > params_.max_hypotheses || parents.size()+children > params_.max_particles)
+            return deferred("bayes_deferred_budget");
+        auto snapshot = [&](const std::shared_ptr<Hypothesis>& h) -> std::shared_ptr<const belugaslam::ValidationMap> {
+            const auto& graph=h->submaps;
+            auto reference=graph.find_submap_by_anchor(report.candidate.reference_sequence);
+            if (!reference) {
+                const auto* sample=graph.find_sample(report.candidate.reference_sequence);
+                if (sample) reference=graph.find_submap(sample->submap_id);
+            }
+            if (!reference || !reference->is_finished()) return {};
+            // Even in synthetic/direct callers, forbid a reference that contains
+            // the candidate's query scan (or later data).
+            for (const auto node_id : graph.insertion_nodes(reference->id())) {
+                const auto* node=graph.find_node(node_id);
+                if (node && node->sequence>=report.candidate.query_sequence) return {};
+            }
+            const auto& grid=reference->grid(); const auto& pose=reference->global_pose();
+            auto result=std::make_shared<const belugaslam::ValidationMap>(grid.data(),grid.width(),grid.height(),
+                grid.resolution(),grid.origin_x(),grid.origin_y(),
+                belugaslam::PoseSample2{pose.translation().x(),pose.translation().y(),pose.so2().log()});
+            return result->usable() ? result : nullptr;
+        };
+        std::vector<std::shared_ptr<const belugaslam::ValidationMap>> null_maps,loop_maps;
+        for (std::size_t i=0; i<parents.size(); ++i) {
+            null_maps.push_back(snapshot(parents[i]));
+            loop_maps.push_back(eligible[i] ? snapshot(report.trials[i].hypothesis) : nullptr);
+            if (!null_maps.back() || (eligible[i] && !loop_maps.back())) return deferred("bayes_deferred_reference");
+        }
+        std::vector<PopulationBranch> pool;
+        const auto initialize = [&](const auto& h,const auto& map,bool loop) {
+            h->validation_map=map;h->validation_loop=loop;h->validation_event=event_id;
+            h->validation_age=0;h->validation_status="pending";h->predictive_log_evidence=0;
+            h->pending_splits.clear();
+        };
+        for (std::size_t i=0; i<parents.size(); ++i) {
+            const auto& parent=parents[i];
+            initialize(parent,null_maps[i],false);
+            // A hard-impossible association is absent from this parent's model.
+            // Otherwise the categorical prior sums to ONE within every parent.
+            const double loop_prior=eligible[i] ? params_.loop_branch_prior : 0;
+            pool.push_back({parent,parent,masses[i]*(1-loop_prior),state_type{},true});
+            pool.back().log_mass=parent->log_mass+std::log(1-loop_prior);
+            if (!eligible[i]) continue;
+            auto& trial=report.trials[i];const auto& child=trial.hypothesis;
+            child->id=next_hypothesis_id_++;child->has_loop=true;
+            child->last_loop_sequence=report.candidate.query_sequence;
+            initialize(child,loop_maps[i],true);
+            pool.push_back({child,parent,masses[i]*loop_prior,
+                child->T_global_local*parent->T_global_local.inverse(),false});
+            pool.back().log_mass=parent->log_mass+std::log(loop_prior);
+            trial.installed=true;trial.status="bayes_pending";
+        }
+        install_population(pool,params_.max_particles);
+        bayes_event_={};bayes_event_.active=true;bayes_event_.id=event_id;
+        // Branch creation runs after insertion. next_scan_sequence_ is the first
+        // FUTURE scan, regardless of the older query sequence used by retrieval.
+        bayes_event_.first_sequence=next_scan_sequence_;
+        bayes_unresolved_=false;last_bayes_status_="pending";
+        last_bayes_probability_=0;
+        for (const auto& h : hypotheses_) if (h->validation_loop) last_bayes_probability_+=std::exp(h->log_mass);
+        if (bayes_diagnostics_) {
+            const auto initial_masses=hypothesis_masses();
+            for (const auto& h : hypotheses_) bayes_diagnostics_
+                << (next_scan_sequence_ ? next_scan_sequence_-1 : 0) << ',' << event_id << ',' << h->id << ','
+                << (h->validation_loop ? "loop" : "no_loop") << ',' << initial_masses.at(h->id) << ','
+                << initial_masses.at(h->id) << ',' << h->log_mass << ",0,0,0,0," << last_bayes_probability_ << ",pending\n";
+            bayes_diagnostics_.flush();
+        }
+        report.selected=true; // installed as tentative; NOT a posterior acceptance
+        consumed_loop_queries_.insert(report.candidate.query_sequence);
+        return true;
+    }
+
+    void finish_bayesian_scan(bool usable, std::size_t beams, const std::map<std::size_t,double>& priors) {
+        if (!bayes_event_.active || bayes_event_.last_sequence==next_scan_sequence_) return;
+        bayes_event_.last_sequence=next_scan_sequence_;
+        ++bayes_event_.attempted_scans;
+        if (usable) ++bayes_event_.evidence_scans;
+        const auto masses=hypothesis_masses();
+        double probability=0;
+        for (const auto& h : hypotheses_) if (h->validation_loop) probability+=masses.at(h->id);
+        probability=std::clamp(probability,0.0,1.0);
+        const auto decision=belugaslam::decide_loop(probability,bayes_event_.evidence_scans,
+            bayes_event_.attempted_scans,params_.loop_bayes);
+        last_bayes_probability_=probability;last_bayes_status_=belugaslam::decision_name(decision);
+        for (const auto& h : hypotheses_) {
+            h->validation_age=bayes_event_.evidence_scans;
+            h->validation_status=last_bayes_status_;
+            if (bayes_diagnostics_) bayes_diagnostics_ << next_scan_sequence_ << ',' << bayes_event_.id << ',' << h->id << ','
+                << (h->validation_loop ? "loop" : "no_loop") << ',' << priors.at(h->id) << ',' << masses.at(h->id) << ','
+                << h->log_mass << ',' << h->predictive_log_evidence << ',' << bayes_event_.evidence_scans << ','
+                << bayes_event_.attempted_scans << ',' << beams << ',' << probability << ',' << last_bayes_status_ << '\n';
+        }
+        if (decision==belugaslam::LoopDecision::pending) return;
+        bayes_event_.active=false;
+        bayes_unresolved_=decision==belugaslam::LoopDecision::undecided;
+        if (!bayes_unresolved_) {
+            const bool keep_loop=decision==belugaslam::LoopDecision::accepted;
+            std::vector<FastSLAMParticle> retained;
+            for (const auto& particle : particles_)
+                if (std::get<2>(particle)->validation_loop==keep_loop) retained.push_back(particle);
+            particles_.assign(retained.begin(),retained.end());
+            hypotheses_.erase(std::remove_if(hypotheses_.begin(),hypotheses_.end(),
+                [&](const auto& h) {return h->validation_loop!=keep_loop;}),hypotheses_.end());
+            normalize_hypothesis_masses();
+            std::vector<PopulationBranch> survivors;
+            for (const auto& h : hypotheses_) {
+                survivors.push_back({h,h,std::exp(h->log_mass),state_type{},true});
+                survivors.back().log_mass=h->log_mass;
+            }
+            install_population(survivors,params_.max_particles);
+            if (keep_loop) for (const auto& h : hypotheses_) loop_closure_poses_.push_back(h->local_pose);
+        }
+        // Snapshots are bounded to one event window. Undecided alternatives and
+        // their masses survive; new events can be attempted if the budget allows.
+        for (const auto& h : hypotheses_) h->validation_map.reset();
+        if (bayes_diagnostics_) bayes_diagnostics_.flush();
+        refresh_output_selection();
+    }
+
     [[nodiscard]] std::vector<LoopCandidate> retrieve_loop_candidates(
         const std::vector<FinishedSubmapEvent>& events) const {
         std::vector<LoopCandidate> candidates;
@@ -1964,6 +2227,7 @@ public:
     }
 
     void verify_loop_candidates(const std::vector<LoopCandidate>& proposed_candidates) {
+        if (bayes_event_.active) return;
         std::vector<LoopCandidate> candidates;
         for (const auto& candidate : proposed_candidates)
             if (!consumed_loop_queries_.count(candidate.query_sequence)) candidates.push_back(candidate);
@@ -2002,16 +2266,20 @@ public:
             report.decision_score = params_.loop_verifier_mode == "map" ? report.evidence.map :
                 params_.loop_verifier_mode == "uniform" ? report.evidence.uniform :
                 params_.loop_verifier_mode == "geometry" ? 1.0 : report.evidence.weighted;
-            report.eligible = report.decision_score >= params_.loop_belief_threshold &&
-                std::any_of(report.trials.begin(), report.trials.end(), [](const auto& trial) { return trial.usable; });
+            report.eligible = params_.loop_update_mode == "bayes"
+                ? std::any_of(report.trials.begin(), report.trials.end(), [&](const auto& trial) {
+                    return trial.usable && trial.compatibility >= params_.loop_geometry_min_compatibility; })
+                : report.decision_score >= params_.loop_belief_threshold &&
+                    std::any_of(report.trials.begin(), report.trials.end(), [](const auto& trial) { return trial.usable; });
         }
         backend_timing_.verification_ms = elapsed_ms(verification_start);
         std::vector<std::size_t> order(reports.size());
         std::iota(order.begin(), order.end(), 0);
         std::stable_sort(order.begin(), order.end(), [&](auto a, auto b) {
             const auto& x = reports[a]; const auto& y = reports[b];
-            return x.decision_score * x.candidate.score * x.candidate.overlap >
-                   y.decision_score * y.candidate.score * y.candidate.overlap;
+            const double sx=params_.loop_update_mode=="bayes" ? 1.0 : x.decision_score;
+            const double sy=params_.loop_update_mode=="bayes" ? 1.0 : y.decision_score;
+            return sx * x.candidate.score * x.candidate.overlap > sy * y.candidate.score * y.candidate.overlap;
         });
         std::vector<std::size_t> accepted;
         for (auto index : order) {
@@ -2020,9 +2288,12 @@ public:
             // not independent evidence factors to multiply into the same graph.
             if (!accepted.empty() && reports[index].candidate.query_sequence != reports[accepted.front()].candidate.query_sequence) continue;
             accepted.push_back(index);
-            if (accepted.size() >= params_.loop_max_branches) break;
+            if (params_.loop_update_mode == "bayes" || accepted.size() >= params_.loop_max_branches) break;
         }
-        if (!accepted.empty()) {
+        if (!accepted.empty() && params_.loop_update_mode == "bayes") {
+            begin_bayesian_loop_event(reports[accepted.front()], prior_hypotheses, masses, event_id);
+        }
+        if (!accepted.empty() && params_.loop_update_mode == "heuristic") {
             std::vector<PopulationBranch> pool;
             for (std::size_t h = 0; h < prior_hypotheses.size(); ++h) {
                 if (masses[h] <= 0.0) continue;
@@ -2245,6 +2516,16 @@ private:
     std::set<std::uint64_t> consumed_loop_queries_;
     std::ofstream loop_diagnostics_;
     std::ofstream tracking_diagnostics_;
+    std::ofstream bayes_diagnostics_;
+    struct BayesEvent {
+        bool active=false;
+        std::uint64_t id=0, first_sequence=0;
+        std::uint64_t last_sequence=std::numeric_limits<std::uint64_t>::max();
+        std::size_t evidence_scans=0, attempted_scans=0;
+    } bayes_event_;
+    bool bayes_unresolved_=false;
+    std::string last_bayes_status_="none";
+    double last_bayes_probability_=0;
     std::vector<std::vector<state_type>> motion_proposals_;
     beluga::TupleVector<FastSLAMParticle> particles_;
 

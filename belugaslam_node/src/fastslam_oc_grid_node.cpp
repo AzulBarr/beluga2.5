@@ -55,6 +55,16 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_max_fit_translation", 0.30);
     this->declare_parameter("loop_max_fit_rotation", 0.12);
     this->declare_parameter("loop_branch_prior", 0.5);
+    declare_parameter("loop_update_mode", "bayes");
+    declare_parameter("loop_bayes_min_scans", 10);
+    declare_parameter("loop_bayes_max_scans", 30);
+    declare_parameter("loop_bayes_accept_probability", 0.95);
+    declare_parameter("loop_bayes_reject_probability", 0.05);
+    declare_parameter("loop_bayes_beta", 0.1);
+    declare_parameter("loop_bayes_min_known_fraction", 0.35);
+    declare_parameter("loop_geometry_min_compatibility", 0.01);
+    declare_parameter("hypothesis_prune_mass", 1e-06);
+    declare_parameter("loop_bayes_diagnostics_path", "");
     this->declare_parameter("loop_null_compatibility", 0.2);
     this->declare_parameter("loop_max_verifications", 6);
     this->declare_parameter("loop_trajectory_samples", 200);
@@ -243,6 +253,18 @@ void BelugaSLAMNode::setup_slam() {
     params.loop_max_fit_translation = get_parameter("loop_max_fit_translation").as_double();
     params.loop_max_fit_rotation = get_parameter("loop_max_fit_rotation").as_double();
     params.loop_branch_prior = get_parameter("loop_branch_prior").as_double();
+    params.loop_update_mode = get_parameter("loop_update_mode").as_string();
+    if (get_parameter("loop_bayes_min_scans").as_int()<1 || get_parameter("loop_bayes_min_scans").as_int()>100000) throw std::invalid_argument("Invalid loop_bayes_min_scans");
+    params.loop_bayes.min_scans = static_cast<std::size_t>(get_parameter("loop_bayes_min_scans").as_int());
+    if (get_parameter("loop_bayes_max_scans").as_int()<1 || get_parameter("loop_bayes_max_scans").as_int()>100000) throw std::invalid_argument("Invalid loop_bayes_max_scans");
+    params.loop_bayes.max_scans = static_cast<std::size_t>(get_parameter("loop_bayes_max_scans").as_int());
+    params.loop_bayes.accept_probability = get_parameter("loop_bayes_accept_probability").as_double();
+    params.loop_bayes.reject_probability = get_parameter("loop_bayes_reject_probability").as_double();
+    params.loop_bayes.beta = get_parameter("loop_bayes_beta").as_double();
+    params.loop_bayes.min_known_fraction = get_parameter("loop_bayes_min_known_fraction").as_double();
+    params.loop_geometry_min_compatibility = get_parameter("loop_geometry_min_compatibility").as_double();
+    params.hypothesis_prune_mass = get_parameter("hypothesis_prune_mass").as_double();
+    params.loop_bayes_diagnostics_path = get_parameter("loop_bayes_diagnostics_path").as_string();
     params.loop_null_compatibility = get_parameter("loop_null_compatibility").as_double();
     if (get_parameter("loop_max_verifications").as_int() < 0) throw std::invalid_argument("loop_max_verifications must be nonnegative");
     params.loop_max_verifications = static_cast<decltype(params.loop_max_verifications)>(get_parameter("loop_max_verifications").as_int());
@@ -704,9 +726,9 @@ void BelugaSLAMNode::compute_se2_covariance() {
 }
 
 void BelugaSLAMNode::compute_entropy() {
-    auto weights = beluga::views::weights(slam_->particles());
     double entropy = 0.0;
-    for (const auto& w : weights) {
+    for (const auto& particle : slam_->particles()) {
+        const double w = joint_particle_weight(particle);
         if (w > 1e-9) { // Avoid log(0)
             entropy -= w * std::log(w);
         }

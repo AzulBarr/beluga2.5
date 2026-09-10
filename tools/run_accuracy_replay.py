@@ -74,6 +74,7 @@ def main():
     parser.add_argument('--hypotheses', type=int, default=4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--loops', choices=['belief', 'map', 'geometry', 'off'], default='belief')
+    parser.add_argument('--loop-update-mode', choices=['bayes', 'heuristic'], default='bayes')
     parser.add_argument('--frontend-pose-mode', choices=['frontend', 'proposal_seed', 'proposal_mean'], default='proposal_seed')
     parser.add_argument('--effective-beams', type=float, default=20.)
     parser.add_argument('--prior-information-scale', type=float, default=1.,
@@ -85,6 +86,8 @@ def main():
     parser.add_argument('--output-root', type=Path, default=Path.home()/'beluga_accuracy_runs')
     parser.add_argument('--suite', action='store_true', help='Three separate fresh runs: submaps without loops, belief N30, belief at requested N')
     args = parser.parse_args()
+    if args.loop_update_mode == 'bayes' and args.loops not in ('belief', 'off'):
+        parser.error('Use --loop-update-mode heuristic for the legacy MAP/geometry ablations')
     if not 5 <= args.particles <= 10000 or not 1 <= args.hypotheses <= args.particles or not 1 <= args.seed < 2**32:
         parser.error('Require 5..10000 particles, 1..particles hypotheses, positive uint32 seed')
     if (not math.isfinite(args.effective_beams) or args.effective_beams <= 0 or args.submap_scans < 1 or
@@ -130,9 +133,9 @@ def main():
                 run = folder/name; run.mkdir()
                 command = [str(args.binary), str(input_path), str(run), str(particles), str(hypotheses),
                            str(args.seed), loops, args.frontend_pose_mode, str(args.effective_beams), str(args.submap_scans),
-                           str(args.prior_information_scale)]
+                           str(args.prior_information_scale), args.loop_update_mode]
                 info = {'command': command, 'complete': False, 'particles': particles, 'hypotheses': hypotheses,
-                        'loops': loops, 'frontend_pose_mode': args.frontend_pose_mode,
+                        'loops': loops, 'loop_update_mode': args.loop_update_mode, 'frontend_pose_mode': args.frontend_pose_mode,
                         'effective_beams': args.effective_beams, 'submap_scans': args.submap_scans,
                         'prior_information_scale': args.prior_information_scale,
                         'seed': args.seed, 'range_max': 30., 'worker_threads': 2,

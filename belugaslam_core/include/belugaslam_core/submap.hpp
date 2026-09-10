@@ -1,5 +1,6 @@
 #ifndef __BELUGASLAM_CORE_SUBMAP_HPP__
 #define __BELUGASLAM_CORE_SUBMAP_HPP__
+#include "validation_map.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -630,6 +631,15 @@ inline Sophus::SE2d weighted_mean_pose(
 }
 
 struct Hypothesis {
+  // Explicit normalized graph mass. Particle weights are conditional on this graph.
+  double log_mass = 0.0;
+  std::shared_ptr<const belugaslam::ValidationMap> validation_map;
+  bool validation_loop = false;
+  std::uint64_t validation_event = 0;
+  std::size_t validation_age = 0;
+  std::string validation_status = "none";
+  double predictive_log_evidence = 0.0;
+
   std::size_t id = 0;
   SubmapList submaps;
   std::size_t optimized_inter_constraints_count = 0;

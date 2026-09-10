@@ -30,6 +30,16 @@
   <arg name="loop_max_fit_translation" default="0.30"/>
   <arg name="loop_max_fit_rotation" default="0.12"/>
   <arg name="loop_branch_prior" default="0.5"/>
+  <arg name="loop_update_mode" default="bayes"/>
+  <arg name="loop_bayes_min_scans" default="10"/>
+  <arg name="loop_bayes_max_scans" default="30"/>
+  <arg name="loop_bayes_accept_probability" default="0.95"/>
+  <arg name="loop_bayes_reject_probability" default="0.05"/>
+  <arg name="loop_bayes_beta" default="0.1"/>
+  <arg name="loop_bayes_min_known_fraction" default="0.35"/>
+  <arg name="loop_geometry_min_compatibility" default="0.01"/>
+  <arg name="hypothesis_prune_mass" default="1e-06"/>
+  <arg name="loop_bayes_diagnostics_path" default=""/>
   <arg name="loop_null_compatibility" default="0.2"/>
   <arg name="loop_max_verifications" default="6"/>
   <arg name="loop_trajectory_samples" default="200"/>
@@ -121,6 +131,16 @@
     <arg name="loop_max_fit_translation" value="$(var loop_max_fit_translation)"/>
     <arg name="loop_max_fit_rotation" value="$(var loop_max_fit_rotation)"/>
     <arg name="loop_branch_prior" value="$(var loop_branch_prior)"/>
+    <arg name="loop_update_mode" value="$(var loop_update_mode)"/>
+    <arg name="loop_bayes_min_scans" value="$(var loop_bayes_min_scans)"/>
+    <arg name="loop_bayes_max_scans" value="$(var loop_bayes_max_scans)"/>
+    <arg name="loop_bayes_accept_probability" value="$(var loop_bayes_accept_probability)"/>
+    <arg name="loop_bayes_reject_probability" value="$(var loop_bayes_reject_probability)"/>
+    <arg name="loop_bayes_beta" value="$(var loop_bayes_beta)"/>
+    <arg name="loop_bayes_min_known_fraction" value="$(var loop_bayes_min_known_fraction)"/>
+    <arg name="loop_geometry_min_compatibility" value="$(var loop_geometry_min_compatibility)"/>
+    <arg name="hypothesis_prune_mass" value="$(var hypothesis_prune_mass)"/>
+    <arg name="loop_bayes_diagnostics_path" value="$(var loop_bayes_diagnostics_path)"/>
     <arg name="loop_null_compatibility" value="$(var loop_null_compatibility)"/>
     <arg name="loop_max_verifications" value="$(var loop_max_verifications)"/>
     <arg name="loop_trajectory_samples" value="$(var loop_trajectory_samples)"/>

@@ -27,7 +27,7 @@ import zipfile
 
 
 def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=True,
-                   particles=30, frontend_pose_mode='frontend', workers=2, replay_rate=1.0):
+                   particles=30, frontend_pose_mode='frontend', workers=2, replay_rate=1.0, loop_update_mode='heuristic'):
     return [
         'ros2', 'launch', 'belugaslam_example', 'intel_dataset_belugaslam.xml',
         'use_sim_time:=true', 'record_bag:=false', f'replay_rate:={replay_rate}',
@@ -37,6 +37,8 @@ def launch_command(run, verifier, max_hypotheses, seed, analytic=True, polish=Tr
         'enable_loop_closure:=true', 'enable_pgo:=true',
         f'pgo_analytic_jacobians:={str(analytic).lower()}',
         f'loop_robust_polish:={str(polish).lower()}',
+        f'loop_update_mode:={loop_update_mode}',
+        f'loop_bayes_diagnostics_path:={run / "bayes.csv"}',
         f'loop_verifier_mode:={verifier}', 'output_selection_mode:=pose_risk',
         f'performance_diagnostics_path:={run / "performance.csv"}',
         f'tracking_diagnostics_path:={run / "tracking.csv"}',
@@ -286,6 +288,7 @@ def record_source_identity(workspace, run):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--loop-update-mode', choices=['bayes', 'heuristic'], default='heuristic')
     parser.add_argument('--verifier', choices=['belief', 'map'], default='belief')
     parser.add_argument('--pgo-analytic-jacobians', action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument('--loop-robust-polish', action=argparse.BooleanOptionalAction, default=True)
@@ -300,6 +303,8 @@ def main():
     parser.add_argument('--drain-seconds', type=float, default=15.0,
                         help='Wait after dataset completion before capture; coverage is checked after shutdown')
     args = parser.parse_args()
+    if args.loop_update_mode == 'bayes' and args.verifier != 'belief':
+        parser.error('Bayesian mode requires --verifier belief; MAP is a legacy heuristic ablation')
     if args.seed <= 0 or args.seed > 2**32 - 1 or not math.isfinite(args.drain_seconds) or args.drain_seconds < 0:
         parser.error('Use a positive uint32 seed and a finite nonnegative drain time')
     if not 5<=args.particles<=10000 or not 1<=args.workers<=64:
@@ -324,7 +329,7 @@ def main():
     run = Path(tempfile.mkdtemp(prefix=prefix, dir=args.output_root.resolve()))
     command = launch_command(run, args.verifier, args.max_hypotheses, args.seed,
                              args.pgo_analytic_jacobians, args.loop_robust_polish,
-                             args.particles, args.frontend_pose_mode, args.workers, args.replay_rate)
+                             args.particles, args.frontend_pose_mode, args.workers, args.replay_rate, args.loop_update_mode)
     meta = {'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'command': command, 'workspace': str(args.workspace), 'captures': {},
             'drain_seconds': args.drain_seconds, 'ground_truth_used': False}
@@ -386,6 +391,7 @@ def main():
     meta['map_validation'] = validate_map(run / 'final_map_raw.yaml')
     meta['optimized_trajectory_validation'] = validate_optimized_trajectory(run)
     meta['parameter_validation'] = validate_parameters(run / 'parameters.yaml', {
+        'loop_update_mode': args.loop_update_mode,
         'loop_verifier_mode': args.verifier, 'output_selection_mode': 'pose_risk',
         'pgo_analytic_jacobians': args.pgo_analytic_jacobians,
         'loop_robust_polish': args.loop_robust_polish,
