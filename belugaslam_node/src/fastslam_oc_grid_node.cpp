@@ -25,7 +25,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("alpha4", 0.05);
     this->declare_parameter("alpha5", 0.1);
     this->declare_parameter("likelihood_scaling_factor", 0.05);
-    this->declare_parameter("submap_num_range_data", 15);
+    this->declare_parameter("submap_num_range_data", 30);
     this->declare_parameter("keyframe_min_translation", 0.15);
     this->declare_parameter("keyframe_min_rotation", 5.0 * Sophus::Constants<double>::pi() / 180.0);
     this->declare_parameter("keyframe_max_time", 5.0);
@@ -63,6 +63,9 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("pgo_max_iterations", 50);
     this->declare_parameter("pgo_analytic_jacobians", true);
     this->declare_parameter("loop_robust_polish", true);
+    this->declare_parameter("loop_refine", false);
+    this->declare_parameter("loop_refine_translation", 0.15);
+    this->declare_parameter("loop_refine_rotation", 0.05);
     this->declare_parameter("random_seed", 42);
     this->declare_parameter("loop_diagnostics_path", "");
 
@@ -252,6 +255,9 @@ void BelugaSLAMNode::setup_slam() {
     params.pgo_max_iterations = get_parameter("pgo_max_iterations").as_int();
     params.pgo_analytic_jacobians = get_parameter("pgo_analytic_jacobians").as_bool();
     params.loop_robust_polish = get_parameter("loop_robust_polish").as_bool();
+    params.loop_refine = get_parameter("loop_refine").as_bool();
+    params.loop_refine_translation = get_parameter("loop_refine_translation").as_double();
+    params.loop_refine_rotation = get_parameter("loop_refine_rotation").as_double();
     if (get_parameter("random_seed").as_int() < 0) throw std::invalid_argument("random_seed must be nonnegative");
     params.random_seed = static_cast<decltype(params.random_seed)>(get_parameter("random_seed").as_int());
     params.loop_diagnostics_path = get_parameter("loop_diagnostics_path").as_string();

@@ -106,13 +106,16 @@ struct FastSLAMParams {
     double likelihood_scaling_factor = 0.05;
 
     /// \brief Cartographer's overlapping submap lifecycle, driven by one number.
-    /// A submap is created, and once it has received `submap_num_range_data` scans the
-    /// next one is created; from then on both receive every scan. The older one is
-    /// finished when it reaches twice that count, at which point the newer one has
-    /// reached the count itself and starts the next submap. Every finished submap has
-    /// therefore seen 2 * submap_num_range_data scans, and consecutive submaps overlap
-    /// by exactly half.
-    int submap_num_range_data = 15;
+    /// The counted unit is a KEYFRAME, not a raw scan: insertion sits behind the
+    /// motion filter, so a scan that fails keyframe_min_translation/rotation/max_time
+    /// never reaches this count. A submap is created, and once it has received
+    /// `submap_num_range_data` keyframes the next one is created; from then on both
+    /// receive every keyframe. The older one is finished when it reaches twice that
+    /// count, at which point the newer one has reached the count itself and starts
+    /// the next submap. Every finished submap has therefore seen
+    /// 2 * submap_num_range_data keyframes, and consecutive submaps overlap by
+    /// exactly half. At the default 30 that is 60 keyframes per finished submap.
+    int submap_num_range_data = 30;
 
     /// Motion filter for BOTH grid insertion and graph nodes, after scan matching.
     double keyframe_min_translation = 0.15;
@@ -153,6 +156,18 @@ struct FastSLAMParams {
     int pgo_max_iterations = 50;
     bool pgo_analytic_jacobians = true;
     bool loop_robust_polish = true;
+
+    /// Continuous refinement of each loop measurement, as Cartographer refines its
+    /// correlative optimum with Ceres before building a constraint. Measured on a
+    /// synthetic L-wall fixture, this recovers between 0 and 6 mm: the beam search
+    /// already samples at 0.015 m, finer than the chamfer field's own accuracy, so
+    /// the residual is the field's discretization bias and not a search artifact.
+    /// Halving map_resolution halves that residual; refining it does not. Off by
+    /// default for that reason, and kept as an explicit ablation. The guard below
+    /// makes it non-worsening under the loop metric, never a silent regression.
+    bool loop_refine = false;
+    double loop_refine_translation = 0.15;  // window around the lattice optimum, meters
+    double loop_refine_rotation = 0.05;     // window around the lattice optimum, radians
     std::uint32_t random_seed = 42;
     std::string loop_diagnostics_path;
     int worker_threads = 2;  // bounded total concurrency, including the caller
@@ -288,6 +303,10 @@ public:
       params_.loop_min_points = std::max<std::size_t>(3, params_.loop_min_points);
       params_.pgo_every_n_nodes = std::max<std::size_t>(1, params_.pgo_every_n_nodes);
       params_.pgo_max_iterations = std::max(1, params_.pgo_max_iterations);
+      for (double value : {params_.loop_refine_translation, params_.loop_refine_rotation}) {
+          if (!std::isfinite(value) || !(value > 0.0))
+              throw std::invalid_argument("Loop refinement windows must be finite and positive");
+      }
       rng_.seed(params_.random_seed == 0 ? std::random_device{}() : params_.random_seed);
       if (!params_.loop_diagnostics_path.empty()) {
           loop_diagnostics_.open(params_.loop_diagnostics_path);
@@ -860,10 +879,48 @@ public:
         }
 
         const auto& best = beam.front();
-        return {best.pose, best.score, best.overlap,
+        auto pose = best.pose;
+        double score = best.score, overlap = best.overlap;
+
+        // Continuous polish of the lattice optimum. The tracking field is the same
+        // chamfer transform as the loop field, but carries analytic derivatives, so
+        // the optimizer can leave the search lattice. The matcher's own accept
+        // thresholds are cleared here because the LOOP field's score and overlap
+        // decide below, on their own terms: the two fields differ in occupancy
+        // threshold and clamping, so a lower cost there is not by itself a better
+        // constraint. Expect small gains; see loop_refine for what actually binds.
+        if (params_.loop_refine) {
+            const auto field = submap.tracking_field();
+            if (field && field->occupied_cells() > 0) {
+                auto options = params_.tracking;
+                options.max_translation = params_.loop_refine_translation;
+                options.max_rotation = params_.loop_refine_rotation;
+                options.prior_translation_sigma = params_.loop_refine_translation;
+                options.prior_rotation_sigma = params_.loop_refine_rotation;
+                options.min_overlap = 0.0;
+                options.min_points = 0;
+                const belugaslam::PoseSample2 prior{best.pose.translation().x(),
+                    best.pose.translation().y(), best.pose.so2().log()};
+                const auto polished = belugaslam::match_tracking_scan(*field, data.returns, prior, options);
+                const auto candidate = Sophus::SE2d{Sophus::SO2d{polished.pose.yaw},
+                    Eigen::Vector2d{polished.pose.x, polished.pose.y}};
+                const auto moved = best.pose.inverse() * candidate;
+                if (moved.translation().norm() > 1.0e-9 || std::abs(moved.so2().log()) > 1.0e-9) {
+                    // Never accept a refinement the loop metric does not endorse.
+                    // The two fields differ in occupancy threshold and clamping, so
+                    // a lower cost there is not automatically a better constraint.
+                    const auto rescored = score_scan_in_submap(data, submap, candidate, cached);
+                    if (rescored.score >= score && rescored.overlap >= overlap) {
+                        pose = candidate; score = rescored.score; overlap = rescored.overlap;
+                    }
+                }
+            }
+        }
+
+        return {pose, score, overlap,
                 data.returns.size() >= params_.loop_min_points &&
-                    best.score >= params_.loop_min_score &&
-                    best.overlap >= params_.loop_min_overlap};
+                    score >= params_.loop_min_score &&
+                    overlap >= params_.loop_min_overlap};
     }
 
     /// Update the occupancy grid map of each hypothesis based on the transformed measurement.
@@ -1697,6 +1754,11 @@ public:
             }
             std::stable_sort(retrieved.begin(), retrieved.end(), [](const auto& a, const auto& b) { return a.rank < b.rank; });
             if (retrieved.size() > params_.loop_max_candidates) retrieved.resize(params_.loop_max_candidates);
+            // tracking_field() builds a mutable member lazily, so it must be warmed
+            // serially before the read-only parallel phase, exactly as the loop cache
+            // is warmed by prepare_loop_matching().
+            if (params_.loop_refine)
+                for (const auto& entry : retrieved) (void)entry.map->tracking_field();
             std::vector<ScanMatchResult> matches(retrieved.size());
             parallel_indices(retrieved.size(), [&](std::size_t i) {
                 const auto& entry = retrieved[i];
@@ -1728,6 +1790,15 @@ public:
                 if (!match.valid) continue;
                 candidates.push_back({retrieved[i].map->anchor_sequence(), query->sequence, (*h_it)->id,
                     match.score, match.overlap, match.T_submap_node});
+            }
+            // A retired field is rebuildable and otherwise accumulates one float
+            // array per frozen submap, which is precisely what the cache pruning
+            // releases. A loop event must not defeat that policy.
+            if (params_.loop_refine) {
+                for (const auto& entry : retrieved) {
+                    if (!graph.has_matching_submap || entry.map->id() != graph.matching_submap_id)
+                        entry.map->release_tracking_field();
+                }
             }
         }
         std::stable_sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {

@@ -109,7 +109,7 @@ def generate_launch_description():
     declare_alpha4 = DeclareLaunchArgument('alpha4', default_value='0.05', description='Translation noise from rotation')
     declare_alpha5 = DeclareLaunchArgument('alpha5', default_value='0.1', description='Deprecated; use motion_distance_threshold (alpha1-alpha4 are the noise coefficients)')
     declare_likelihood_scaling_factor = DeclareLaunchArgument('likelihood_scaling_factor', default_value='0.05', description='Scaling factor for scan matching likelihood')
-    declare_submap_num_range_data = DeclareLaunchArgument('submap_num_range_data', default_value='15', description='Accepted insertions before starting the next submap; frozen at twice this count')
+    declare_submap_num_range_data = DeclareLaunchArgument('submap_num_range_data', default_value='30', description='Keyframes accepted into a submap before the next one starts; the submap is frozen at twice this count, so it ends up with 60 keyframes and overlaps its neighbour by 30')
     declare_keyframe_min_translation = DeclareLaunchArgument('keyframe_min_translation', default_value='0.15', description='Insertion motion filter translation threshold in meters')
     declare_keyframe_min_rotation = DeclareLaunchArgument('keyframe_min_rotation', default_value='0.0872665', description='Insertion motion filter rotation threshold in radians')
     declare_keyframe_max_time = DeclareLaunchArgument('keyframe_max_time', default_value='5.0', description='Maximum scan timestamp interval between insertions in seconds')
@@ -147,6 +147,9 @@ def generate_launch_description():
     declare_pgo_max_iterations = DeclareLaunchArgument('pgo_max_iterations', default_value='50', description='Maximum Ceres iterations per PGO solve')
     declare_pgo_analytic_jacobians = DeclareLaunchArgument('pgo_analytic_jacobians', default_value='true', description='Use exact analytic SE2 residual derivatives; false restores AutoDiff')
     declare_loop_robust_polish = DeclareLaunchArgument('loop_robust_polish', default_value='true', description='Check loop trials under the same robust objective used after installation')
+    declare_loop_refine = DeclareLaunchArgument('loop_refine', default_value='false', choices=['true', 'false'], description='Refine each loop measurement continuously after the lattice search; measured gain is 0-6 mm because the chamfer field discretization dominates, so this is an ablation, not a default')
+    declare_loop_refine_translation = DeclareLaunchArgument('loop_refine_translation', default_value='0.15', description='Refinement translation window around the lattice optimum in meters')
+    declare_loop_refine_rotation = DeclareLaunchArgument('loop_refine_rotation', default_value='0.05', description='Refinement rotation window around the lattice optimum in radians')
     declare_random_seed = DeclareLaunchArgument('random_seed', default_value='42', description='Reproducible core seed; zero requests random seeding')
     declare_loop_diagnostics_path = DeclareLaunchArgument('loop_diagnostics_path', default_value='', description='Optional CSV file for per-hypothesis verification scores')
 
@@ -257,6 +260,9 @@ def generate_launch_description():
             "pgo_max_iterations": ParameterValue(LaunchConfiguration('pgo_max_iterations'), value_type=int),
             "pgo_analytic_jacobians": ParameterValue(LaunchConfiguration('pgo_analytic_jacobians'), value_type=bool),
             "loop_robust_polish": ParameterValue(LaunchConfiguration('loop_robust_polish'), value_type=bool),
+            "loop_refine": ParameterValue(LaunchConfiguration('loop_refine'), value_type=bool),
+            "loop_refine_translation": LaunchConfiguration('loop_refine_translation'),
+            "loop_refine_rotation": LaunchConfiguration('loop_refine_rotation'),
             "random_seed": ParameterValue(LaunchConfiguration('random_seed'), value_type=int),
             "loop_diagnostics_path": ParameterValue(LaunchConfiguration('loop_diagnostics_path'), value_type=str),
 
@@ -366,6 +372,9 @@ def generate_launch_description():
     declare_pgo_max_iterations,
     declare_pgo_analytic_jacobians,
     declare_loop_robust_polish,
+    declare_loop_refine,
+    declare_loop_refine_translation,
+    declare_loop_refine_rotation,
     declare_random_seed,
     declare_loop_diagnostics_path,
     declare_worker_threads,
