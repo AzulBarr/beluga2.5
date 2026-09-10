@@ -1,0 +1,57 @@
+{
+  "revision": "steps_1_and_2_probability_ceres_odometry_prior",
+  "validated_at_utc": "2026-09-10T18:23:53.711865+00:00",
+  "defaults": {
+    "tracking_matcher": "distance",
+    "tracking_prior_mode": "fixed"
+  },
+  "enable_steps_1_and_2": {
+    "tracking_matcher": "probability_ceres",
+    "tracking_prior_mode": "odometry"
+  },
+  "standalone_cpp": {
+    "passed": 13,
+    "new_prior_checks": 106,
+    "nonlinear_motion_samples": 80000,
+    "covariance_relative_error": 0.0132856,
+    "log": "adaptive_standalone_tests.log"
+  },
+  "python_tests": {
+    "passed": 76,
+    "log": "adaptive_standalone_tests.log"
+  },
+  "native_ceres_kernel": {
+    "passed": 9,
+    "solver": "pyceres 2.6, native Ceres DENSE_QR",
+    "production_cpp_residual_and_initializer_exercised": true,
+    "cpp_ceres_adapter_exercised": false,
+    "log": "adaptive_native_ceres.json",
+    "step_1_fixed_prior_max_pose_change": 0.0
+  },
+  "sanitizers": {
+    "address": true,
+    "undefined_behavior": true,
+    "leaks": false,
+    "leak_check_limitation": "LeakSanitizer cannot inspect /proc in this environment; detect_leaks=0",
+    "log": "adaptive_sanitizers.log"
+  },
+  "source_checks": {
+    "python_ast": true,
+    "launch_xml_forwarding": true,
+    "diff_whitespace": true
+  },
+  "full_core_build_verified": false,
+  "cpp_ceres_adapter_build_verified": false,
+  "unavailable_dependencies": "ROS 2 ament_cmake and complete C++ dependencies including Ceres headers",
+  "dependency_failure_logs": [
+    "probability_full_build_attempt.log",
+    "probability_cpp_ceres_build_attempt.log"
+  ],
+  "new_unexecuted_core_gtests": 3,
+  "extended_unexecuted_cpp_test": "ceres_probability_tracking_test",
+  "covariance_model": "One-step F D F^T + G Q G^T, fixed local-pose uncertainty floor D, differential-drive motion noise Q",
+  "recursive_pose_covariance_filter": false,
+  "full_dataset_replay_performed": false,
+  "slam_rmse_improvement_established": false,
+  "step_3_sliding_window_implemented": false
+}

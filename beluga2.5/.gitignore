@@ -1,0 +1,7 @@
+*.bag
+*.db3
+perf.data
+.vscode/
+install/
+log/
+__pycache__/

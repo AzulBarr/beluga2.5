@@ -1,0 +1,237 @@
+<launch>
+  <arg name="use_sim_time" default="true" /> 
+  <arg name="bag_path" default="src/beluga2.5/belugaslam_example/bags/intel" />
+  <arg name="slam_prefix" default="" />
+  <arg name="replay_rate" default="1.0" />
+  <arg name="replay_start_delay" default="2.0" />
+  <arg name="laser_angle_min_deg" default="-90.0" />
+  <arg name="laser_angle_increment_deg" default="1.0" />
+  <arg name="rviz_config_file" default="$(find-pkg-share belugaslam_example)/RVIZFiles/config.rviz"/>
+  <arg name="min_particles" default="5"/>
+  <arg name="max_particles" default="30"/>
+  <arg name="record_bag" default="false"/>
+  <arg name="submap_num_range_data" default="15"/>
+  <arg name="keyframe_min_translation" default="0.15"/>
+  <arg name="keyframe_min_rotation" default="0.0872665"/>
+  <arg name="keyframe_max_time" default="5.0"/>
+
+  <arg name="enable_loop_closure" default="true"/>
+  <arg name="enable_pgo" default="true"/>
+  <arg name="loop_verifier_mode" default="belief"/>
+  <arg name="output_selection_mode" default="map"/>
+  <arg name="frontend_pose_mode" default="frontend"/>
+  <arg name="optimized_trajectory_path" default=""/>
+  <arg name="proposal_pose_min_ess" default="5.0"/>
+  <arg name="proposal_pose_min_local_mass" default="0.90"/>
+  <arg name="proposal_pose_max_log_drop" default="0.02"/>
+  <arg name="loop_belief_threshold" default="0.25"/>
+  <arg name="loop_translation_scale" default="0.30"/>
+  <arg name="loop_rotation_scale" default="0.10"/>
+  <arg name="loop_max_fit_translation" default="0.30"/>
+  <arg name="loop_max_fit_rotation" default="0.12"/>
+  <arg name="loop_branch_prior" default="0.5"/>
+  <arg name="loop_update_mode" default="bayes"/>
+  <arg name="loop_bayes_min_scans" default="10"/>
+  <arg name="loop_bayes_max_scans" default="30"/>
+  <arg name="loop_bayes_accept_probability" default="0.95"/>
+  <arg name="loop_bayes_reject_probability" default="0.05"/>
+  <arg name="loop_bayes_beta" default="0.1"/>
+  <arg name="loop_bayes_min_known_fraction" default="0.35"/>
+  <arg name="loop_geometry_min_compatibility" default="0.01"/>
+  <arg name="hypothesis_prune_mass" default="1e-06"/>
+  <arg name="loop_bayes_diagnostics_path" default=""/>
+  <arg name="loop_null_compatibility" default="0.2"/>
+  <arg name="loop_max_verifications" default="6"/>
+  <arg name="loop_trajectory_samples" default="200"/>
+  <arg name="loop_min_points" default="30"/>
+  <arg name="pgo_every_n_nodes" default="20"/>
+  <arg name="pgo_max_iterations" default="50"/>
+  <arg name="pgo_analytic_jacobians" default="true"/>
+  <arg name="loop_robust_polish" default="true"/>
+  <arg name="random_seed" default="42"/>
+  <arg name="loop_diagnostics_path" default=""/>
+  <arg name="loop_recent_submaps" default="5"/>
+  <arg name="loop_max_candidates" default="6"/>
+  <arg name="loop_max_branches" default="2"/>
+  <arg name="max_hypotheses" default="4"/>
+  <arg name="loop_candidate_distance" default="10.0"/>
+  <arg name="loop_search_translation" default="3.0"/>
+  <arg name="loop_search_rotation" default="0.7"/>
+  <arg name="loop_min_score" default="0.55"/>
+  <arg name="loop_min_overlap" default="0.35"/>
+
+  <arg name="worker_threads" default="2"/>
+  <arg name="verbose_backend" default="false"/>
+  <arg name="map_publish_period" default="1.0"/>
+  <arg name="visualization_publish_period" default="0.2"/>
+  <arg name="trajectory_max_poses" default="5000"/>
+  <arg name="scan_queue_depth" default="50"/>
+  <arg name="scan_reliable" default="false"/>
+  <arg name="performance_diagnostics_path" default=""/>
+  <arg name="final_trajectory_path" default=""/>
+
+  <arg name="tracking_prior_mode" default="fixed"/>
+  <arg name="tracking_odom_translation_sigma" default="0.10"/>
+  <arg name="tracking_odom_rotation_sigma" default="0.05"/>
+  <arg name="tracking_matcher" default="distance"/>
+  <arg name="tracking_occupied_space_weight" default="5.0"/>
+  <arg name="tracking_voxel_size" default="0.05"/>
+  <arg name="tracking_sigma" default="0.15"/>
+  <arg name="tracking_outlier_probability" default="0.05"/>
+  <arg name="tracking_translation_prior_sigma" default="0.50"/>
+  <arg name="tracking_rotation_prior_sigma" default="0.20"/>
+  <arg name="tracking_max_translation" default="0.50"/>
+  <arg name="tracking_max_rotation" default="0.25"/>
+  <arg name="tracking_min_overlap" default="0.35"/>
+  <arg name="tracking_inlier_distance" default="0.20"/>
+  <arg name="tracking_effective_beams" default="20.0"/>
+  <arg name="tracking_prior_information_scale" default="1.0"/>
+  <arg name="tracking_min_points" default="12"/>
+  <arg name="tracking_max_points" default="180"/>
+  <arg name="tracking_max_iterations" default="20"/>
+  <arg name="motion_proposal_samples" default="8"/>
+  <arg name="map_resolution" default="0.05"/>
+  <arg name="split_min_mass" default="0.02"/>
+  <arg name="split_min_particles" default="2"/>
+  <arg name="split_persistence" default="3"/>
+  <arg name="loop_validation_scans" default="3"/>
+  <arg name="tracking_diagnostics_path" default=""/>
+  <arg name="motion_distance_threshold" default="0.01"/>
+  <arg name="deskew_scan" default="true"/>
+  <arg name="tracking_recovery" default="true"/>
+  <arg name="recovery_translation_window" default="1.0"/>
+  <arg name="recovery_rotation_window" default="0.35"/>
+  <arg name="recovery_min_overlap" default="0.55"/>
+  <arg name="recovery_ambiguity_margin" default="0.05"/>
+  <arg name="recovery_after_failures" default="1"/>
+  <arg name="recovery_interval" default="3"/>
+  <arg name="recovery_confirmations" default="2"/>
+  <arg name="loop_cache_budget_mb" default="64"/>
+
+
+  <include file="$(find-pkg-share belugaslam_node)/launch/fastslam_oc_grid.launch.py">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="slam_prefix" value="$(var slam_prefix)"/>
+    <arg name="odom_frame" value="odom_combined"/>
+    <arg name="base_frame" value="base_footprint"/>
+    <arg name="scan_topic" value="/base_scan"/>
+    <arg name="range_max" value="30.0"/>
+    <arg name="min_particles" value="$(var min_particles)"/>
+    <arg name="max_particles" value="$(var max_particles)"/>
+    <arg name="submap_num_range_data" value="$(var submap_num_range_data)"/>
+    <arg name="keyframe_min_translation" value="$(var keyframe_min_translation)"/>
+    <arg name="keyframe_min_rotation" value="$(var keyframe_min_rotation)"/>
+    <arg name="keyframe_max_time" value="$(var keyframe_max_time)"/>
+    <arg name="enable_loop_closure" value="$(var enable_loop_closure)"/>
+    <arg name="enable_pgo" value="$(var enable_pgo)"/>
+    <arg name="loop_verifier_mode" value="$(var loop_verifier_mode)"/>
+    <arg name="output_selection_mode" value="$(var output_selection_mode)"/>
+    <arg name="frontend_pose_mode" value="$(var frontend_pose_mode)"/>
+    <arg name="optimized_trajectory_path" value="$(var optimized_trajectory_path)"/>
+    <arg name="proposal_pose_min_ess" value="$(var proposal_pose_min_ess)"/>
+    <arg name="proposal_pose_min_local_mass" value="$(var proposal_pose_min_local_mass)"/>
+    <arg name="proposal_pose_max_log_drop" value="$(var proposal_pose_max_log_drop)"/>
+    <arg name="loop_belief_threshold" value="$(var loop_belief_threshold)"/>
+    <arg name="loop_translation_scale" value="$(var loop_translation_scale)"/>
+    <arg name="loop_rotation_scale" value="$(var loop_rotation_scale)"/>
+    <arg name="loop_max_fit_translation" value="$(var loop_max_fit_translation)"/>
+    <arg name="loop_max_fit_rotation" value="$(var loop_max_fit_rotation)"/>
+    <arg name="loop_branch_prior" value="$(var loop_branch_prior)"/>
+    <arg name="loop_update_mode" value="$(var loop_update_mode)"/>
+    <arg name="loop_bayes_min_scans" value="$(var loop_bayes_min_scans)"/>
+    <arg name="loop_bayes_max_scans" value="$(var loop_bayes_max_scans)"/>
+    <arg name="loop_bayes_accept_probability" value="$(var loop_bayes_accept_probability)"/>
+    <arg name="loop_bayes_reject_probability" value="$(var loop_bayes_reject_probability)"/>
+    <arg name="loop_bayes_beta" value="$(var loop_bayes_beta)"/>
+    <arg name="loop_bayes_min_known_fraction" value="$(var loop_bayes_min_known_fraction)"/>
+    <arg name="loop_geometry_min_compatibility" value="$(var loop_geometry_min_compatibility)"/>
+    <arg name="hypothesis_prune_mass" value="$(var hypothesis_prune_mass)"/>
+    <arg name="loop_bayes_diagnostics_path" value="$(var loop_bayes_diagnostics_path)"/>
+    <arg name="loop_null_compatibility" value="$(var loop_null_compatibility)"/>
+    <arg name="loop_max_verifications" value="$(var loop_max_verifications)"/>
+    <arg name="loop_trajectory_samples" value="$(var loop_trajectory_samples)"/>
+    <arg name="loop_min_points" value="$(var loop_min_points)"/>
+    <arg name="pgo_every_n_nodes" value="$(var pgo_every_n_nodes)"/>
+    <arg name="pgo_max_iterations" value="$(var pgo_max_iterations)"/>
+    <arg name="pgo_analytic_jacobians" value="$(var pgo_analytic_jacobians)"/>
+    <arg name="loop_robust_polish" value="$(var loop_robust_polish)"/>
+    <arg name="random_seed" value="$(var random_seed)"/>
+    <arg name="loop_diagnostics_path" value="$(var loop_diagnostics_path)"/>
+    <arg name="loop_recent_submaps" value="$(var loop_recent_submaps)"/>
+    <arg name="loop_max_candidates" value="$(var loop_max_candidates)"/>
+    <arg name="loop_max_branches" value="$(var loop_max_branches)"/>
+    <arg name="max_hypotheses" value="$(var max_hypotheses)"/>
+    <arg name="loop_candidate_distance" value="$(var loop_candidate_distance)"/>
+    <arg name="loop_search_translation" value="$(var loop_search_translation)"/>
+    <arg name="loop_search_rotation" value="$(var loop_search_rotation)"/>
+    <arg name="loop_min_score" value="$(var loop_min_score)"/>
+    <arg name="loop_min_overlap" value="$(var loop_min_overlap)"/>
+    <arg name="worker_threads" value="$(var worker_threads)"/>
+    <arg name="verbose_backend" value="$(var verbose_backend)"/>
+    <arg name="map_publish_period" value="$(var map_publish_period)"/>
+    <arg name="visualization_publish_period" value="$(var visualization_publish_period)"/>
+    <arg name="trajectory_max_poses" value="$(var trajectory_max_poses)"/>
+    <arg name="scan_queue_depth" value="$(var scan_queue_depth)"/>
+    <arg name="scan_reliable" value="$(var scan_reliable)"/>
+    <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
+    <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
+    <arg name="tracking_prior_mode" value="$(var tracking_prior_mode)"/>
+    <arg name="tracking_odom_translation_sigma" value="$(var tracking_odom_translation_sigma)"/>
+    <arg name="tracking_odom_rotation_sigma" value="$(var tracking_odom_rotation_sigma)"/>
+    <arg name="tracking_matcher" value="$(var tracking_matcher)"/>
+    <arg name="tracking_occupied_space_weight" value="$(var tracking_occupied_space_weight)"/>
+    <arg name="tracking_voxel_size" value="$(var tracking_voxel_size)"/>
+    <arg name="tracking_sigma" value="$(var tracking_sigma)"/>
+    <arg name="tracking_outlier_probability" value="$(var tracking_outlier_probability)"/>
+    <arg name="tracking_translation_prior_sigma" value="$(var tracking_translation_prior_sigma)"/>
+    <arg name="tracking_rotation_prior_sigma" value="$(var tracking_rotation_prior_sigma)"/>
+    <arg name="tracking_max_translation" value="$(var tracking_max_translation)"/>
+    <arg name="tracking_max_rotation" value="$(var tracking_max_rotation)"/>
+    <arg name="tracking_min_overlap" value="$(var tracking_min_overlap)"/>
+    <arg name="tracking_inlier_distance" value="$(var tracking_inlier_distance)"/>
+    <arg name="tracking_effective_beams" value="$(var tracking_effective_beams)"/>
+    <arg name="tracking_prior_information_scale" value="$(var tracking_prior_information_scale)"/>
+    <arg name="tracking_min_points" value="$(var tracking_min_points)"/>
+    <arg name="tracking_max_points" value="$(var tracking_max_points)"/>
+    <arg name="tracking_max_iterations" value="$(var tracking_max_iterations)"/>
+    <arg name="motion_proposal_samples" value="$(var motion_proposal_samples)"/>
+    <arg name="map_resolution" value="$(var map_resolution)"/>
+    <arg name="split_min_mass" value="$(var split_min_mass)"/>
+    <arg name="split_min_particles" value="$(var split_min_particles)"/>
+    <arg name="split_persistence" value="$(var split_persistence)"/>
+    <arg name="loop_validation_scans" value="$(var loop_validation_scans)"/>
+    <arg name="tracking_diagnostics_path" value="$(var tracking_diagnostics_path)"/>
+    <arg name="motion_distance_threshold" value="$(var motion_distance_threshold)"/>
+    <arg name="deskew_scan" value="$(var deskew_scan)"/>
+    <arg name="tracking_recovery" value="$(var tracking_recovery)"/>
+    <arg name="recovery_translation_window" value="$(var recovery_translation_window)"/>
+    <arg name="recovery_rotation_window" value="$(var recovery_rotation_window)"/>
+    <arg name="recovery_min_overlap" value="$(var recovery_min_overlap)"/>
+    <arg name="recovery_ambiguity_margin" value="$(var recovery_ambiguity_margin)"/>
+    <arg name="recovery_after_failures" value="$(var recovery_after_failures)"/>
+    <arg name="recovery_interval" value="$(var recovery_interval)"/>
+    <arg name="recovery_confirmations" value="$(var recovery_confirmations)"/>
+    <arg name="loop_cache_budget_mb" value="$(var loop_cache_budget_mb)"/>
+
+  </include>
+
+  <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(var rviz_config_file)">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <group if="$(var record_bag)">
+    <executable 
+      cmd="ros2 bag record 
+        /best_pose 
+        -o bag_output_intel" 
+      output="screen"/>
+  </group>
+
+  <group if="$(eval '\'$(var bag_path)\' != \'\'')">
+    <executable
+      cmd="$(var bag_path)/intel_clf_to_ros2.py --ros-args -p replay_rate:=$(var replay_rate) -p start_delay:=$(var replay_start_delay) -p laser_angle_min_deg:=$(var laser_angle_min_deg) -p laser_angle_increment_deg:=$(var laser_angle_increment_deg)"
+      output="screen"
+      on_exit="shutdown" />
+  </group>
+
+</launch>

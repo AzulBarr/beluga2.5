@@ -1,0 +1,51 @@
+{
+  "revision": "probability_ceres_frontend",
+  "validated_at_utc": "2026-09-10T17:27:48.845108+00:00",
+  "default_tracking_matcher": "distance",
+  "standalone_cpp": {
+    "passed": 12,
+    "new_probability_checks": 556,
+    "log": "probability_standalone_tests.log"
+  },
+  "python_tests": {
+    "passed": 72,
+    "log": "probability_standalone_tests.log"
+  },
+  "native_ceres_kernel": {
+    "passed": 5,
+    "solver": "pyceres 2.6, native Ceres DENSE_QR",
+    "log": "probability_native_ceres.json",
+    "cpp_adapter_exercised": false,
+    "production_residual_kernel_exercised": true
+  },
+  "sanitizers": {
+    "address": true,
+    "undefined_behavior": true,
+    "log": "probability_sanitizers.log",
+    "leaks": false,
+    "leak_check_limitation": "LeakSanitizer cannot inspect /proc in this environment; rerun ASan/UBSan with detect_leaks=0",
+    "leak_check_log": "probability_leaks_unavailable.log"
+  },
+  "source_checks": {
+    "python_ast": true,
+    "launch_xml_forwarding": true,
+    "diff_whitespace": true
+  },
+  "full_core_build": {
+    "passed": false,
+    "reason": "ament_cmake (ROS 2) unavailable",
+    "log": "probability_full_build_attempt.log"
+  },
+  "cpp_ceres_adapter_build": {
+    "passed": false,
+    "reason": "Ceres C++ headers unavailable",
+    "log": "probability_cpp_ceres_build_attempt.log"
+  },
+  "added_unexecuted_tests": [
+    "ceres_probability_tracking_test (native C++ adapter)",
+    "probability_frontend_integration_test (3 GTests)"
+  ],
+  "full_dataset_replay_performed": false,
+  "slam_rmse_improvement_established": false,
+  "cartographer_superiority_established": false
+}

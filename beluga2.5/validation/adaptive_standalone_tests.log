@@ -1,0 +1,25 @@
+PASS: 106 odometry prior checks; nonlinear covariance relative error=0.0132856
+PASS: 556 probability interpolation/residual/filter checks
+hierarchical_bayes_test: 51 checks passed
+Known-map registration: 40 fixtures, XY RMSE=0.00231819 m, max=0.00314106 m
+PASS: known-map accuracy regression (not end-to-end SLAM)
+PASS: 12 motion-filter checks
+PASS: 47 loop-belief, alignment and particle-mass checks
+PASS: 315 output-selection checks
+PASS: 2000 residual/Jacobian fixtures, max residual error=3.41061e-13, max finite-difference error=3.03873e-07
+PASS: 36 proposal-pose checks; 2000 Gaussian cloud trials
+Monte Carlo mean-estimation RMSE (not SLAM): N30=0.03404058358 N300=0.01083763624 selected-only N300=0.02568738118
+Recovered pose 0.176033 -0.108544 0.0359229 overlap 1
+PASS: 24 robust tracking/proposal checks
+Normal pose 0.0436278 -0.219325 overlap 0.465625; recovery 0.74451 -0.228453 0.100547 accepted 1 in 6.45395 ms
+PASS: 14 late-run recovery/cache checks
+2400 complete-grid equivalence checks passed
+Coarse-gap synthetic translation error: previous=0.0497467 new=0
+Default search score evaluations: 3315
+12 synthetic wall cases: max translation error=0.00251946 elapsed_ms=81.4486
+PASS: 50 loop search/evidence checks
+............................................................................
+----------------------------------------------------------------------
+Ran 76 tests in 1.055s
+
+OK

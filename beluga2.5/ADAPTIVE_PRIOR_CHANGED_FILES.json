@@ -1,0 +1,175 @@
+{
+  "baseline_archive": "beluga2.5_probability_ceres.zip",
+  "baseline_sha256": "11e1f7a62b981f47c3e4a6ea5cefdda16eef242b7603a2b7c93edaec4c01dfe9",
+  "changed_files": [
+    {
+      "path": "ADAPTIVE_PRIOR.md",
+      "status": "added",
+      "sha256": "ea49c685df6916ad8c406e66956f14dc5b584c3b161d7875a074af2d1cbf2023",
+      "previous_sha256": null
+    },
+    {
+      "path": "PROBABILITY_MATCHER.md",
+      "status": "modified",
+      "sha256": "b6e4a4e3d0ac0b7b1a1a03d5ac6cedb690255e61897899265c453cd64091d44d",
+      "previous_sha256": "2529746edbccb7894803e06f51e46503218ed1f6846bcf0dd90988dd47e07e57"
+    },
+    {
+      "path": "README.md",
+      "status": "modified",
+      "sha256": "71a04355b177650a6cf51937630becb6d86a64c74fd5f91ca7a3d0d578a9470e",
+      "previous_sha256": "a19ad28d55103af8ccaf1761c4c7b307dccc7abc8e1f21d348ea4545809d66b4"
+    },
+    {
+      "path": "belugaslam_core/CMakeLists.txt",
+      "status": "modified",
+      "sha256": "6e99b11d3eb098eaeda6d1f14cccb45463551d5bf0f7b536a746b359c2d3fb91",
+      "previous_sha256": "6008d28cf4bd6836a7d63451c5c285c54edc86dc8e3e475c1e39bcfc708b6873"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/ceres_probability_tracking.hpp",
+      "status": "modified",
+      "sha256": "35b2678cc8fa17e4815e10068d0705238f0f02b7c7428e2ae6bd603b0fb8a6b6",
+      "previous_sha256": "424a92c7b0ab7233d6468f8639d1473329b8fe3ba3c7dad5faff8073a60b74f2"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/fastslam_oc_grid_core.hpp",
+      "status": "modified",
+      "sha256": "a187464a0149e1bf907c7fcdd2e1b07cd63bacf34eff6dfadb490e59bf46730d",
+      "previous_sha256": "749dc922dde4d695cc3899d6c4c200957da8d731be1c5013173392595d5e3ed3"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/odometry_tracking_prior.hpp",
+      "status": "added",
+      "sha256": "596ed60846a5215c7f03037be1c86add1f97a9851d2edc902e19b0075507edab",
+      "previous_sha256": null
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/probability_matching.hpp",
+      "status": "modified",
+      "sha256": "3ec93f2b003830c3c3c98e15dcfd8988fad0e09be977da2dd645c82256610dc1",
+      "previous_sha256": "a3a6a0716196376145d8c25c232e06b74c73c17fd47dca59f9cc98ea6b707145"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/robust_tracking.hpp",
+      "status": "modified",
+      "sha256": "0cda21cf19f5c360741e5357c62de1346eed1f5b388be1c8c6755afe2d618c92",
+      "previous_sha256": "a524b86a1cde7ff52b297f940fdeda677da5344f748549110e46bd5bb5ce6ad2"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/submap.hpp",
+      "status": "modified",
+      "sha256": "6dc89b14ee9b1fda8b3c0ee30ac27190772069ba067132313745758e86741185",
+      "previous_sha256": "f6af0df6321116d7664e03ee560873f15ec812196c34773942dcfbfa8b7fc9e9"
+    },
+    {
+      "path": "belugaslam_core/test/ceres_probability_tracking_test.cpp",
+      "status": "modified",
+      "sha256": "775e2d7a3bc517afdfae1148d013a02eba70013af292d09e591db53947bb8fff",
+      "previous_sha256": "0f70abf2952b8e8f4254ffa7e2cebb0e788cc2ec534815058dd68b7369ffe823"
+    },
+    {
+      "path": "belugaslam_core/test/odometry_tracking_prior_test.cpp",
+      "status": "added",
+      "sha256": "c711c4e668c57f479db6aba8f66c1f44e1fdb770142273b3d38922d7bb2a3ecc",
+      "previous_sha256": null
+    },
+    {
+      "path": "belugaslam_core/test/probability_frontend_integration_test.cpp",
+      "status": "modified",
+      "sha256": "29d5e5b3d0ecdc7e139519b9a5577bda127603ae502b8be08b2906a16e57e656",
+      "previous_sha256": "7d58268496342a03f36d12ce7aa948718516f762a6dcd317980dee5978dfe2bf"
+    },
+    {
+      "path": "belugaslam_example/example/launch/intel_dataset_belugaslam.xml",
+      "status": "modified",
+      "sha256": "28adb3de599774cb2ef4257adaff544fe75600527d8ab99eed53cef8b0c4600a",
+      "previous_sha256": "39b98bc2eba8885ff9b0069a33a6d49c7785f31e7716ebf6f69d124bf15098a5"
+    },
+    {
+      "path": "belugaslam_node/launch/fastslam_oc_grid.launch.py",
+      "status": "modified",
+      "sha256": "d7732209e175c8046462c5a7b6c40e15dd655a22adcbea35952bc525623136ca",
+      "previous_sha256": "b6d08c81578928028a06dbe3b2e52b77b3f22f1226f75dd563595a17d79028c4"
+    },
+    {
+      "path": "belugaslam_node/src/fastslam_oc_grid_node.cpp",
+      "status": "modified",
+      "sha256": "89c0e156491774c44562de6e6c8049d3aa9a64ae0b023184a8d72368c022e7f7",
+      "previous_sha256": "de911c3dc18da274e901a8e3bd40b2ae66b91289094758dd7b641a4a0b87d364"
+    },
+    {
+      "path": "tools/intel_accuracy_replay.cpp",
+      "status": "modified",
+      "sha256": "626b708224297441b166f0fd3fa40bf5bda99bb8ec368a62fb7d357856411336",
+      "previous_sha256": "52d8cad095d001e7d5f4c73b33e98e0006ab419bf2ed7c53050099f7103d2f2c"
+    },
+    {
+      "path": "tools/probability_kernel_c_api.cpp",
+      "status": "modified",
+      "sha256": "c69da0f1897a6276d7a9af77274f9b243ffcee48984d04498181f932316b7b90",
+      "previous_sha256": "43213cfd8ca79943e86393baa2a8bac7516bc53582545f632cd774c94397ee35"
+    },
+    {
+      "path": "tools/run_accuracy_replay.py",
+      "status": "modified",
+      "sha256": "4e9a6d03e092a78614637248a8a6ecbbb81d99ac3ca4e8e3a08354a4eb7a563b",
+      "previous_sha256": "ea5c3c8b8338f5b3de1f9b12d2c2a8f8756a7f4a8aa5a1fb164bbfdc223cc48b"
+    },
+    {
+      "path": "tools/run_beluga_comparison.py",
+      "status": "modified",
+      "sha256": "790aaff7574ef7eecd6aa462a87c421fdefecf68fda13a32913ea802354b4a66",
+      "previous_sha256": "ba938abcdaed2468a719d6e28d4764d64ef5a57f85bdec3f6ea80616e2178f7a"
+    },
+    {
+      "path": "tools/run_standalone_tests.sh",
+      "status": "modified",
+      "sha256": "266a517242fa83f120274053d569089eb1a19b4e447dea30750d976eff431ee6",
+      "previous_sha256": "2dc644591464258d05365a68700d99eab52bddb34d6e7813c0fee71012813338"
+    },
+    {
+      "path": "tools/test_probability_replay.py",
+      "status": "modified",
+      "sha256": "ef198c24bcf7e9b7ba6a014b89c05bb52bcf2c68b1b504c8968e0ae3cda65960",
+      "previous_sha256": "8ea1300037ae90182519b5597c2552941190b3310b6f284ee9c3870c039835e7"
+    },
+    {
+      "path": "tools/test_runner.py",
+      "status": "modified",
+      "sha256": "0a71733bf2d5c482f499ad3a9c2e86d24215377ca85e5ae45b884166f2e8df22",
+      "previous_sha256": "c477bb749ccbf911954181a11fe272084874a6cfe85993d7fc2a028497917430"
+    },
+    {
+      "path": "tools/validate_probability_ceres.py",
+      "status": "modified",
+      "sha256": "2bf52ae7bebe8265f0d4fd7976ee4737b1f786e0597899dcde177c1d7f5fcb1e",
+      "previous_sha256": "c8e093868ab116bf8d6844ad843885403940c78ad9f541a2a814863af4808b54"
+    },
+    {
+      "path": "validation/ADAPTIVE_PRIOR_VALIDATION.json",
+      "status": "added",
+      "sha256": "432e1eb84abe123d8a9092e45acd127852d3e16fa2f106193e51ec584fbf75b0",
+      "previous_sha256": null
+    },
+    {
+      "path": "validation/adaptive_native_ceres.json",
+      "status": "added",
+      "sha256": "df75cc243c46ef289866d1b4bc19de83062f9d43dffa3a74f5c8396894698798",
+      "previous_sha256": null
+    },
+    {
+      "path": "validation/adaptive_sanitizers.log",
+      "status": "added",
+      "sha256": "7db1b6814a83348628178ed72ebf14ee96c16593eb3daa1ed4ca146e9566b0ab",
+      "previous_sha256": null
+    },
+    {
+      "path": "validation/adaptive_standalone_tests.log",
+      "status": "added",
+      "sha256": "9427cd4533cf51625b0f76f8c56ce82a5f70bbaf3c4f9f2889b625845e3f030a",
+      "previous_sha256": null
+    }
+  ],
+  "notes": "Step-2 changes compared with the delivered step-1 archive. Prior Bayesian and step-1 functionality is retained."
+}
