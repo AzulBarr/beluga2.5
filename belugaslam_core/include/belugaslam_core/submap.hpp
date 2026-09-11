@@ -731,6 +731,9 @@ struct Hypothesis {
   bool has_pose_covariance = false;
   std::string pose_source = "frontend", proposal_pose_decision = "not_evaluated";
   double proposal_ess=0, proposal_local_mass=0, proposal_position_std=0, proposal_yaw_std=0, proposal_mean_offset=0;
+  std::string scan_proposal_status="not_evaluated";
+  std::size_t scan_proposal_count=0,scan_proposal_frontend_count=0;
+  double scan_proposal_log_ratio_min=0,scan_proposal_log_ratio_max=0,scan_proposal_fraction=0;
   bool tracking_evaluated = false;
   bool tracking_usable = true;
   double tracking_overlap = 0.0;

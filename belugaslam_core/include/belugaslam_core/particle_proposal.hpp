@@ -10,9 +10,9 @@
 #include <vector>
 namespace belugaslam {
 struct ProposalSelection { std::size_t index=0; double log_evidence=0; };
-// K independent draws from the motion prior. Select using their sensor likelihood;
-// the ancestor's incremental importance weight is their MEAN likelihood, not the
-// selected/maximized likelihood. K=1 is the bootstrap filter update.
+// K independent draws from q. logs = log(likelihood) + log(p_motion/q).
+// Select using these corrected factors; the ancestor receives their MEAN,
+// not the selected/maximized factor. For q=p this is the original multi-try PF.
 template<class Generator>
 ProposalSelection select_motion_proposal(const std::vector<double>& logs,Generator& generator) {
   if (logs.empty()) throw std::invalid_argument("Empty proposal set");
@@ -21,7 +21,8 @@ ProposalSelection select_motion_proposal(const std::vector<double>& logs,Generat
   std::vector<double> weights; weights.reserve(logs.size());
   double total=0;
   for (double l:logs) {
-    if (!std::isfinite(l)) throw std::invalid_argument("Non-finite proposal likelihood");
+    if (std::isnan(l) || l==std::numeric_limits<double>::infinity())
+      throw std::invalid_argument("Invalid proposal importance factor");
     weights.push_back(std::exp(l-maximum));total+=weights.back();
   }
   std::discrete_distribution<std::size_t> choose(weights.begin(),weights.end());

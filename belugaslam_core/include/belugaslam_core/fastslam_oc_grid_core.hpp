@@ -22,6 +22,7 @@
 #include "loop_belief.hpp"
 #include "hierarchical_bayes.hpp"
 #include "particle_proposal.hpp"
+#include "scan_informed_proposal.hpp"
 #include "proposal_pose.hpp"
 #include "output_selection.hpp"
 #include <ceres/ceres.h>
@@ -237,6 +238,9 @@ struct FastSLAMParams {
     bool icp_refine = false;
     belugaslam::IcpOptions icp;
     std::size_t motion_proposal_samples = 8;
+    bool scan_informed_proposal = true;
+    belugaslam::ScanProposalOptions scan_proposal;
+
     double map_resolution = GRID_RESOLUTION;
     double split_min_mass = 0.02;
     std::size_t split_min_particles = 2, split_persistence = 3;
@@ -319,6 +323,7 @@ public:
       if (params_.worker_threads < 1) throw std::invalid_argument("worker_threads must be positive");
       if (params_.output_selection_mode != "map" && params_.output_selection_mode != "pose_risk")
           throw std::invalid_argument("output_selection_mode must be map or pose_risk");
+      params_.scan_proposal.validate();
       if (params_.frontend_pose_mode != "frontend" && params_.frontend_pose_mode != "proposal_mean" &&
           params_.frontend_pose_mode != "proposal_seed")
           throw std::invalid_argument("frontend_pose_mode must be frontend, proposal_mean or proposal_seed");
@@ -367,7 +372,7 @@ public:
           tracking_diagnostics_.open(params_.tracking_diagnostics_path);
           if (!tracking_diagnostics_) throw std::runtime_error("Cannot open tracking_diagnostics_path");
           tracking_diagnostics_ << std::setprecision(17)
-              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points,tracking_prior_mode,prior_evaluated,prior_cov_xx,prior_cov_xy,prior_cov_xyaw,prior_cov_yy,prior_cov_yyaw,prior_cov_yawyaw,icp_decision,icp_inlier_ratio,icp_rmse,icp_condition_number,icp_correction_m\n";
+              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points,tracking_prior_mode,prior_evaluated,prior_cov_xx,prior_cov_xy,prior_cov_xyaw,prior_cov_yy,prior_cov_yyaw,prior_cov_yawyaw,icp_decision,icp_inlier_ratio,icp_rmse,icp_condition_number,icp_correction_m,scan_proposal_status,scan_proposals,frontend_proposals,scan_proposal_fraction,log_p_over_q_min,log_p_over_q_max\n";
       }
       params_.submap_num_range_data = std::max(1, params_.submap_num_range_data);
       params_.max_points_per_scan_node =
@@ -478,12 +483,15 @@ public:
     void sample_motion_model(const control_type& u) {
         last_odom_delta_ = std::get<1>(u).inverse() * std::get<0>(u);
         motion_proposals_.clear(); motion_proposals_.resize(particles_.size());
+        motion_ancestors_.clear(); motion_ancestors_.reserve(particles_.size());
+        motion_distribution_ = motion_model_.increment_distribution(u);
         const bool stationary = last_odom_delta_.translation().squaredNorm() < 1e-24 &&
             std::abs(last_odom_delta_.so2().log()) < 1e-12;
         auto sampler = motion_model_(u);
         for (std::size_t i = 0; i < particles_.size(); ++i) {
             auto&& p = *(particles_.begin() + i);
             const auto previous = std::get<0>(p);
+            motion_ancestors_.push_back(previous);
             auto& proposals = motion_proposals_[i];
             const auto count = stationary ? std::size_t{1} : params_.motion_proposal_samples;
             proposals.reserve(count);
@@ -692,6 +700,8 @@ public:
         std::shared_ptr<const Submap> submap;
         std::shared_ptr<const belugaslam::TrackingField> field;
         state_type prediction{};
+        state_type frontend_delta{};
+        bool has_frontend_delta=false;
     };
 
     TrackingReference track_hypothesis(const std::shared_ptr<Hypothesis>& h, const measurement_type& scan) {
@@ -905,6 +915,62 @@ public:
         }
     }
 
+    std::vector<std::vector<double>> prepare_scan_informed_proposals(
+        const std::map<std::size_t,TrackingReference>& references,bool evidence_available) {
+        std::map<std::size_t,belugaslam::ScanInformedProposal> samplers;
+        for (const auto& h:hypotheses_) {
+            h->scan_proposal_count=0;h->scan_proposal_frontend_count=0;h->scan_proposal_fraction=0;
+            h->scan_proposal_log_ratio_min=0;h->scan_proposal_log_ratio_max=0;
+            const auto& ref=references.at(h->id);
+            h->scan_proposal_status="disabled";
+            if (!params_.scan_informed_proposal || params_.scan_proposal.fraction==0) continue;
+            h->scan_proposal_status="missing_evidence";
+            if (!evidence_available) continue;
+            h->scan_proposal_status="frontend_unavailable";
+            if (!ref.has_frontend_delta) continue;
+            h->scan_proposal_status="singular_motion";
+            if (!motion_distribution_.has_density()) continue;
+            h->scan_proposal_status="no_motion_update";
+            if (motion_ancestors_.size()!=particles_.size()) continue;
+            const auto& d=ref.frontend_delta;
+            samplers.emplace(h->id,belugaslam::ScanInformedProposal{motion_distribution_,
+                {d.translation().x(),d.translation().y(),d.so2().log()},params_.scan_proposal});
+            h->scan_proposal_fraction=samplers.at(h->id).fraction();
+            h->scan_proposal_status=h->scan_proposal_fraction>0 ? "mixture" : "frontend_outside_prior";
+        }
+        std::vector<std::vector<double>> corrections(particles_.size());
+        for (std::size_t i=0;i<particles_.size();++i) {
+            auto&& particle=*(particles_.begin()+i);
+            const auto& h=std::get<2>(particle);
+            auto& proposals=motion_proposals_[i];
+            if (proposals.empty()) proposals.push_back(std::get<0>(particle));
+            corrections[i].resize(proposals.size(),0.);
+            const auto sampler=samplers.find(h->id);
+            for (std::size_t k=0;k<proposals.size();++k) {
+                if (sampler!=samplers.end()) {
+                    const auto prior=motion_ancestors_[i].inverse()*proposals[k];
+                    const auto draw=sampler->second.draw(
+                        {prior.translation().x(),prior.translation().y(),prior.so2().log()},rng_);
+                    if (draw.from_frontend) {
+                        proposals[k]=motion_ancestors_[i]*state_type{Sophus::SO2d{draw.delta[2]},
+                            Eigen::Vector2d{draw.delta[0],draw.delta[1]}};
+                        ++h->scan_proposal_frontend_count;
+                    }
+                    corrections[i][k]=draw.log_ratio;
+                }
+                const double ratio=corrections[i][k];
+                if (h->scan_proposal_count==0) {
+                    h->scan_proposal_log_ratio_min=ratio;h->scan_proposal_log_ratio_max=ratio;
+                } else {
+                    h->scan_proposal_log_ratio_min=std::min(h->scan_proposal_log_ratio_min,ratio);
+                    h->scan_proposal_log_ratio_max=std::max(h->scan_proposal_log_ratio_max,ratio);
+                }
+                ++h->scan_proposal_count;
+            }
+        }
+        return corrections;
+    }
+
     void measurement_model_map(const measurement_type& z) {
         if (z.empty()) return;
         if (bayes_event_.active && bayes_event_.last_sequence==next_scan_sequence_) return;
@@ -917,27 +983,17 @@ public:
             belugaslam::probability_tracking_points(finite_scan,params_.probability_matching.voxel_size,
                                                     params_.tracking.max_points) : sparse;
         std::map<std::size_t, TrackingReference> references;
-        for (auto& h : hypotheses_) references.emplace(h->id,track_hypothesis(h,frontend_scan));
+        for (auto& h : hypotheses_) {
+            // Both poses are in the same current graph frame: no PGO correction
+            // or switch of selected global hypothesis enters this body increment.
+            const auto previous=h->local_pose;
+            const bool had_pose=h->has_local_pose;
+            auto reference=track_hypothesis(h,frontend_scan);
+            reference.frontend_delta=previous.inverse()*h->local_pose;
+            reference.has_frontend_delta=had_pose && h->tracking_status=="tracked";
+            references.emplace(h->id,std::move(reference));
+        }
         if (motion_proposals_.size() != particles_.size()) motion_proposals_.resize(particles_.size());
-        std::vector<std::vector<double>> proposal_logs(particles_.size());
-        parallel_indices(particles_.size(), [&](std::size_t i) {
-            const auto&& p = *(particles_.begin() + i);
-            auto& proposals = motion_proposals_[i];
-            if (proposals.empty()) proposals.push_back(std::get<0>(p));
-            const auto& ref = std::as_const(references).at(std::get<2>(p)->id);
-            auto& logs = proposal_logs[i]; logs.resize(proposals.size(), 0);
-            if (!ref.field || ref.field->occupied_cells() == 0) return;
-            const auto inverse = ref.submap->global_pose().inverse();
-            for (std::size_t k = 0; k < proposals.size(); ++k) {
-                const auto pose = inverse * proposals[k];
-                logs[k] = params_.tracking.effective_beams * belugaslam::tracking_score(*ref.field, sparse,
-                    {pose.translation().x(), pose.translation().y(), pose.so2().log()}, params_.tracking).mean_log_likelihood;
-            }
-        });
-        // The frontend uses its live tracking map. Inference during a validation
-        // event uses ONLY the frozen historical map, on the SAME motion-prior
-        // proposals. No scan-matcher optimum enters predictive evidence.
-        estimate_proposal_poses(frontend_scan,references,proposal_logs);
         const bool future_scan = bayes_event_.active && next_scan_sequence_ >= bayes_event_.first_sequence &&
             bayes_event_.last_sequence != next_scan_sequence_;
         measurement_type common_scan;
@@ -956,17 +1012,38 @@ public:
         }
         const bool validation_usable = future_scan && common_scan.size() >= params_.tracking.min_points &&
             common_scan.size() >= params_.loop_bayes.min_known_fraction * sparse.size();
+        const auto proposal_corrections=prepare_scan_informed_proposals(
+            references,!bayes_event_.active || validation_usable);
+        std::vector<std::vector<double>> proposal_logs(particles_.size());
+        parallel_indices(particles_.size(), [&](std::size_t i) {
+            const auto&& p = *(particles_.begin() + i);
+            auto& proposals = motion_proposals_[i];
+            if (proposals.empty()) proposals.push_back(std::get<0>(p));
+            const auto& ref = std::as_const(references).at(std::get<2>(p)->id);
+            auto& logs = proposal_logs[i]; logs=proposal_corrections[i];
+            if (!ref.field || ref.field->occupied_cells() == 0) return;
+            const auto inverse = ref.submap->global_pose().inverse();
+            for (std::size_t k = 0; k < proposals.size(); ++k) {
+                const auto pose = inverse * proposals[k];
+                logs[k] += params_.tracking.effective_beams * belugaslam::tracking_score(*ref.field, sparse,
+                    {pose.translation().x(), pose.translation().y(), pose.so2().log()}, params_.tracking).mean_log_likelihood;
+            }
+        });
+        // The frontend uses its live tracking map. Inference during a validation
+        // event uses ONLY the frozen historical map and the SAME corrected
+        // proposal weights. The frontend optimum is never a likelihood factor.
+        estimate_proposal_poses(frontend_scan,references,proposal_logs);
         if (bayes_event_.active && !validation_usable) {
             // An uninformative scan is missing evidence at BOTH hierarchy levels.
             // The independent frontend can still track using its live map.
-            for (auto& logs : proposal_logs) std::fill(logs.begin(),logs.end(),0.0);
+            proposal_logs=proposal_corrections; // q=p here: all corrections are exactly zero.
         }
         if (validation_usable) {
             parallel_indices(particles_.size(), [&](std::size_t i) {
                 const auto& h=std::get<2>(*(particles_.begin()+i));
                 for (std::size_t k=0; k<motion_proposals_[i].size(); ++k) {
                     const auto& pose=motion_proposals_[i][k];
-                    proposal_logs[i][k]=h->validation_map->log_likelihood(common_scan,
+                    proposal_logs[i][k]=proposal_corrections[i][k]+h->validation_map->log_likelihood(common_scan,
                         {pose.translation().x(),pose.translation().y(),pose.so2().log()},params_.tracking,params_.loop_bayes.beta);
                 }
             });
@@ -974,7 +1051,7 @@ public:
         const auto prior_masses=hypothesis_masses();
         std::map<std::size_t,std::vector<std::size_t>> indices;
         std::vector<double> increments(particles_.size());
-        // Fixed serial RNG order. Keep the proposal MEAN likelihood normalizer,
+        // Fixed serial RNG order. Keep MEAN(likelihood * p/q),
         // then the conditional-particle normalizer, then normalize graph masses.
         for (std::size_t i=0; i<particles_.size(); ++i) {
             auto&& particle=*(particles_.begin()+i);
@@ -1003,7 +1080,7 @@ public:
             if (bayes_event_.active) cache_particle_pose_covariance(h);
         }
         normalize_hypothesis_masses();
-        motion_proposals_.clear();
+        motion_proposals_.clear(); motion_ancestors_.clear();
         if (future_scan) finish_bayesian_scan(validation_usable,common_scan.size(),prior_masses);
         if (tracking_diagnostics_.is_open()) {
             const auto masses = hypothesis_masses();
@@ -1023,7 +1100,9 @@ public:
                     << h->tracking_prior_covariance[4] << ',' << h->tracking_prior_covariance[5] << ','
                     << h->tracking_prior_covariance[8] << ',' << h->icp_decision << ','
                     << h->icp_inlier_ratio << ',' << h->icp_rmse << ',' << h->icp_condition_number << ','
-                    << h->icp_correction << '\n';
+                    << h->icp_correction << ',' << h->scan_proposal_status << ','
+                    << h->scan_proposal_count << ',' << h->scan_proposal_frontend_count << ',' << h->scan_proposal_fraction << ','
+                    << h->scan_proposal_log_ratio_min << ',' << h->scan_proposal_log_ratio_max << '\n';
             }
             if (next_scan_sequence_ % 100 == 0) tracking_diagnostics_.flush();
         }
@@ -2785,6 +2864,8 @@ private:
     std::string last_bayes_status_="none";
     double last_bayes_probability_=0;
     std::vector<std::vector<state_type>> motion_proposals_;
+    std::vector<state_type> motion_ancestors_;
+    beluga::DifferentialDriveDistribution2d motion_distribution_;
     beluga::TupleVector<FastSLAMParticle> particles_;
 
     MotionModel motion_model_;

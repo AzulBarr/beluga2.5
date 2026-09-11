@@ -193,6 +193,9 @@ def generate_launch_description():
     declare_tracking_max_points = DeclareLaunchArgument('tracking_max_points', default_value='180', description='See QUALITY_REVIEW.md for tracking_max_points')
     declare_tracking_max_iterations = DeclareLaunchArgument('tracking_max_iterations', default_value='20', description='See QUALITY_REVIEW.md for tracking_max_iterations')
     declare_motion_proposal_samples = DeclareLaunchArgument('motion_proposal_samples', default_value='8', description='See QUALITY_REVIEW.md for motion_proposal_samples')
+    declare_scan_informed_proposal = DeclareLaunchArgument('scan_informed_proposal', default_value='true')
+    declare_scan_proposal_fraction = DeclareLaunchArgument('scan_proposal_fraction', default_value='0.8')
+    declare_scan_proposal_adapt_to_prior = DeclareLaunchArgument('scan_proposal_adapt_to_prior', default_value='true')
     declare_map_resolution = DeclareLaunchArgument('map_resolution', default_value='0.05', description='See QUALITY_REVIEW.md for map_resolution')
     declare_split_min_mass = DeclareLaunchArgument('split_min_mass', default_value='0.02', description='See QUALITY_REVIEW.md for split_min_mass')
     declare_split_min_particles = DeclareLaunchArgument('split_min_particles', default_value='2', description='See QUALITY_REVIEW.md for split_min_particles')
@@ -333,6 +336,9 @@ def generate_launch_description():
             "tracking_max_points": ParameterValue(LaunchConfiguration('tracking_max_points'), value_type=int),
             "tracking_max_iterations": ParameterValue(LaunchConfiguration('tracking_max_iterations'), value_type=int),
             "motion_proposal_samples": ParameterValue(LaunchConfiguration('motion_proposal_samples'), value_type=int),
+            "scan_informed_proposal": ParameterValue(LaunchConfiguration('scan_informed_proposal'), value_type=bool),
+            "scan_proposal_fraction": ParameterValue(LaunchConfiguration('scan_proposal_fraction'), value_type=float),
+            "scan_proposal_adapt_to_prior": ParameterValue(LaunchConfiguration('scan_proposal_adapt_to_prior'), value_type=bool),
             "map_resolution": ParameterValue(LaunchConfiguration('map_resolution'), value_type=float),
             "split_min_mass": ParameterValue(LaunchConfiguration('split_min_mass'), value_type=float),
             "split_min_particles": ParameterValue(LaunchConfiguration('split_min_particles'), value_type=int),
@@ -470,6 +476,9 @@ def generate_launch_description():
     declare_tracking_max_points,
     declare_tracking_max_iterations,
     declare_motion_proposal_samples,
+    declare_scan_informed_proposal,
+    declare_scan_proposal_fraction,
+    declare_scan_proposal_adapt_to_prior,
     declare_map_resolution,
     declare_split_min_mass,
     declare_split_min_particles,

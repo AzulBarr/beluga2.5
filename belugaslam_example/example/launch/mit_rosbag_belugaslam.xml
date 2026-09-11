@@ -37,7 +37,19 @@
   <arg name="performance_diagnostics_path" default=""/>
   <arg name="final_trajectory_path" default=""/>
 
+  <!-- Scan-informed PF; false reproduces the odometry proposal. -->
+  <arg name="scan_informed_proposal" default="true"/>
+  <arg name="scan_proposal_fraction" default="0.8"/>
+  <arg name="scan_proposal_adapt_to_prior" default="true"/>
+  <arg name="motion_proposal_samples" default="8"/>
+  <arg name="tracking_diagnostics_path" default=""/>
+
   <include file="$(find-pkg-share belugaslam_node)/launch/fastslam_oc_grid.launch.py">
+    <arg name="scan_informed_proposal" value="$(var scan_informed_proposal)"/>
+    <arg name="scan_proposal_fraction" value="$(var scan_proposal_fraction)"/>
+    <arg name="scan_proposal_adapt_to_prior" value="$(var scan_proposal_adapt_to_prior)"/>
+    <arg name="motion_proposal_samples" value="$(var motion_proposal_samples)"/>
+    <arg name="tracking_diagnostics_path" value="$(var tracking_diagnostics_path)"/>
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
     <arg name="launch_prefix" value="$(var slam_prefix)"/>
     <arg name="odom_frame" value="odom_combined"/>

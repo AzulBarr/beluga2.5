@@ -130,6 +130,9 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     declare_parameter("tracking_max_points", 180);
     declare_parameter("tracking_max_iterations", 20);
     declare_parameter("motion_proposal_samples", 8);
+    declare_parameter("scan_informed_proposal", true);
+    declare_parameter("scan_proposal_fraction", 0.8);
+    declare_parameter("scan_proposal_adapt_to_prior", true);
     declare_parameter("map_resolution", 0.05);
     declare_parameter("split_min_mass", 0.02);
     declare_parameter("split_min_particles", 2);
@@ -400,6 +403,10 @@ void BelugaSLAMNode::setup_slam() {
     params.tracking.max_iterations = static_cast<decltype(params.tracking.max_iterations)>(get_parameter("tracking_max_iterations").as_int());
     if (get_parameter("motion_proposal_samples").as_int() < 1 || get_parameter("motion_proposal_samples").as_int() > 100000) throw std::invalid_argument("Invalid motion_proposal_samples");
     params.motion_proposal_samples = static_cast<decltype(params.motion_proposal_samples)>(get_parameter("motion_proposal_samples").as_int());
+    params.scan_informed_proposal = get_parameter("scan_informed_proposal").as_bool();
+    params.scan_proposal.fraction = get_parameter("scan_proposal_fraction").as_double();
+    params.scan_proposal.adapt_to_prior = get_parameter("scan_proposal_adapt_to_prior").as_bool();
+    params.scan_proposal.validate();
     params.map_resolution = static_cast<decltype(params.map_resolution)>(get_parameter("map_resolution").as_double());
     params.split_min_mass = static_cast<decltype(params.split_min_mass)>(get_parameter("split_min_mass").as_double());
     if (get_parameter("split_min_particles").as_int() < 1 || get_parameter("split_min_particles").as_int() > 100000) throw std::invalid_argument("Invalid split_min_particles");

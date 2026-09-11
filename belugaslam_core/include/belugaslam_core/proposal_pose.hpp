@@ -5,7 +5,7 @@
 
 namespace belugaslam {
 
-// One hypothesis only. log_weight = log(ancestor weight) + log likelihood
+// One hypothesis only. log_weight = log(ancestor weight) + log(likelihood * p_motion/q)
 // - log(number of proposals for that ancestor). Never pool different graphs.
 struct WeightedPoseProposal { PoseSample2 pose; double log_weight; };
 struct ProposalPoseSummary {

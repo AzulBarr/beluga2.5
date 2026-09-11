@@ -71,6 +71,7 @@ def main():
     parser.add_argument('--dataset', type=Path, default=ROOT/'belugaslam_example/bags/intel/intel.clf')
     parser.add_argument('--binary', type=Path, help='Defaults to the installed belugaslam_core executable')
     parser.add_argument('--particles', type=int, default=300)
+    parser.add_argument('--scan-informed-proposal', choices=['on', 'off'], default='on')
     parser.add_argument('--hypotheses', type=int, default=4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--loops', choices=['belief', 'map', 'geometry', 'off'], default='belief')
@@ -164,7 +165,8 @@ def main():
                            str(args.seed), loops, args.frontend_pose_mode, str(args.effective_beams), str(args.submap_scans),
                            str(args.prior_information_scale), args.loop_update_mode, matcher,
                            str(args.tracking_occupied_space_weight), str(args.tracking_voxel_size), prior_mode,
-                           str(args.tracking_odom_translation_sigma), str(args.tracking_odom_rotation_sigma)]
+                           str(args.tracking_odom_translation_sigma), str(args.tracking_odom_rotation_sigma),
+                           args.scan_informed_proposal]
                 info = {'command': command, 'complete': False, 'particles': particles, 'hypotheses': hypotheses,
                         'loops': loops, 'loop_update_mode': args.loop_update_mode, 'frontend_pose_mode': args.frontend_pose_mode,
                         'effective_beams': args.effective_beams, 'submap_scans': args.submap_scans,
@@ -173,6 +175,7 @@ def main():
                         'tracking_prior_mode': prior_mode,
                         'tracking_odom_translation_sigma': args.tracking_odom_translation_sigma,
                         'tracking_odom_rotation_sigma': args.tracking_odom_rotation_sigma,
+                        'scan_informed_proposal': args.scan_informed_proposal,
                         'tracking_occupied_space_weight': args.tracking_occupied_space_weight,
                         'tracking_voxel_size': args.tracking_voxel_size,
                         'seed': args.seed, 'range_max': 30., 'worker_threads': 2,

@@ -90,10 +90,13 @@ TEST(ProbabilityFrontend, SameMapPFUpdateUnchangedAndFrontendFeedsGraph) {
     }
   }
 }
-TEST(ProbabilityFrontend, AdaptivePriorPreservesFirstScanPFUpdateAndFeedsGraph) {
+TEST(ProbabilityFrontend, AdaptivePriorPreservesBootstrapPFUpdateAndFeedsGraph) {
   std::vector<double> fixed_weights;
   for(const std::string mode:{"fixed","odometry"}) {
     FastSLAMParams p;p.tracking_prior_mode=mode;p.tracking_matcher="probability_ceres";
+    // This independence is a bootstrap invariant. With a scan-informed q,
+    // changing the frontend prior deliberately changes proposals and p/q.
+    p.scan_informed_proposal=false;
     p.frontend_pose_mode="frontend";p.max_particles=30;p.min_particles=5;p.recovery.enabled=false;
     auto slam=Slam(p);auto h=std::get<2>(*slam->particles().begin());
     auto map=std::make_shared<Submap>(0,Pose(),160,160,.05);

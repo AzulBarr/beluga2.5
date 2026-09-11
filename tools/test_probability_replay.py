@@ -24,7 +24,7 @@ class ProbabilityReplayTests(unittest.TestCase):
 import json,sys
 from pathlib import Path
 from decimal import Decimal
-assert len(sys.argv)==18, sys.argv
+assert len(sys.argv)==19 and sys.argv[18] in ("on","off"), sys.argv
 source,out=Path(sys.argv[1]),Path(sys.argv[2])
 stamps=[int(row.split()[0]) for row in source.read_text().splitlines()]
 (out/'arguments.json').write_text(json.dumps(sys.argv[3:]))
@@ -54,6 +54,14 @@ stamps=[int(row.split()[0]) for row in source.read_text().splitlines()]
         with zipfile.ZipFile(status_path.parent.with_suffix('.zip')) as archive:
             self.assertEqual(sum(n.endswith('parameters.json') for n in archive.namelist()),2)
             self.assertFalse(any(n.endswith('scans.input') for n in archive.namelist()))
+
+    def test_scan_proposal_mode_is_forwarded_and_recorded(self):
+        result = self.invoke('--scan-informed-proposal', 'off')
+        self.assertEqual(result.returncode, 0, result.stderr+result.stdout)
+        status = json.loads(next((self.root/'runs').glob('*/run_status.json')).read_text())
+        run = status['runs']['requested']
+        self.assertEqual(run['command'][18], 'off')
+        self.assertEqual(run['scan_informed_proposal'], 'off')
 
     def test_comparison_rejects_a_confounded_pose_readout(self):
         result = self.invoke('--matcher-comparison','--frontend-pose-mode','proposal_mean')

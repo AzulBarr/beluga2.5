@@ -8,8 +8,8 @@
 namespace fs=std::filesystem;
 int main(int argc,char** argv) {
   try {
-    if(argc<11 || argc>18) throw std::invalid_argument(
-      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size [fixed|odometry [odom_translation_sigma [odom_rotation_sigma]]]]]]]");
+    if(argc<11 || argc>19) throw std::invalid_argument(
+      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size [fixed|odometry [odom_translation_sigma [odom_rotation_sigma [scan_proposal:on|off]]]]]]]]");
     const fs::path input=argv[1], output=argv[2];
     if(!fs::is_directory(output)) throw std::invalid_argument("Output directory must exist");
     FastSLAMParams params;
@@ -30,6 +30,11 @@ int main(int argc,char** argv) {
     if(argc>=16) params.tracking_prior_mode=argv[15];
     if(argc>=17) params.odometry_prior.translation_sigma=std::stod(argv[16]);
     if(argc>=18) params.odometry_prior.rotation_sigma=std::stod(argv[17]);
+    if(argc>=19) {
+      const std::string mode=argv[18];
+      if(mode!="on" && mode!="off") throw std::invalid_argument("scan_proposal must be on or off");
+      params.scan_informed_proposal=mode=="on";
+    }
     // Keep these coefficients identical to the PF MotionModel constructed below.
     params.odometry_prior.alpha1=.1;params.odometry_prior.alpha2=.05;
     params.odometry_prior.alpha3=.1;params.odometry_prior.alpha4=.05;

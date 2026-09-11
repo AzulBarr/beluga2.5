@@ -1,0 +1,80 @@
+{
+  "dataset": "Intel intel.clf supplied in the uploaded ZIP",
+  "scans": 13631,
+  "seed": 42,
+  "max_particles": 30,
+  "max_hypotheses": 4,
+  "loop_update": "bayes",
+  "loop_verifier": "belief",
+  "tracking_matcher": "probability_ceres",
+  "tracking_prior": "odometry",
+  "frontend_pose_mode": "frontend",
+  "icp_refine": false,
+  "reference_used_by_slam": false,
+  "runs": {
+    "on": {
+      "coverage": 13631,
+      "optimized_poses": 13631,
+      "tracking_status": {
+        "bootstrap": 1,
+        "tracked": 27180
+      },
+      "proposal_status": {
+        "frontend_unavailable": 1,
+        "singular_motion": 3441,
+        "frontend_outside_prior": 5175,
+        "mixture": 17536,
+        "missing_evidence": 1028
+      },
+      "total_candidates": 3176649,
+      "frontend_candidates": 511112,
+      "frontend_fraction_when_mixture": 0.2436735051927793,
+      "scan_proposal_adapt_to_prior": true,
+      "mean_effective_frontend_fraction": 0.15570181874541764,
+      "maximum_hypothesis_mass_normalization_error": 3.3306690738754696e-16,
+      "max_active_hypotheses": 4,
+      "mean_processing_ms": 11.036236779033086
+    },
+    "off": {
+      "coverage": 13631,
+      "optimized_poses": 13631,
+      "tracking_status": {
+        "bootstrap": 1,
+        "tracked": 26982
+      },
+      "proposal_status": {
+        "disabled": 26983
+      },
+      "total_candidates": 3176462,
+      "frontend_candidates": 0,
+      "frontend_fraction_when_mixture": 0,
+      "scan_proposal_adapt_to_prior": false,
+      "mean_effective_frontend_fraction": 0.0,
+      "maximum_hypothesis_mass_normalization_error": 3.3306690738754696e-16,
+      "max_active_hypotheses": 4,
+      "mean_processing_ms": 11.462130619910498
+    },
+    "fixed_on": {
+      "coverage": 13631,
+      "optimized_poses": 13631,
+      "tracking_status": {
+        "bootstrap": 1,
+        "tracked": 22470
+      },
+      "proposal_status": {
+        "frontend_unavailable": 1,
+        "singular_motion": 2739,
+        "mixture": 18107,
+        "missing_evidence": 1624
+      },
+      "total_candidates": 3174547,
+      "frontend_candidates": 2124732,
+      "frontend_fraction_when_mixture": 0.7997214736303278,
+      "scan_proposal_adapt_to_prior": false,
+      "mean_effective_frontend_fraction": 0.644635307729963,
+      "maximum_hypothesis_mass_normalization_error": 3.3306690738754696e-16,
+      "max_active_hypotheses": 4,
+      "mean_processing_ms": 9.937935532389405
+    }
+  }
+}
