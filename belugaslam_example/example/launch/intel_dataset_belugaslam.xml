@@ -10,6 +10,7 @@
   <arg name="min_particles" default="5"/>
   <arg name="max_particles" default="30"/>
   <arg name="record_bag" default="false"/>
+  <arg name="base_frame" default="base_footprint"/>
   <arg name="submap_num_range_data" default="15"/>
   <arg name="keyframe_min_translation" default="0.15"/>
   <arg name="keyframe_min_rotation" default="0.0872665"/>
@@ -107,13 +108,30 @@
   <arg name="recovery_interval" default="3"/>
   <arg name="recovery_confirmations" default="2"/>
   <arg name="loop_cache_budget_mb" default="64"/>
+  <arg name="icp_refine" default="false"/>
+  <arg name="icp_voxel_size" default="0.04"/>
+  <arg name="icp_bucket_size" default="0.25"/>
+  <arg name="icp_normal_radius" default="0.20"/>
+  <arg name="icp_min_normal_neighbors" default="4"/>
+  <arg name="icp_max_correspondence_distance" default="0.25"/>
+  <arg name="icp_min_linearity" default="0.55"/>
+  <arg name="icp_sigma" default="0.05"/>
+  <arg name="icp_huber_delta" default="0.05"/>
+  <arg name="icp_iterations" default="8"/>
+  <arg name="icp_max_translation_correction" default="0.15"/>
+  <arg name="icp_max_rotation_correction" default="0.052"/>
+  <arg name="icp_min_inlier_ratio" default="0.55"/>
+  <arg name="icp_max_rmse" default="0.10"/>
+  <arg name="icp_max_condition_number" default="200.0"/>
+  <arg name="icp_min_correspondences" default="30"/>
+  <arg name="icp_objective_tolerance" default="0.03"/>
 
 
   <include file="$(find-pkg-share belugaslam_node)/launch/fastslam_oc_grid.launch.py">
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
     <arg name="slam_prefix" value="$(var slam_prefix)"/>
     <arg name="odom_frame" value="odom_combined"/>
-    <arg name="base_frame" value="base_footprint"/>
+    <arg name="base_frame" value="$(var base_frame)"/>
     <arg name="scan_topic" value="/base_scan"/>
     <arg name="range_max" value="30.0"/>
     <arg name="min_particles" value="$(var min_particles)"/>
@@ -212,6 +230,23 @@
     <arg name="recovery_interval" value="$(var recovery_interval)"/>
     <arg name="recovery_confirmations" value="$(var recovery_confirmations)"/>
     <arg name="loop_cache_budget_mb" value="$(var loop_cache_budget_mb)"/>
+    <arg name="icp_refine" value="$(var icp_refine)"/>
+    <arg name="icp_voxel_size" value="$(var icp_voxel_size)"/>
+    <arg name="icp_bucket_size" value="$(var icp_bucket_size)"/>
+    <arg name="icp_normal_radius" value="$(var icp_normal_radius)"/>
+    <arg name="icp_min_normal_neighbors" value="$(var icp_min_normal_neighbors)"/>
+    <arg name="icp_max_correspondence_distance" value="$(var icp_max_correspondence_distance)"/>
+    <arg name="icp_min_linearity" value="$(var icp_min_linearity)"/>
+    <arg name="icp_sigma" value="$(var icp_sigma)"/>
+    <arg name="icp_huber_delta" value="$(var icp_huber_delta)"/>
+    <arg name="icp_iterations" value="$(var icp_iterations)"/>
+    <arg name="icp_max_translation_correction" value="$(var icp_max_translation_correction)"/>
+    <arg name="icp_max_rotation_correction" value="$(var icp_max_rotation_correction)"/>
+    <arg name="icp_min_inlier_ratio" value="$(var icp_min_inlier_ratio)"/>
+    <arg name="icp_max_rmse" value="$(var icp_max_rmse)"/>
+    <arg name="icp_max_condition_number" value="$(var icp_max_condition_number)"/>
+    <arg name="icp_min_correspondences" value="$(var icp_min_correspondences)"/>
+    <arg name="icp_objective_tolerance" value="$(var icp_objective_tolerance)"/>
 
   </include>
 
