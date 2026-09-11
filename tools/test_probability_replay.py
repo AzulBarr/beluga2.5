@@ -24,7 +24,7 @@ class ProbabilityReplayTests(unittest.TestCase):
 import json,sys
 from pathlib import Path
 from decimal import Decimal
-assert len(sys.argv)==19 and sys.argv[18] in ("on","off"), sys.argv
+assert len(sys.argv)==19 and sys.argv[18] in ("on","off","pure"), sys.argv
 source,out=Path(sys.argv[1]),Path(sys.argv[2])
 stamps=[int(row.split()[0]) for row in source.read_text().splitlines()]
 (out/'arguments.json').write_text(json.dumps(sys.argv[3:]))
@@ -62,6 +62,12 @@ stamps=[int(row.split()[0]) for row in source.read_text().splitlines()]
         run = status['runs']['requested']
         self.assertEqual(run['command'][18], 'off')
         self.assertEqual(run['scan_informed_proposal'], 'off')
+
+    def test_pure_scan_proposal_mode_is_forwarded(self):
+        result = self.invoke('--scan-informed-proposal', 'pure')
+        self.assertEqual(result.returncode, 0, result.stderr+result.stdout)
+        status = json.loads(next((self.root/'runs').glob('*/run_status.json')).read_text())
+        self.assertEqual(status['runs']['requested']['command'][18], 'pure')
 
     def test_comparison_rejects_a_confounded_pose_readout(self):
         result = self.invoke('--matcher-comparison','--frontend-pose-mode','proposal_mean')

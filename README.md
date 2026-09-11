@@ -1,3 +1,5 @@
+> **Experimento NO recomendado por su RMSE:** variante 100% frontend, pesos de importancia y presets con ICP: [PURE_FRONTEND.md](PURE_FRONTEND.md).
+
 > Nueva revisión: propuesta por frontend con corrección de importancia y comandos A/B en [SCAN_INFORMED_PROPOSAL.md](SCAN_INFORMED_PROPOSAL.md).
 
 > Latest update: [ADAPTIVE_PRIOR.md](ADAPTIVE_PRIOR.md) adds the motion-dependent full covariance prior (step 2) while keeping probability-grid Ceres matching (step 1). Includes a fixed-vs-odometry prior comparison and exact build/run commands.

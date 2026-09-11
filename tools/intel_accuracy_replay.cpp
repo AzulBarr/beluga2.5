@@ -8,8 +8,8 @@
 namespace fs=std::filesystem;
 int main(int argc,char** argv) {
   try {
-    if(argc<11 || argc>19) throw std::invalid_argument(
-      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size [fixed|odometry [odom_translation_sigma [odom_rotation_sigma [scan_proposal:on|off]]]]]]]]");
+    if(argc<11 || argc>20) throw std::invalid_argument(
+      "Usage: intel_accuracy_replay input output particles hypotheses seed loops frontend_mode effective_beams submap_scans prior_information_scale [bayes|heuristic [distance|probability_ceres [occupied_space_weight [voxel_size [fixed|odometry [odom_translation_sigma [odom_rotation_sigma [scan_proposal:on|off|pure [icp:on|off]]]]]]]]]");
     const fs::path input=argv[1], output=argv[2];
     if(!fs::is_directory(output)) throw std::invalid_argument("Output directory must exist");
     FastSLAMParams params;
@@ -32,8 +32,14 @@ int main(int argc,char** argv) {
     if(argc>=18) params.odometry_prior.rotation_sigma=std::stod(argv[17]);
     if(argc>=19) {
       const std::string mode=argv[18];
-      if(mode!="on" && mode!="off") throw std::invalid_argument("scan_proposal must be on or off");
-      params.scan_informed_proposal=mode=="on";
+      if(mode!="on" && mode!="off" && mode!="pure") throw std::invalid_argument("scan_proposal must be on, off or pure");
+      params.scan_informed_proposal=mode!="off";
+      if(mode=="pure") {params.scan_proposal.fraction=1.;params.scan_proposal.adapt_to_prior=false;}
+    }
+    if(argc>=20) {
+      const std::string icp=argv[19];
+      if(icp!="on" && icp!="off") throw std::invalid_argument("icp must be on or off");
+      params.icp_refine=icp=="on";
     }
     // Keep these coefficients identical to the PF MotionModel constructed below.
     params.odometry_prior.alpha1=.1;params.odometry_prior.alpha2=.05;

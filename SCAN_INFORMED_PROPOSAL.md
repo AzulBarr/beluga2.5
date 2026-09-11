@@ -132,7 +132,7 @@ readouts, evitando una dependencia circular del mismo conjunto de muestras.
 | Parámetro | Por defecto | Significado |
 |---|---:|---|
 | `scan_informed_proposal` | `true` | Activa la propuesta informada con respaldo |
-| `scan_proposal_fraction` | `0.8` | Fracción máxima de la rama frontend; rango `[0, 0.95]` |
+| `scan_proposal_fraction` | `0.8` | Fracción máxima de la rama frontend; rango `[0, 1]` |
 | `scan_proposal_adapt_to_prior` | `true` | Reduce la fracción cuando el frontend contradice fuertemente al prior |
 | `motion_proposal_samples` | `8` | Propuestas por ancestro; reposo conserva una |
 | `alpha1`–`alpha4` | Sin cambios | Ruido del modelo de movimiento original |

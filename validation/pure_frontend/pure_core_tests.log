@@ -1,0 +1,294 @@
+Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 117 tests from 18 test suites.
+[----------] Global test environment set-up.
+[----------] 9 tests from SubmapTrackingTest
+[ RUN      ] SubmapTrackingTest.BootstrapKeepsPredictionWithoutAMap
+[       OK ] SubmapTrackingTest.BootstrapKeepsPredictionWithoutAMap (2 ms)
+[ RUN      ] SubmapTrackingTest.StationaryOdometryPreservesParticlePoseAndWeight
+[       OK ] SubmapTrackingTest.StationaryOdometryPreservesParticlePoseAndWeight (2 ms)
+[ RUN      ] SubmapTrackingTest.UsesGrownNativeGridFarOutsideOldWorldWindow
+[       OK ] SubmapTrackingTest.UsesGrownNativeGridFarOutsideOldWorldWindow (2 ms)
+[ RUN      ] SubmapTrackingTest.YoungerAndHistoricalGridsDoNotBiasTracking
+[       OK ] SubmapTrackingTest.YoungerAndHistoricalGridsDoNotBiasTracking (2 ms)
+[ RUN      ] SubmapTrackingTest.FilteredScansLeaveGridGraphAndLifecycleUntouched
+[       OK ] SubmapTrackingTest.FilteredScansLeaveGridGraphAndLifecycleUntouched (1 ms)
+[ RUN      ] SubmapTrackingTest.FilteringUsesLastInsertionAndWrappedAngle
+[       OK ] SubmapTrackingTest.FilteringUsesLastInsertionAndWrappedAngle (1 ms)
+[ RUN      ] SubmapTrackingTest.OverlapCountsAcceptedScansAndHandoverCannotStallOnRejection
+[       OK ] SubmapTrackingTest.OverlapCountsAcceptedScansAndHandoverCannotStallOnRejection (1 ms)
+[ RUN      ] SubmapTrackingTest.SingleScanHalfLifeHasAValidMatchingReference
+[       OK ] SubmapTrackingTest.SingleScanHalfLifeHasAValidMatchingReference (1 ms)
+[ RUN      ] SubmapTrackingTest.MatchingReferenceResolvesClonedHypothesisPoseById
+[       OK ] SubmapTrackingTest.MatchingReferenceResolvesClonedHypothesisPoseById (1 ms)
+[----------] 9 tests from SubmapTrackingTest (18 ms total)
+
+[----------] 6 tests from ProbabilityFrontend
+[ RUN      ] ProbabilityFrontend.RejectsUnknownModeAndInvalidOptions
+[       OK ] ProbabilityFrontend.RejectsUnknownModeAndInvalidOptions (4 ms)
+[ RUN      ] ProbabilityFrontend.RejectsInvalidMotionPriorConfiguration
+[       OK ] ProbabilityFrontend.RejectsInvalidMotionPriorConfiguration (3 ms)
+[ RUN      ] ProbabilityFrontend.MotionPriorUsesPreviousHeadingInMatchingFrame
+[       OK ] ProbabilityFrontend.MotionPriorUsesPreviousHeadingInMatchingFrame (1 ms)
+[ RUN      ] ProbabilityFrontend.CacheInvalidatesOnWriteAndCropAndDetachesAcrossBranches
+[       OK ] ProbabilityFrontend.CacheInvalidatesOnWriteAndCropAndDetachesAcrossBranches (0 ms)
+[ RUN      ] ProbabilityFrontend.SameMapPFUpdateUnchangedAndFrontendFeedsGraph
+[       OK ] ProbabilityFrontend.SameMapPFUpdateUnchangedAndFrontendFeedsGraph (6 ms)
+[ RUN      ] ProbabilityFrontend.AdaptivePriorPreservesBootstrapPFUpdateAndFeedsGraph
+[       OK ] ProbabilityFrontend.AdaptivePriorPreservesBootstrapPFUpdateAndFeedsGraph (7 ms)
+[----------] 6 tests from ProbabilityFrontend (24 ms total)
+
+[----------] 13 tests from QualityIntegration
+[ RUN      ] QualityIntegration.StartsWithRequestedPopulation
+[       OK ] QualityIntegration.StartsWithRequestedPopulation (1 ms)
+[ RUN      ] QualityIntegration.ProposalReadoutPreservesWeightsAndFeedsNodeAndPublication
+[       OK ] QualityIntegration.ProposalReadoutPreservesWeightsAndFeedsNodeAndPublication (6 ms)
+[ RUN      ] QualityIntegration.SpatialChildStartsAtPreResamplingMeanImmediately
+[       OK ] QualityIntegration.SpatialChildStartsAtPreResamplingMeanImmediately (1 ms)
+[ RUN      ] QualityIntegration.RetrospectiveExportKeepsExactScanTimesAndUsesGraphPoses
+[       OK ] QualityIntegration.RetrospectiveExportKeepsExactScanTimesAndUsesGraphPoses (3 ms)
+[ RUN      ] QualityIntegration.FieldInvalidatesOnGridWriteAndDetachesAcrossClones
+[       OK ] QualityIntegration.FieldInvalidatesOnGridWriteAndDetachesAcrossClones (0 ms)
+[ RUN      ] QualityIntegration.RejectedScanDoesNotWriteGridOrGraph
+[       OK ] QualityIntegration.RejectedScanDoesNotWriteGridOrGraph (4 ms)
+[ RUN      ] QualityIntegration.ZeroNoiseAndRepeatedSeedsAreIndependent
+[       OK ] QualityIntegration.ZeroNoiseAndRepeatedSeedsAreIndependent (0 ms)
+[ RUN      ] QualityIntegration.MatchingDoesNotGreedilyMoveStationaryParticles
+[       OK ] QualityIntegration.MatchingDoesNotGreedilyMoveStationaryParticles (2 ms)
+[ RUN      ] QualityIntegration.RuntimeResolutionIsUsedBySubmapsAndPublishedMap
+[       OK ] QualityIntegration.RuntimeResolutionIsUsedBySubmapsAndPublishedMap (2 ms)
+[ RUN      ] QualityIntegration.SpatialSplitRefreshesOutputEvenWithoutEssResampling
+[       OK ] QualityIntegration.SpatialSplitRefreshesOutputEvenWithoutEssResampling (1 ms)
+[ RUN      ] QualityIntegration.PruningRefreshesOutputAfterPopulationInstallation
+[       OK ] QualityIntegration.PruningRefreshesOutputAfterPopulationInstallation (1 ms)
+[ RUN      ] QualityIntegration.OutputRiskUsesCombinedPositionMassWithoutChangingInference
+[       OK ] QualityIntegration.OutputRiskUsesCombinedPositionMassWithoutChangingInference (3 ms)
+[ RUN      ] QualityIntegration.InvalidOutputModeIsRejected
+[       OK ] QualityIntegration.InvalidOutputModeIsRejected (1 ms)
+[----------] 13 tests from QualityIntegration (32 ms total)
+
+[----------] 13 tests from LoopPgoTest
+[ RUN      ] LoopPgoTest.DefaultsEnableBeliefVerificationAndPgo
+[       OK ] LoopPgoTest.DefaultsEnableBeliefVerificationAndPgo (0 ms)
+[ RUN      ] LoopPgoTest.AnalyticCostMatchesAutoDiffIncludingRigidOffsets
+[       OK ] LoopPgoTest.AnalyticCostMatchesAutoDiffIncludingRigidOffsets (0 ms)
+[ RUN      ] LoopPgoTest.RejectsLoopThatSlipsOutsideFitGateUnderInstalledObjective
+[       OK ] LoopPgoTest.RejectsLoopThatSlipsOutsideFitGateUnderInstalledObjective (4 ms)
+[ RUN      ] LoopPgoTest.PolishedTrialCannotGainCompatibilityAndRetainsItsFit
+[       OK ] LoopPgoTest.PolishedTrialCannotGainCompatibilityAndRetainsItsFit (2 ms)
+[ RUN      ] LoopPgoTest.SkipsSecondSolveInsideHuberQuadraticRegion
+[       OK ] LoopPgoTest.SkipsSecondSolveInsideHuberQuadraticRegion (1 ms)
+[ RUN      ] LoopPgoTest.TrialPgoDoesNotMutateLiveMapsParticlesOrConstraints
+[       OK ] LoopPgoTest.TrialPgoDoesNotMutateLiveMapsParticlesOrConstraints (2 ms)
+[ RUN      ] LoopPgoTest.ImpossibleLoopCannotPassByBeingRobustlyIgnored
+[       OK ] LoopPgoTest.ImpossibleLoopCannotPassByBeingRobustlyIgnored (2 ms)
+[ RUN      ] LoopPgoTest.ActiveGridsMoveRigidlyAndLocalPriorsRemainImmutable
+[       OK ] LoopPgoTest.ActiveGridsMoveRigidlyAndLocalPriorsRemainImmutable (2 ms)
+[ RUN      ] LoopPgoTest.InvalidGraphFailsWithoutCommittingState
+[       OK ] LoopPgoTest.InvalidGraphFailsWithoutCommittingState (1 ms)
+[ RUN      ] LoopPgoTest.SequenceIdentitySurvivesCloudTrimmingAndFilteredQueries
+[       OK ] LoopPgoTest.SequenceIdentitySurvivesCloudTrimmingAndFilteredQueries (1 ms)
+[ RUN      ] LoopPgoTest.HypothesisMassSurvivesMinimumParticleQuotas
+[       OK ] LoopPgoTest.HypothesisMassSurvivesMinimumParticleQuotas (1 ms)
+[ RUN      ] LoopPgoTest.PoseOnlyCloneDetachesBeforePixelInsertion
+[       OK ] LoopPgoTest.PoseOnlyCloneDetachesBeforePixelInsertion (0 ms)
+[ RUN      ] LoopPgoTest.FinalTrajectoryReportsOptimizedPosesAndKeepsTheOnlineOnes
+[       OK ] LoopPgoTest.FinalTrajectoryReportsOptimizedPosesAndKeepsTheOnlineOnes (2 ms)
+[----------] 13 tests from LoopPgoTest (22 ms total)
+
+[----------] 5 tests from PerformanceRegression
+[ RUN      ] PerformanceRegression.ParallelParticleMatchingPreservesStateAndWeights
+[       OK ] PerformanceRegression.ParallelParticleMatchingPreservesStateAndWeights (33 ms)
+[ RUN      ] PerformanceRegression.CachedLoopScoresEqualOriginalExponential
+[       OK ] PerformanceRegression.CachedLoopScoresEqualOriginalExponential (0 ms)
+[ RUN      ] PerformanceRegression.PublicationIsLazyAndReusedAcrossConsumers
+[       OK ] PerformanceRegression.PublicationIsLazyAndReusedAcrossConsumers (2 ms)
+[ RUN      ] PerformanceRegression.HistoryCacheInvalidatesOnPoseChangeAndHypothesisSwitch
+[       OK ] PerformanceRegression.HistoryCacheInvalidatesOnPoseChangeAndHypothesisSwitch (1 ms)
+[ RUN      ] PerformanceRegression.ParallelTrialSolvesMatchSerialAndLeavePriorUntouched
+[       OK ] PerformanceRegression.ParallelTrialSolvesMatchSerialAndLeavePriorUntouched (3 ms)
+[----------] 5 tests from PerformanceRegression (41 ms total)
+
+[----------] 10 tests from HierarchicalBayesIntegration
+[ RUN      ] HierarchicalBayesIntegration.BranchPriorsIgnoreDeformationMultiplier
+[       OK ] HierarchicalBayesIntegration.BranchPriorsIgnoreDeformationMultiplier (2 ms)
+[ RUN      ] HierarchicalBayesIntegration.RejectsWrongLoopOnlyAfterTenFutureScans
+[       OK ] HierarchicalBayesIntegration.RejectsWrongLoopOnlyAfterTenFutureScans (4 ms)
+[ RUN      ] HierarchicalBayesIntegration.AcceptsSupportedLoopOnlyAfterTenFutureScans
+[       OK ] HierarchicalBayesIntegration.AcceptsSupportedLoopOnlyAfterTenFutureScans (4 ms)
+[ RUN      ] HierarchicalBayesIntegration.ValidationOwnsItsPixelsAndWorldPose
+[       OK ] HierarchicalBayesIntegration.ValidationOwnsItsPixelsAndWorldPose (2 ms)
+[ RUN      ] HierarchicalBayesIntegration.MissingCoverageTimesOutWithoutManufacturingEvidence
+[       OK ] HierarchicalBayesIntegration.MissingCoverageTimesOutWithoutManufacturingEvidence (19 ms)
+[ RUN      ] HierarchicalBayesIntegration.DuplicateMeasurementCannotCountAsFutureEvidenceTwice
+[       OK ] HierarchicalBayesIntegration.DuplicateMeasurementCannotCountAsFutureEvidenceTwice (2 ms)
+[ RUN      ] HierarchicalBayesIntegration.BudgetDeferralDoesNotDropParentOrConsumeCandidate
+[       OK ] HierarchicalBayesIntegration.BudgetDeferralDoesNotDropParentOrConsumeCandidate (1 ms)
+[ RUN      ] HierarchicalBayesIntegration.NoHistoricalReferenceDefersWithoutMutation
+[       OK ] HierarchicalBayesIntegration.NoHistoricalReferenceDefersWithoutMutation (2 ms)
+[ RUN      ] HierarchicalBayesIntegration.ResamplingPreservesSubnormalGraphLogMass
+[       OK ] HierarchicalBayesIntegration.ResamplingPreservesSubnormalGraphLogMass (2 ms)
+[ RUN      ] HierarchicalBayesIntegration.MultipleParentMassesAreConservedAtBranchCreation
+[       OK ] HierarchicalBayesIntegration.MultipleParentMassesAreConservedAtBranchCreation (2 ms)
+[----------] 10 tests from HierarchicalBayesIntegration (43 ms total)
+
+[----------] 4 tests from LoopRefinement
+[ RUN      ] LoopRefinement.RefinementNeverMovesAwayFromTheTruth
+[       OK ] LoopRefinement.RefinementNeverMovesAwayFromTheTruth (141 ms)
+[ RUN      ] LoopRefinement.ResidualScalesWithCellSizeNotSearchStep
+[       OK ] LoopRefinement.ResidualScalesWithCellSizeNotSearchStep (42 ms)
+[ RUN      ] LoopRefinement.NeverWorsensTheLoopMetric
+[       OK ] LoopRefinement.NeverWorsensTheLoopMetric (134 ms)
+[ RUN      ] LoopRefinement.DisabledReproducesTheLatticeOptimum
+[       OK ] LoopRefinement.DisabledReproducesTheLatticeOptimum (33 ms)
+[----------] 4 tests from LoopRefinement (352 ms total)
+
+[----------] 6 tests from LateRunIntegration
+[ RUN      ] LateRunIntegration.RecoveryWaitsForNextScanBeforeInsertion
+[       OK ] LateRunIntegration.RecoveryWaitsForNextScanBeforeInsertion (7 ms)
+[ RUN      ] LateRunIntegration.AnotherMatureNativeSubmapCanRecoverStaleReference
+[       OK ] LateRunIntegration.AnotherMatureNativeSubmapCanRecoverStaleReference (10 ms)
+[ RUN      ] LateRunIntegration.UnusableScanCannotCreateRecoveryOrNewMap
+[       OK ] LateRunIntegration.UnusableScanCannotCreateRecoveryOrNewMap (5 ms)
+[ RUN      ] LateRunIntegration.LocalOnlyGraphDoesNotScheduleRedundantPgo
+[       OK ] LateRunIntegration.LocalOnlyGraphDoesNotScheduleRedundantPgo (1 ms)
+[ RUN      ] LateRunIntegration.FrozenCachesAreLazySharedEvictableAndReproducible
+[       OK ] LateRunIntegration.FrozenCachesAreLazySharedEvictableAndReproducible (1 ms)
+[ RUN      ] LateRunIntegration.ZeroBudgetEvictsDerivedDataWithoutRemovingHistory
+[       OK ] LateRunIntegration.ZeroBudgetEvictsDerivedDataWithoutRemovingHistory (2 ms)
+[----------] 6 tests from LateRunIntegration (28 ms total)
+
+[----------] 4 tests from AccuracyRegression
+[ RUN      ] AccuracyRegression.ZeroNoisePreservesSmallReverseAndLateralOdometry
+[       OK ] AccuracyRegression.ZeroNoisePreservesSmallReverseAndLateralOdometry (0 ms)
+[ RUN      ] AccuracyRegression.DenseTrajectoryUsesTimeInterpolatedNodeCorrections
+[       OK ] AccuracyRegression.DenseTrajectoryUsesTimeInterpolatedNodeCorrections (0 ms)
+[ RUN      ] AccuracyRegression.LoopUsesRetrievedSubmapInsteadOfItsPredecessor
+[       OK ] AccuracyRegression.LoopUsesRetrievedSubmapInsteadOfItsPredecessor (1 ms)
+[ RUN      ] AccuracyRegression.ProposalSeedKeepsWeightsAndCannotWorsenFrontendObjective
+[       OK ] AccuracyRegression.ProposalSeedKeepsWeightsAndCannotWorsenFrontendObjective (4 ms)
+[----------] 4 tests from AccuracyRegression (6 ms total)
+
+[----------] 7 tests from ScanInformedIntegration
+[ RUN      ] ScanInformedIntegration.CorrectsEachParticleAndHypothesisEvidence
+[       OK ] ScanInformedIntegration.CorrectsEachParticleAndHypothesisEvidence (2 ms)
+[ RUN      ] ScanInformedIntegration.RigidGraphFrameChangeDoesNotBecomeMotion
+[       OK ] ScanInformedIntegration.RigidGraphFrameChangeDoesNotBecomeMotion (4 ms)
+[ RUN      ] ScanInformedIntegration.StationaryAndZeroNoiseExactlyRetainBootstrap
+[       OK ] ScanInformedIntegration.StationaryAndZeroNoiseExactlyRetainBootstrap (8 ms)
+[ RUN      ] ScanInformedIntegration.RejectedTrackingUsesOriginalProposals
+[       OK ] ScanInformedIntegration.RejectedTrackingUsesOriginalProposals (1 ms)
+[ RUN      ] ScanInformedIntegration.MissingLoopCoverageHasNoArtificialEvidence
+[       OK ] ScanInformedIntegration.MissingLoopCoverageHasNoArtificialEvidence (2 ms)
+[ RUN      ] ScanInformedIntegration.FrozenLoopLikelihoodRetainsImportanceCorrection
+[       OK ] ScanInformedIntegration.FrozenLoopLikelihoodRetainsImportanceCorrection (3 ms)
+[ RUN      ] ScanInformedIntegration.PureUsesFrontendForEveryCandidate
+[       OK ] ScanInformedIntegration.PureUsesFrontendForEveryCandidate (2 ms)
+[----------] 7 tests from ScanInformedIntegration (26 ms total)
+
+[----------] 4 tests from SubmapTest
+[ RUN      ] SubmapTest.FrozenDistanceFieldAndIdSurviveClone
+[       OK ] SubmapTest.FrozenDistanceFieldAndIdSurviveClone (0 ms)
+[ RUN      ] SubmapTest.RadialSignatureIsMeasuredFromTheOriginNotTheArrayCentre
+[       OK ] SubmapTest.RadialSignatureIsMeasuredFromTheOriginNotTheArrayCentre (0 ms)
+[ RUN      ] SubmapTest.FinishCropsBeforeBuildingTheDistanceField
+[       OK ] SubmapTest.FinishCropsBeforeBuildingTheDistanceField (0 ms)
+[ RUN      ] SubmapTest.GrowingAnActiveSubmapDoesNotMoveItsGlobalPose
+[       OK ] SubmapTest.GrowingAnActiveSubmapDoesNotMoveItsGlobalPose (0 ms)
+[----------] 4 tests from SubmapTest (0 ms total)
+
+[----------] 8 tests from LogOddsGridTest
+[ RUN      ] LogOddsGridTest.GrowPreservesWorldCoordinatesOfExistingCells
+[       OK ] LogOddsGridTest.GrowPreservesWorldCoordinatesOfExistingCells (0 ms)
+[ RUN      ] LogOddsGridTest.GrowPreservesEveryCellMetricCoordinateAndValue
+[       OK ] LogOddsGridTest.GrowPreservesEveryCellMetricCoordinateAndValue (0 ms)
+[ RUN      ] LogOddsGridTest.RepeatedGrowthKeepsTheInvariant
+[       OK ] LogOddsGridTest.RepeatedGrowthKeepsTheInvariant (0 ms)
+[ RUN      ] LogOddsGridTest.CropShrinksToTheObservedBoxAndKeepsCoordinates
+[       OK ] LogOddsGridTest.CropShrinksToTheObservedBoxAndKeepsCoordinates (0 ms)
+[ RUN      ] LogOddsGridTest.CropLeavesAnUnobservedGridAlone
+[       OK ] LogOddsGridTest.CropLeavesAnUnobservedGridAlone (0 ms)
+[ RUN      ] LogOddsGridTest.CropIsANoOpWhenTheObservedBoxAlreadyFillsTheGrid
+[       OK ] LogOddsGridTest.CropIsANoOpWhenTheObservedBoxAlreadyFillsTheGrid (0 ms)
+[ RUN      ] LogOddsGridTest.GrowIsANoOpWhenTheBoxAlreadyFits
+[       OK ] LogOddsGridTest.GrowIsANoOpWhenTheBoxAlreadyFits (0 ms)
+[ RUN      ] LogOddsGridTest.ResetChangesExtentAndClears
+[       OK ] LogOddsGridTest.ResetChangesExtentAndClears (0 ms)
+[----------] 8 tests from LogOddsGridTest (0 ms total)
+
+[----------] 4 tests from WeightedMeanPoseTest
+[ RUN      ] WeightedMeanPoseTest.AveragesTranslationByWeight
+[       OK ] WeightedMeanPoseTest.AveragesTranslationByWeight (0 ms)
+[ RUN      ] WeightedMeanPoseTest.AveragesAngleCircularlyAcrossTheWrap
+[       OK ] WeightedMeanPoseTest.AveragesAngleCircularlyAcrossTheWrap (0 ms)
+[ RUN      ] WeightedMeanPoseTest.FallsBackToAnUnweightedMeanWhenWeightsVanish
+[       OK ] WeightedMeanPoseTest.FallsBackToAnUnweightedMeanWhenWeightsVanish (0 ms)
+[ RUN      ] WeightedMeanPoseTest.IsIdentityWithNoPoses
+[       OK ] WeightedMeanPoseTest.IsIdentityWithNoPoses (0 ms)
+[----------] 4 tests from WeightedMeanPoseTest (0 ms total)
+
+[----------] 1 test from HypothesisTest
+[ RUN      ] HypothesisTest.StartsWithoutALocalPoseSoItIsSeededOnce
+[       OK ] HypothesisTest.StartsWithoutALocalPoseSoItIsSeededOnce (0 ms)
+[----------] 1 test from HypothesisTest (0 ms total)
+
+[----------] 1 test from DynamicOccupancyGridTest
+[ RUN      ] DynamicOccupancyGridTest.ResetAdoptsExtentAndFill
+[       OK ] DynamicOccupancyGridTest.ResetAdoptsExtentAndFill (0 ms)
+[----------] 1 test from DynamicOccupancyGridTest (0 ms total)
+
+[----------] 9 tests from SubmapGraphTest
+[ RUN      ] SubmapGraphTest.BoundingBoxIsEmptyWithoutSubmaps
+[       OK ] SubmapGraphTest.BoundingBoxIsEmptyWithoutSubmaps (0 ms)
+[ RUN      ] SubmapGraphTest.BoundingBoxCoversAnAxisAlignedSubmap
+[       OK ] SubmapGraphTest.BoundingBoxCoversAnAxisAlignedSubmap (0 ms)
+[ RUN      ] SubmapGraphTest.BoundingBoxUsesAllFourCornersOfARotatedSubmap
+[       OK ] SubmapGraphTest.BoundingBoxUsesAllFourCornersOfARotatedSubmap (0 ms)
+[ RUN      ] SubmapGraphTest.BoundingBoxSpansHistoryAndActiveSubmaps
+[       OK ] SubmapGraphTest.BoundingBoxSpansHistoryAndActiveSubmaps (0 ms)
+[ RUN      ] SubmapGraphTest.MakingRoomFinishesTheOldestAndKeepsAtMostTwoActive
+[       OK ] SubmapGraphTest.MakingRoomFinishesTheOldestAndKeepsAtMostTwoActive (0 ms)
+[ RUN      ] SubmapGraphTest.MakingRoomFinishesAnUnderfilledSubmap
+[       OK ] SubmapGraphTest.MakingRoomFinishesAnUnderfilledSubmap (0 ms)
+[ RUN      ] SubmapGraphTest.MakingRoomDoesNothingBelowTheCap
+[       OK ] SubmapGraphTest.MakingRoomDoesNothingBelowTheCap (0 ms)
+[ RUN      ] SubmapGraphTest.RepeatedCreationNeverExceedsTwoActive
+[       OK ] SubmapGraphTest.RepeatedCreationNeverExceedsTwoActive (0 ms)
+[ RUN      ] SubmapGraphTest.CountsInterConstraintsAndTrimsInactiveScanData
+[       OK ] SubmapGraphTest.CountsInterConstraintsAndTrimsInactiveScanData (0 ms)
+[----------] 9 tests from SubmapGraphTest (0 ms total)
+
+[----------] 5 tests from SubmapCopyOnWriteTest
+[ RUN      ] SubmapCopyOnWriteTest.FinishedGridIsSharedWithClonesRatherThanCopied
+[       OK ] SubmapCopyOnWriteTest.FinishedGridIsSharedWithClonesRatherThanCopied (0 ms)
+[ RUN      ] SubmapCopyOnWriteTest.ActiveGridIsCopiedSoHypothesesCanDiverge
+[       OK ] SubmapCopyOnWriteTest.ActiveGridIsCopiedSoHypothesesCanDiverge (0 ms)
+[ RUN      ] SubmapCopyOnWriteTest.AFinishedSubmapRefusesToBeMutated
+[       OK ] SubmapCopyOnWriteTest.AFinishedSubmapRefusesToBeMutated (0 ms)
+[ RUN      ] SubmapCopyOnWriteTest.ClonesShareTheGridButOwnTheirPose
+[       OK ] SubmapCopyOnWriteTest.ClonesShareTheGridButOwnTheirPose (0 ms)
+[ RUN      ] SubmapCopyOnWriteTest.SubmapsFrozenToMakeRoomAreSharedByClones
+[       OK ] SubmapCopyOnWriteTest.SubmapsFrozenToMakeRoomAreSharedByClones (0 ms)
+[----------] 5 tests from SubmapCopyOnWriteTest (0 ms total)
+
+[----------] 8 tests from ScanInsertionTest
+[ RUN      ] ScanInsertionTest.OffsetSensorPreservesOccludedCellsBehindItsRealRay
+[       OK ] ScanInsertionTest.OffsetSensorPreservesOccludedCellsBehindItsRealRay (0 ms)
+[ RUN      ] ScanInsertionTest.TransformsOriginsIntoRotatedSubmapAndGrowsToIncludeThem
+[       OK ] ScanInsertionTest.TransformsOriginsIntoRotatedSubmapAndGrowsToIncludeThem (0 ms)
+[ RUN      ] ScanInsertionTest.CoLocatedOriginsRetainLegacyGridAndInvalidInputIsTransactional
+[       OK ] ScanInsertionTest.CoLocatedOriginsRetainLegacyGridAndInvalidInputIsTransactional (0 ms)
+[ RUN      ] ScanInsertionTest.HitBeatsAMissFromAnotherBeamInTheSameCell
+[       OK ] ScanInsertionTest.HitBeatsAMissFromAnotherBeamInTheSameCell (0 ms)
+[ RUN      ] ScanInsertionTest.SharedFreeCellIsUpdatedOncePerScan
+[       OK ] ScanInsertionTest.SharedFreeCellIsUpdatedOncePerScan (0 ms)
+[ RUN      ] ScanInsertionTest.SeparateScansStillAccumulate
+[       OK ] ScanInsertionTest.SeparateScansStillAccumulate (0 ms)
+[ RUN      ] ScanInsertionTest.ReturnBeyondTheInitialGridIsGrownIntoAndMarked
+[       OK ] ScanInsertionTest.ReturnBeyondTheInitialGridIsGrownIntoAndMarked (0 ms)
+[ RUN      ] ScanInsertionTest.RepeatedHitsClampAtTheConfiguredBound
+[       OK ] ScanInsertionTest.RepeatedHitsClampAtTheConfiguredBound (0 ms)
+[----------] 8 tests from ScanInsertionTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 117 tests from 18 test suites ran. (596 ms total)
+[  PASSED  ] 117 tests.

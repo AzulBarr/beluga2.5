@@ -1,0 +1,77 @@
+<launch>
+  <!--Pure frontend proposal; retains mandatory bootstrap handling for missing or singular motion.-->
+  <arg name="use_sim_time" default="true" />
+  <arg name="bag_path" default="src/beluga2.5/belugaslam_example/bags/mit_rosbag/mit_bag_ros2" />
+  <arg name="slam_prefix" default="" />
+  <arg name="rviz_config_file" default="$(find-pkg-share belugaslam_example)/RVIZFiles/config.rviz" />
+  <arg name="min_particles" default="5" />
+  <arg name="max_particles" default="30" />
+  <arg name="record_bag" default="false" />
+  <arg name="bag_timeout" default="0" />
+  <arg name="optimized_trajectory_path" default="" />
+  <arg name="pgo_odometry_translation_weight" default="3.0" />
+  <arg name="pgo_odometry_rotation_weight" default="5.0" />
+  <arg name="pgo_intra_translation_weight" default="5.0" />
+  <arg name="pgo_intra_rotation_weight" default="8.0" />
+  <arg name="pgo_loop_translation_weight" default="10.0" />
+  <arg name="pgo_loop_rotation_weight" default="12.0" />
+  <arg name="pgo_huber_scale" default="1.0" />
+  <arg name="insertion_l_occ" default="1.2" />
+  <arg name="insertion_l_free" default="-0.2" />
+  <arg name="keyframe_min_translation" default="0.15" />
+  <arg name="keyframe_min_rotation" default="0.0872665" />
+  <arg name="max_points_per_scan_node" default="180" />
+  <arg name="tracking_occupied_space_weight" default="5.0" />
+  <arg name="tracking_odom_translation_sigma" default="0.10" />
+  <arg name="tracking_odom_rotation_sigma" default="0.05" />
+  <arg name="tracking_max_points" default="180" />
+  <arg name="range_max" default="60.0" />
+  <arg name="random_seed" default="42" />
+  <arg name="loop_diagnostics_path" default="" />
+  <arg name="performance_diagnostics_path" default="" />
+  <arg name="final_trajectory_path" default="" />
+  <arg name="scan_informed_proposal" default="true" />
+  <arg name="icp_refine" default="true" />
+  <arg name="scan_proposal_fraction" default="1.0" />
+  <arg name="scan_proposal_adapt_to_prior" default="false" />
+  <arg name="motion_proposal_samples" default="8" />
+  <arg name="tracking_diagnostics_path" default="" />
+  <include file="$(find-pkg-share belugaslam_example)/example/launch/mit_rosbag_belugaslam.xml">
+    <arg name="use_sim_time" value="$(var use_sim_time)" />
+    <arg name="bag_path" value="$(var bag_path)" />
+    <arg name="slam_prefix" value="$(var slam_prefix)" />
+    <arg name="rviz_config_file" value="$(var rviz_config_file)" />
+    <arg name="min_particles" value="$(var min_particles)" />
+    <arg name="max_particles" value="$(var max_particles)" />
+    <arg name="record_bag" value="$(var record_bag)" />
+    <arg name="bag_timeout" value="$(var bag_timeout)" />
+    <arg name="optimized_trajectory_path" value="$(var optimized_trajectory_path)" />
+    <arg name="pgo_odometry_translation_weight" value="$(var pgo_odometry_translation_weight)" />
+    <arg name="pgo_odometry_rotation_weight" value="$(var pgo_odometry_rotation_weight)" />
+    <arg name="pgo_intra_translation_weight" value="$(var pgo_intra_translation_weight)" />
+    <arg name="pgo_intra_rotation_weight" value="$(var pgo_intra_rotation_weight)" />
+    <arg name="pgo_loop_translation_weight" value="$(var pgo_loop_translation_weight)" />
+    <arg name="pgo_loop_rotation_weight" value="$(var pgo_loop_rotation_weight)" />
+    <arg name="pgo_huber_scale" value="$(var pgo_huber_scale)" />
+    <arg name="insertion_l_occ" value="$(var insertion_l_occ)" />
+    <arg name="insertion_l_free" value="$(var insertion_l_free)" />
+    <arg name="keyframe_min_translation" value="$(var keyframe_min_translation)" />
+    <arg name="keyframe_min_rotation" value="$(var keyframe_min_rotation)" />
+    <arg name="max_points_per_scan_node" value="$(var max_points_per_scan_node)" />
+    <arg name="tracking_occupied_space_weight" value="$(var tracking_occupied_space_weight)" />
+    <arg name="tracking_odom_translation_sigma" value="$(var tracking_odom_translation_sigma)" />
+    <arg name="tracking_odom_rotation_sigma" value="$(var tracking_odom_rotation_sigma)" />
+    <arg name="tracking_max_points" value="$(var tracking_max_points)" />
+    <arg name="range_max" value="$(var range_max)" />
+    <arg name="random_seed" value="$(var random_seed)" />
+    <arg name="loop_diagnostics_path" value="$(var loop_diagnostics_path)" />
+    <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)" />
+    <arg name="final_trajectory_path" value="$(var final_trajectory_path)" />
+    <arg name="scan_informed_proposal" value="$(var scan_informed_proposal)" />
+    <arg name="icp_refine" value="$(var icp_refine)" />
+    <arg name="scan_proposal_fraction" value="$(var scan_proposal_fraction)" />
+    <arg name="scan_proposal_adapt_to_prior" value="$(var scan_proposal_adapt_to_prior)" />
+    <arg name="motion_proposal_samples" value="$(var motion_proposal_samples)" />
+    <arg name="tracking_diagnostics_path" value="$(var tracking_diagnostics_path)" />
+  </include>
+</launch>

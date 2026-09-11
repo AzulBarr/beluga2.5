@@ -14,12 +14,12 @@ inline MotionIncrement inverse_increment(const MotionIncrement& a) {
   return {-c*a[0]-s*a[1],s*a[0]-c*a[1],-a[2]};
 }
 struct ScanProposalOptions {
-  // Retain >=5% of the ORIGINAL prior as a defensive mixture component.
+  // fraction=1 with adapt_to_prior=false selects the pure frontend proposal.
   double fraction=.8;
   bool adapt_to_prior=true;
   void validate() const {
-    if (!std::isfinite(fraction) || fraction<0 || fraction>.95)
-      throw std::invalid_argument("scan_proposal_fraction must be in [0,0.95]");
+    if (!std::isfinite(fraction) || fraction<0 || fraction>1)
+      throw std::invalid_argument("scan_proposal_fraction must be in [0,1]");
   }
 };
 
@@ -62,6 +62,7 @@ class ScanInformedProposal {
   [[nodiscard]] double log_importance_ratio(const MotionIncrement& delta) const {
     if (options_.fraction==0) return 0.;
     const double lp=prior_.log_density(delta[0],delta[1],delta[2]);
+    if (options_.fraction==1) return lp-log_frontend_density(delta);
     const double lq=beluga::motion_detail::log_add(std::log1p(-options_.fraction)+lp,
         std::log(options_.fraction)+log_frontend_density(delta));
     return lp-lq;
@@ -71,7 +72,8 @@ class ScanInformedProposal {
   template<class Generator>
   Draw draw(const MotionIncrement& prior_draw,Generator& generator) const {
     auto delta=prior_draw;
-    const bool frontend=options_.fraction>0 && std::bernoulli_distribution{options_.fraction}(generator);
+    const bool frontend=options_.fraction==1 ||
+      (options_.fraction>0 && std::bernoulli_distribution{options_.fraction}(generator));
     if (frontend) delta=compose_increment(shift_,prior_draw);
     return {delta,log_importance_ratio(delta),frontend};
   }

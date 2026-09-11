@@ -98,14 +98,25 @@ int main() {
   double adaptive_norm=0;
   for(int i=0;i<180000;++i) adaptive_norm+=std::exp(adaptive.draw(prior.sample(rng),rng).log_ratio);
   near(adaptive_norm/180000,1,.012,"adaptive coefficient is also used in denominator q");
+  ScanProposalOptions pure_options;pure_options.fraction=1.;pure_options.adapt_to_prior=false;
+  ScanInformedProposal pure(prior,compose_increment(odom,{.001,.001,.001}),pure_options);
+  double pure_norm=0;
+  for(int i=0;i<180000;++i) {
+    const auto raw=prior.sample(rng);const auto before=rng;const auto d=pure.draw(raw,rng);
+    require(d.from_frontend && rng==before,"pure proposal always transforms; no mixture draw");
+    near(d.log_ratio,prior.log_density(d.delta[0],d.delta[1],d.delta[2])-pure.log_frontend_density(d.delta),
+      1e-12,"pure correction uses exactly p/q_frontend");
+    pure_norm+=std::exp(d.log_ratio);
+  }
+  near(pure_norm/180000,1.,.012,"pure proposal change of measure");
   ScanProposalOptions off;off.fraction=0;
   ScanInformedProposal qoff(prior,{2,3,.4},off);
   const auto generator_before=rng;
   const MotionIncrement candidate{.4,.1,.2};const auto draw=qoff.draw(candidate,rng);
   require(rng==generator_before && draw.delta==candidate && draw.log_ratio==0 && !draw.from_frontend,
       "disabled proposal retains draws and RNG");
-  bool rejected=false;try {ScanProposalOptions bad;bad.fraction=1;bad.validate();}catch(const std::invalid_argument&){rejected=true;}
-  require(rejected,"cannot remove defensive prior component");
+  bool rejected=false;try {ScanProposalOptions bad;bad.fraction=1.01;bad.validate();}catch(const std::invalid_argument&){rejected=true;}
+  require(rejected,"cannot exceed probability one");
   const auto choice=select_motion_proposal({-INFINITY,std::log(.4)},rng);
   require(choice.index==1,"zero target density is never selected");
   near(std::exp(choice.log_evidence),.2,1e-14,"zero-weight candidates remain in K normalizer");

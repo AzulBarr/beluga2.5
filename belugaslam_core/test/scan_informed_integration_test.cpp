@@ -11,9 +11,10 @@ struct ScanFixture {
   std::unique_ptr<BelugaSLAM> slam;
   std::shared_ptr<Hypothesis> h;
   BelugaSLAM::measurement_type scan;
-  explicit ScanFixture(bool enabled=true,bool deterministic=false,const state_type& world=SIPose()) {
+  explicit ScanFixture(bool enabled=true,bool deterministic=false,const state_type& world=SIPose(),bool pure=false) {
     params.min_particles=5;params.max_particles=30;params.max_hypotheses=4;
     params.motion_proposal_samples=1;params.worker_threads=1;
+    if(pure) {params.scan_proposal.fraction=1.;params.scan_proposal.adapt_to_prior=false;}
     params.scan_informed_proposal=enabled;params.tracking_matcher="distance";
     params.enable_loop_closure=false;params.enable_pgo=false;
     params.recovery.enabled=false;params.split_persistence=100;
@@ -179,4 +180,15 @@ TEST(ScanInformedIntegration, FrozenLoopLikelihoodRetainsImportanceCorrection) {
     for(std::size_t j=0;j<values.size();++j)
       EXPECT_NEAR(std::get<3>(*(f.slam->particles().begin()+members[id][j])),values[j],1e-9);
   }
+}
+
+TEST(ScanInformedIntegration, PureUsesFrontendForEveryCandidate) {
+  ScanFixture f(true,false,SIPose(),true);
+  f.slam->sample_motion_model({SIPose(.2,0,.02),SIPose()});f.slam->measurement_model_map(f.scan);
+  ASSERT_EQ(f.h->scan_proposal_status,"mixture");
+  EXPECT_DOUBLE_EQ(f.h->scan_proposal_fraction,1.);
+  EXPECT_GT(f.h->scan_proposal_count,0U);
+  EXPECT_EQ(f.h->scan_proposal_count,f.h->scan_proposal_frontend_count);
+  double mass=0;for(const auto& p:f.slam->particles()) mass+=joint_particle_weight(p);
+  EXPECT_NEAR(mass,1.,1e-12);
 }

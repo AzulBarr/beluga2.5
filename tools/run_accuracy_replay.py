@@ -71,7 +71,7 @@ def main():
     parser.add_argument('--dataset', type=Path, default=ROOT/'belugaslam_example/bags/intel/intel.clf')
     parser.add_argument('--binary', type=Path, help='Defaults to the installed belugaslam_core executable')
     parser.add_argument('--particles', type=int, default=300)
-    parser.add_argument('--scan-informed-proposal', choices=['on', 'off'], default='on')
+    parser.add_argument('--scan-informed-proposal', choices=['on', 'off', 'pure'], default='on')
     parser.add_argument('--hypotheses', type=int, default=4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--loops', choices=['belief', 'map', 'geometry', 'off'], default='belief')

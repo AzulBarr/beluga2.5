@@ -1,0 +1,32 @@
+{
+  "pure_icp": {
+    "poses": 13631,
+    "optimized_poses": 13631,
+    "proposal_status": {
+      "frontend_unavailable": 20915,
+      "singular_motion": 738,
+      "mixture": 4202,
+      "missing_evidence": 282
+    },
+    "icp_status": {
+      "disabled": 20915,
+      "frontend_cost_retained": 1688,
+      "icp_accepted": 3532,
+      "high_rmse": 2
+    },
+    "max_mass_normalization_error": 3.3306690738754696e-16
+  },
+  "odom_icp": {
+    "poses": 13631,
+    "optimized_poses": 13631,
+    "proposal_status": {
+      "disabled": 26225
+    },
+    "icp_status": {
+      "disabled": 1,
+      "frontend_cost_retained": 8814,
+      "icp_accepted": 17410
+    },
+    "max_mass_normalization_error": 3.3306690738754696e-16
+  }
+}

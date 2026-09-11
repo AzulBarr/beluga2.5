@@ -194,6 +194,7 @@ def generate_launch_description():
     declare_tracking_max_iterations = DeclareLaunchArgument('tracking_max_iterations', default_value='20', description='See QUALITY_REVIEW.md for tracking_max_iterations')
     declare_motion_proposal_samples = DeclareLaunchArgument('motion_proposal_samples', default_value='8', description='See QUALITY_REVIEW.md for motion_proposal_samples')
     declare_scan_informed_proposal = DeclareLaunchArgument('scan_informed_proposal', default_value='true')
+    declare_icp_refine = DeclareLaunchArgument('icp_refine', default_value='false')
     declare_scan_proposal_fraction = DeclareLaunchArgument('scan_proposal_fraction', default_value='0.8')
     declare_scan_proposal_adapt_to_prior = DeclareLaunchArgument('scan_proposal_adapt_to_prior', default_value='true')
     declare_map_resolution = DeclareLaunchArgument('map_resolution', default_value='0.05', description='See QUALITY_REVIEW.md for map_resolution')
@@ -337,6 +338,7 @@ def generate_launch_description():
             "tracking_max_iterations": ParameterValue(LaunchConfiguration('tracking_max_iterations'), value_type=int),
             "motion_proposal_samples": ParameterValue(LaunchConfiguration('motion_proposal_samples'), value_type=int),
             "scan_informed_proposal": ParameterValue(LaunchConfiguration('scan_informed_proposal'), value_type=bool),
+            "icp_refine": ParameterValue(LaunchConfiguration('icp_refine'), value_type=bool),
             "scan_proposal_fraction": ParameterValue(LaunchConfiguration('scan_proposal_fraction'), value_type=float),
             "scan_proposal_adapt_to_prior": ParameterValue(LaunchConfiguration('scan_proposal_adapt_to_prior'), value_type=bool),
             "map_resolution": ParameterValue(LaunchConfiguration('map_resolution'), value_type=float),
@@ -477,6 +479,7 @@ def generate_launch_description():
     declare_tracking_max_iterations,
     declare_motion_proposal_samples,
     declare_scan_informed_proposal,
+    declare_icp_refine,
     declare_scan_proposal_fraction,
     declare_scan_proposal_adapt_to_prior,
     declare_map_resolution,

@@ -1,0 +1,519 @@
+{
+  "reference_poses": 9722,
+  "common_reference_poses": 9722,
+  "common_reference_fraction": 1.0,
+  "alignment": "se2",
+  "max_timestamp_difference_s": 0.05,
+  "rpe_delta_s": 1.0,
+  "common_time_range_s": [
+    "976052857.33753",
+    "976055548.637284"
+  ],
+  "runs": {
+    "pure_icp_online": {
+      "estimate_poses": 13631,
+      "matched_reference_poses": 9722,
+      "unmatched_reference_poses": 0,
+      "unmatched_estimate_poses": 3909,
+      "alignment_transform": {
+        "x": -8.213826628553731,
+        "y": -20.342672529023545,
+        "yaw": 1.3070713570655315,
+        "scale": 1
+      },
+      "association_dt_s": {
+        "count": 9722,
+        "rmse": 0.0020699647787959263,
+        "p95": 0.004476949999999999,
+        "max": 0.004996
+      },
+      "position_ape_m": {
+        "count": 9722,
+        "rmse": 16.181989824978857,
+        "p95": 27.782996418190717,
+        "max": 31.18919905415779
+      },
+      "yaw_ape_rad": {
+        "count": 9722,
+        "rmse": 1.5013234731943357,
+        "p95": 2.76965970811774,
+        "max": 3.134221037253899
+      },
+      "translation_rpe_m": {
+        "count": 2727,
+        "rmse": 0.7225981886282742,
+        "p95": 0.17998790776404563,
+        "max": 14.30536054662694
+      },
+      "rotation_rpe_rad": {
+        "count": 2727,
+        "rmse": 0.15708883649013908,
+        "p95": 0.13552326412768148,
+        "max": 2.303461900705917
+      },
+      "position_ape_by_third_m": {
+        "early": {
+          "count": 3240,
+          "rmse": 19.06612355779047,
+          "p95": 28.272875665050456,
+          "max": 30.54652910818119
+        },
+        "middle": {
+          "count": 3241,
+          "rmse": 10.455376220010377,
+          "p95": 20.880564738599606,
+          "max": 26.893047518131805
+        },
+        "late": {
+          "count": 3241,
+          "rmse": 17.685298742473236,
+          "p95": 28.940502046545106,
+          "max": 31.18919905415779
+        }
+      },
+      "worst_reference_samples": [
+        {
+          "reference_index": 9506,
+          "stamp_ns": 976055469747284000,
+          "position_error_m": 31.18919905415779,
+          "yaw_error_rad": 2.878773797784584
+        },
+        {
+          "reference_index": 8232,
+          "stamp_ns": 976054991357284000,
+          "position_error_m": 30.996348143012487,
+          "yaw_error_rad": 2.557545631599637
+        },
+        {
+          "reference_index": 8233,
+          "stamp_ns": 976054992767284000,
+          "position_error_m": 30.93837919106985,
+          "yaw_error_rad": 2.5575384726237425
+        },
+        {
+          "reference_index": 9507,
+          "stamp_ns": 976055469757284000,
+          "position_error_m": 30.928402960330946,
+          "yaw_error_rad": 2.860025572153482
+        },
+        {
+          "reference_index": 9094,
+          "stamp_ns": 976055305867284000,
+          "position_error_m": 30.84813841493704,
+          "yaw_error_rad": 1.5887447990057029
+        },
+        {
+          "reference_index": 9097,
+          "stamp_ns": 976055306727284000,
+          "position_error_m": 30.846718471959203,
+          "yaw_error_rad": 1.5887433028470852
+        },
+        {
+          "reference_index": 9095,
+          "stamp_ns": 976055306307284000,
+          "position_error_m": 30.845205139406804,
+          "yaw_error_rad": 1.5887462075527676
+        },
+        {
+          "reference_index": 9096,
+          "stamp_ns": 976055306397284000,
+          "position_error_m": 30.845205139406804,
+          "yaw_error_rad": 1.5887443150893765
+        },
+        {
+          "reference_index": 9104,
+          "stamp_ns": 976055309397284000,
+          "position_error_m": 30.821064195191372,
+          "yaw_error_rad": 1.2799069180286167
+        },
+        {
+          "reference_index": 9101,
+          "stamp_ns": 976055307417284000,
+          "position_error_m": 30.820422241971084,
+          "yaw_error_rad": 1.4949992357080604
+        }
+      ]
+    },
+    "pure_icp_optimized": {
+      "estimate_poses": 13631,
+      "matched_reference_poses": 9722,
+      "unmatched_reference_poses": 0,
+      "unmatched_estimate_poses": 3909,
+      "alignment_transform": {
+        "x": -9.010463972837627,
+        "y": -20.643246291509655,
+        "yaw": 1.2694574242181285,
+        "scale": 1
+      },
+      "association_dt_s": {
+        "count": 9722,
+        "rmse": 0.0020699647787959263,
+        "p95": 0.004476949999999999,
+        "max": 0.004996
+      },
+      "position_ape_m": {
+        "count": 9722,
+        "rmse": 15.912917510594305,
+        "p95": 27.367936157662378,
+        "max": 30.54487839751368
+      },
+      "yaw_ape_rad": {
+        "count": 9722,
+        "rmse": 1.4713199164385289,
+        "p95": 2.698057836932009,
+        "max": 3.130646866697586
+      },
+      "translation_rpe_m": {
+        "count": 2727,
+        "rmse": 0.4945739244754107,
+        "p95": 0.13446697975723668,
+        "max": 11.997953467751447
+      },
+      "rotation_rpe_rad": {
+        "count": 2727,
+        "rmse": 0.10476300686907566,
+        "p95": 0.1077397339149479,
+        "max": 1.9005628079345904
+      },
+      "position_ape_by_third_m": {
+        "early": {
+          "count": 3240,
+          "rmse": 18.96209765437092,
+          "p95": 28.133504225964106,
+          "max": 29.9152877812984
+        },
+        "middle": {
+          "count": 3241,
+          "rmse": 9.960260496096199,
+          "p95": 19.584277071378423,
+          "max": 25.549508444460653
+        },
+        "late": {
+          "count": 3241,
+          "rmse": 17.34726795252371,
+          "p95": 28.262847705560585,
+          "max": 30.54487839751368
+        }
+      },
+      "worst_reference_samples": [
+        {
+          "reference_index": 9502,
+          "stamp_ns": 976055466677284000,
+          "position_error_m": 30.54487839751368,
+          "yaw_error_rad": 2.70158318740132
+        },
+        {
+          "reference_index": 9503,
+          "stamp_ns": 976055466757284000,
+          "position_error_m": 30.54487839751368,
+          "yaw_error_rad": 2.701588384251981
+        },
+        {
+          "reference_index": 9504,
+          "stamp_ns": 976055467127284000,
+          "position_error_m": 30.54487839751368,
+          "yaw_error_rad": 2.701582624429081
+        },
+        {
+          "reference_index": 9505,
+          "stamp_ns": 976055467327284000,
+          "position_error_m": 30.544878397513678,
+          "yaw_error_rad": 2.701588229527033
+        },
+        {
+          "reference_index": 9506,
+          "stamp_ns": 976055469747284000,
+          "position_error_m": 30.544878397513678,
+          "yaw_error_rad": 2.70158532160147
+        },
+        {
+          "reference_index": 9507,
+          "stamp_ns": 976055469757284000,
+          "position_error_m": 30.30535600956521,
+          "yaw_error_rad": 2.682837095970368
+        },
+        {
+          "reference_index": 9508,
+          "stamp_ns": 976055469767284000,
+          "position_error_m": 29.98091341012544,
+          "yaw_error_rad": 2.7012737493335726
+        },
+        {
+          "reference_index": 2881,
+          "stamp_ns": 976053503356284000,
+          "position_error_m": 29.9152877812984,
+          "yaw_error_rad": 2.6207423853648404
+        },
+        {
+          "reference_index": 2883,
+          "stamp_ns": 976053503436284000,
+          "position_error_m": 29.915197281173096,
+          "yaw_error_rad": 2.6496863443787064
+        },
+        {
+          "reference_index": 2880,
+          "stamp_ns": 976053502804284000,
+          "position_error_m": 29.912669477873376,
+          "yaw_error_rad": 2.617957333775115
+        }
+      ]
+    },
+    "odom_icp_online": {
+      "estimate_poses": 13631,
+      "matched_reference_poses": 9722,
+      "unmatched_reference_poses": 0,
+      "unmatched_estimate_poses": 3909,
+      "alignment_transform": {
+        "x": -0.09059258752703808,
+        "y": -0.0753053466699729,
+        "yaw": 0.0103049777949935,
+        "scale": 1
+      },
+      "association_dt_s": {
+        "count": 9722,
+        "rmse": 0.0020699647787959263,
+        "p95": 0.004476949999999999,
+        "max": 0.004996
+      },
+      "position_ape_m": {
+        "count": 9722,
+        "rmse": 0.24287921498106832,
+        "p95": 0.48384433859578,
+        "max": 3.5806802205895933
+      },
+      "yaw_ape_rad": {
+        "count": 9722,
+        "rmse": 0.053327240899482146,
+        "p95": 0.10096791831424932,
+        "max": 0.585782153434341
+      },
+      "translation_rpe_m": {
+        "count": 2727,
+        "rmse": 0.08807210351131402,
+        "p95": 0.10925196498961673,
+        "max": 3.54892233089641
+      },
+      "rotation_rpe_rad": {
+        "count": 2727,
+        "rmse": 0.047355133263296274,
+        "p95": 0.0937875082242116,
+        "max": 0.47657966797831564
+      },
+      "position_ape_by_third_m": {
+        "early": {
+          "count": 3240,
+          "rmse": 0.3324533759696085,
+          "p95": 0.7899150567217103,
+          "max": 1.074902290473998
+        },
+        "middle": {
+          "count": 3241,
+          "rmse": 0.09963028096172405,
+          "p95": 0.16553859974897384,
+          "max": 0.30252847329107374
+        },
+        "late": {
+          "count": 3241,
+          "rmse": 0.2377717394215029,
+          "p95": 0.23264275311355176,
+          "max": 3.5806802205895933
+        }
+      },
+      "worst_reference_samples": [
+        {
+          "reference_index": 9147,
+          "stamp_ns": 976055325737284000,
+          "position_error_m": 3.5806802205895933,
+          "yaw_error_rad": 0.5498841534237942
+        },
+        {
+          "reference_index": 9148,
+          "stamp_ns": 976055325897284000,
+          "position_error_m": 3.574992987609997,
+          "yaw_error_rad": 0.551706839475302
+        },
+        {
+          "reference_index": 9146,
+          "stamp_ns": 976055325727284000,
+          "position_error_m": 3.5638546712458887,
+          "yaw_error_rad": 0.454449061924793
+        },
+        {
+          "reference_index": 9145,
+          "stamp_ns": 976055323697284000,
+          "position_error_m": 3.561330663010813,
+          "yaw_error_rad": 0.4903331854693731
+        },
+        {
+          "reference_index": 9150,
+          "stamp_ns": 976055326327284000,
+          "position_error_m": 3.56057159535385,
+          "yaw_error_rad": 0.5590425322989683
+        },
+        {
+          "reference_index": 9144,
+          "stamp_ns": 976055323607284000,
+          "position_error_m": 3.5552069610802426,
+          "yaw_error_rad": 0.4903558671600366
+        },
+        {
+          "reference_index": 9151,
+          "stamp_ns": 976055326587284000,
+          "position_error_m": 3.549827408471808,
+          "yaw_error_rad": 0.5609338185340005
+        },
+        {
+          "reference_index": 9154,
+          "stamp_ns": 976055327567284000,
+          "position_error_m": 3.4986873157595983,
+          "yaw_error_rad": 0.585782153434341
+        },
+        {
+          "reference_index": 9155,
+          "stamp_ns": 976055327577284000,
+          "position_error_m": 3.4896347920304605,
+          "yaw_error_rad": 0.585120144091808
+        },
+        {
+          "reference_index": 9156,
+          "stamp_ns": 976055327807284000,
+          "position_error_m": 3.4803056628924147,
+          "yaw_error_rad": 0.585214497630705
+        }
+      ]
+    },
+    "odom_icp_optimized": {
+      "estimate_poses": 13631,
+      "matched_reference_poses": 9722,
+      "unmatched_reference_poses": 0,
+      "unmatched_estimate_poses": 3909,
+      "alignment_transform": {
+        "x": -0.042280689187758395,
+        "y": -0.032432365071160874,
+        "yaw": 0.003953161088112001,
+        "scale": 1
+      },
+      "association_dt_s": {
+        "count": 9722,
+        "rmse": 0.0020699647787959263,
+        "p95": 0.004476949999999999,
+        "max": 0.004996
+      },
+      "position_ape_m": {
+        "count": 9722,
+        "rmse": 0.07973000507195546,
+        "p95": 0.14007421580217785,
+        "max": 0.41246398810196505
+      },
+      "yaw_ape_rad": {
+        "count": 9722,
+        "rmse": 0.04805237121389185,
+        "p95": 0.09604643936629527,
+        "max": 0.4792661185940677
+      },
+      "translation_rpe_m": {
+        "count": 2727,
+        "rmse": 0.051564252024798925,
+        "p95": 0.10346239566602018,
+        "max": 0.5033214489155273
+      },
+      "rotation_rpe_rad": {
+        "count": 2727,
+        "rmse": 0.04636430184681868,
+        "p95": 0.094688811523522,
+        "max": 0.44087617279313307
+      },
+      "position_ape_by_third_m": {
+        "early": {
+          "count": 3240,
+          "rmse": 0.0664743501324733,
+          "p95": 0.12162118909170185,
+          "max": 0.19297998582724105
+        },
+        "middle": {
+          "count": 3241,
+          "rmse": 0.07721930333562808,
+          "p95": 0.1347224391838224,
+          "max": 0.24270960740867903
+        },
+        "late": {
+          "count": 3241,
+          "rmse": 0.09321138942702527,
+          "p95": 0.15889579411601693,
+          "max": 0.41246398810196505
+        }
+      },
+      "worst_reference_samples": [
+        {
+          "reference_index": 8467,
+          "stamp_ns": 976055074977284000,
+          "position_error_m": 0.41246398810196505,
+          "yaw_error_rad": 0.06161833687921561
+        },
+        {
+          "reference_index": 9062,
+          "stamp_ns": 976055293947284000,
+          "position_error_m": 0.4053382382079619,
+          "yaw_error_rad": 0.1322760715097535
+        },
+        {
+          "reference_index": 9333,
+          "stamp_ns": 976055400827284000,
+          "position_error_m": 0.3800781703546948,
+          "yaw_error_rad": 0.012168583678581646
+        },
+        {
+          "reference_index": 8799,
+          "stamp_ns": 976055193617284000,
+          "position_error_m": 0.3367858181423667,
+          "yaw_error_rad": 0.03736357172332516
+        },
+        {
+          "reference_index": 9022,
+          "stamp_ns": 976055278767284000,
+          "position_error_m": 0.3303572074517235,
+          "yaw_error_rad": 0.013525271914714754
+        },
+        {
+          "reference_index": 9171,
+          "stamp_ns": 976055334197284000,
+          "position_error_m": 0.32919618866516287,
+          "yaw_error_rad": 0.06990520213705159
+        },
+        {
+          "reference_index": 9051,
+          "stamp_ns": 976055290157284000,
+          "position_error_m": 0.32437616400693253,
+          "yaw_error_rad": 0.006700767102248095
+        },
+        {
+          "reference_index": 9381,
+          "stamp_ns": 976055421707284000,
+          "position_error_m": 0.3005432885816911,
+          "yaw_error_rad": 0.010699869889326807
+        },
+        {
+          "reference_index": 8308,
+          "stamp_ns": 976055019267284000,
+          "position_error_m": 0.29649646230483473,
+          "yaw_error_rad": 0.025099663891990254
+        },
+        {
+          "reference_index": 8309,
+          "stamp_ns": 976055019277284000,
+          "position_error_m": 0.29091013693833295,
+          "yaw_error_rad": 0.028055620372578582
+        }
+      ]
+    }
+  },
+  "notes": [
+    "All runs use the same reference indices; missing poses and coverage are reported separately.",
+    "Metrics are planar XY translation and wrapped yaw. No scale fitting or per-segment realignment.",
+    "These are online estimates if /best_pose is used. Compare the same trajectory type and body frame for every method.",
+    "The optimized column of a final-trajectory CSV is the trajectory after pose graph optimisation, read at the end of the run; it is not what the robot could have known online.",
+    "Time synchronization is explicit; reference provenance and independent ground-truth accuracy must be established.",
+    "Low matched-pose RMSE does not excuse missing coverage or establish map accuracy."
+  ],
+  "reference_note": "Reference supplied in the ZIP; independent ground-truth accuracy is not established."
+}
