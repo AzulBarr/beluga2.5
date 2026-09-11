@@ -49,6 +49,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("proposal_pose_min_ess", 5.0);
     this->declare_parameter("proposal_pose_min_local_mass", 0.90);
     this->declare_parameter("proposal_pose_max_log_drop", 0.02);
+    this->declare_parameter("loop_undecided_max_scans", 20);
     this->declare_parameter("loop_belief_threshold", 0.25);
     this->declare_parameter("loop_translation_scale", 0.30);
     this->declare_parameter("loop_rotation_scale", 0.10);
@@ -283,6 +284,8 @@ void BelugaSLAMNode::setup_slam() {
     params.proposal_pose_min_ess = get_parameter("proposal_pose_min_ess").as_double();
     params.proposal_pose_min_local_mass = get_parameter("proposal_pose_min_local_mass").as_double();
     params.proposal_pose_max_log_drop = get_parameter("proposal_pose_max_log_drop").as_double();
+    if (get_parameter("loop_undecided_max_scans").as_int()<0 || get_parameter("loop_undecided_max_scans").as_int()>100000) throw std::invalid_argument("Invalid loop_undecided_max_scans");
+    params.loop_undecided_max_scans = static_cast<decltype(params.loop_undecided_max_scans)>(get_parameter("loop_undecided_max_scans").as_int());
     params.loop_belief_threshold = get_parameter("loop_belief_threshold").as_double();
     params.loop_translation_scale = get_parameter("loop_translation_scale").as_double();
     params.loop_rotation_scale = get_parameter("loop_rotation_scale").as_double();

@@ -157,6 +157,13 @@ struct FastSLAMParams {
     double proposal_pose_min_ess = 5.0;
     double proposal_pose_min_local_mass = 0.90;
     double proposal_pose_max_log_drop = 0.02;
+    /// Scans an undecided loop event may stay unresolved before the MAP branch is
+    /// forced. The window does NOT gather evidence: graph masses are deliberately
+    /// frozen while unresolved, because two branches holding different maps have
+    /// no comparable tracking likelihood. What it buys is the chance for another
+    /// loop event to supersede the ambiguity with real evidence before anything
+    /// is committed. Zero commits immediately.
+    std::size_t loop_undecided_max_scans = 20;
     double loop_belief_threshold = 0.25;
     double loop_translation_scale = 0.30;  // aligned trajectory RMSE, meters
     double loop_rotation_scale = 0.10;     // aligned trajectory RMSE, radians
@@ -382,6 +389,8 @@ public:
       if (params_.min_particles == 0 || params_.max_particles < params_.min_particles)
           throw std::invalid_argument("Require 1 <= min_particles <= max_particles");
       params_.max_hypotheses = std::min(params_.max_hypotheses, params_.max_particles);
+      if (params_.loop_undecided_max_scans > 100000)
+          throw std::invalid_argument("loop_undecided_max_scans is implausibly large");
       if (params_.loop_verifier_mode != "belief" && params_.loop_verifier_mode != "map" &&
           params_.loop_verifier_mode != "uniform" && params_.loop_verifier_mode != "geometry")
           throw std::invalid_argument("loop_verifier_mode must be belief, map, uniform or geometry");
@@ -1338,6 +1347,10 @@ public:
         // --- Loop Closure Detection (driven by FinishedSubmapEvents) ---
         (void)z;
         backend_timing_ = {};
+        // An undecided event holds the filter's masses frozen. Give it a deadline.
+        if (bayes_unresolved_ && !bayes_event_.active &&
+            next_scan_sequence_ - unresolved_since_sequence_ >= params_.loop_undecided_max_scans)
+            resolve_undecided_event("undecided_expired");
 #if BELUGASLAM_ENABLE_LOOP_CLOSURE
         // Retrieval fixes geometric measurements in native submap coordinates.
         // A baseline solve is needed before verification, not before a search that
@@ -2115,6 +2128,69 @@ public:
         return true;
     }
 
+    /// Keeps one side of a validation event and discards the other. Returns false
+    /// without touching the population when the requested side is empty, which
+    /// resampling can produce by evicting every low-mass branch on one side.
+    bool collapse_validation_branches(bool keep_loop) {
+        const bool populated=std::any_of(hypotheses_.begin(),hypotheses_.end(),
+            [&](const auto& h){return h->validation_loop==keep_loop;});
+        if (!populated) return false;
+        std::vector<FastSLAMParticle> retained;
+        for (const auto& particle : particles_)
+            if (std::get<2>(particle)->validation_loop==keep_loop) retained.push_back(particle);
+        if (retained.empty()) return false;
+        particles_.assign(retained.begin(),retained.end());
+        hypotheses_.erase(std::remove_if(hypotheses_.begin(),hypotheses_.end(),
+            [&](const auto& h) {return h->validation_loop!=keep_loop;}),hypotheses_.end());
+        normalize_hypothesis_masses();
+        std::vector<PopulationBranch> survivors;
+        for (const auto& h : hypotheses_) {
+            survivors.push_back({h,h,std::exp(h->log_mass),state_type{},true});
+            survivors.back().log_mass=h->log_mass;
+        }
+        install_population(survivors,params_.max_particles);
+        if (keep_loop) for (const auto& h : hypotheses_) loop_closure_poses_.push_back(h->local_pose);
+        return true;
+    }
+
+    /// Commits an undecided event to its MAP branch.
+    ///
+    /// Carrying the ambiguity forward indefinitely is not neutral. While
+    /// bayes_unresolved_ holds, graph masses stop responding to scan evidence,
+    /// mode splitting is suspended and mass pruning is bypassed, so nothing can
+    /// ever separate the two branches again; and because the population stays at
+    /// its cap, every later event is refused for budget and the flag never clears.
+    /// Committing is what breaks that, and a tie commits to no_loop: an
+    /// unverified loop must not be installed by default.
+    void resolve_undecided_event(const char* reason) {
+        if (!bayes_unresolved_ || bayes_event_.active) return;
+        if (hypotheses_.empty()) { bayes_unresolved_=false; return; }
+        double loop_mass=0, null_mass=0;
+        const auto masses=hypothesis_masses();
+        for (const auto& h : hypotheses_) {
+            const auto it=masses.find(h->id);
+            if (it==masses.end()) continue;
+            (h->validation_loop ? loop_mass : null_mass)+=it->second;
+        }
+        const bool keep_loop=loop_mass>null_mass;
+        if (!collapse_validation_branches(keep_loop) && !collapse_validation_branches(!keep_loop)) {
+            // Neither side is representable. Leave the population alone and clear
+            // the flag anyway, so the filter resumes instead of freezing forever.
+            bayes_unresolved_=false;
+            last_bayes_status_=reason;
+            return;
+        }
+        bayes_unresolved_=false;
+        last_bayes_probability_=loop_mass;
+        last_bayes_status_=reason;
+        for (const auto& h : hypotheses_) {
+            h->validation_map.reset();
+            h->validation_loop=false;
+            h->validation_status=reason;
+        }
+        refresh_output_selection();
+    }
+
     void finish_bayesian_scan(bool usable, std::size_t beams, const std::map<std::size_t,double>& priors) {
         if (!bayes_event_.active || bayes_event_.last_sequence==next_scan_sequence_) return;
         bayes_event_.last_sequence=next_scan_sequence_;
@@ -2138,23 +2214,8 @@ public:
         if (decision==belugaslam::LoopDecision::pending) return;
         bayes_event_.active=false;
         bayes_unresolved_=decision==belugaslam::LoopDecision::undecided;
-        if (!bayes_unresolved_) {
-            const bool keep_loop=decision==belugaslam::LoopDecision::accepted;
-            std::vector<FastSLAMParticle> retained;
-            for (const auto& particle : particles_)
-                if (std::get<2>(particle)->validation_loop==keep_loop) retained.push_back(particle);
-            particles_.assign(retained.begin(),retained.end());
-            hypotheses_.erase(std::remove_if(hypotheses_.begin(),hypotheses_.end(),
-                [&](const auto& h) {return h->validation_loop!=keep_loop;}),hypotheses_.end());
-            normalize_hypothesis_masses();
-            std::vector<PopulationBranch> survivors;
-            for (const auto& h : hypotheses_) {
-                survivors.push_back({h,h,std::exp(h->log_mass),state_type{},true});
-                survivors.back().log_mass=h->log_mass;
-            }
-            install_population(survivors,params_.max_particles);
-            if (keep_loop) for (const auto& h : hypotheses_) loop_closure_poses_.push_back(h->local_pose);
-        }
+        if (bayes_unresolved_) unresolved_since_sequence_=next_scan_sequence_;
+        if (!bayes_unresolved_) collapse_validation_branches(decision==belugaslam::LoopDecision::accepted);
         // Snapshots are bounded to one event window. Undecided alternatives and
         // their masses survive; new events can be attempted if the budget allows.
         for (const auto& h : hypotheses_) h->validation_map.reset();
@@ -2417,6 +2478,11 @@ public:
         for (const auto& candidate : proposed_candidates)
             if (!consumed_loop_queries_.count(candidate.query_sequence)) candidates.push_back(candidate);
         if (candidates.empty()) return;
+        // Commit the previous ambiguity BEFORE snapshotting the population. An
+        // unresolved event keeps the hypothesis budget full, and deferring on that
+        // budget is what used to leave bayes_unresolved_ set forever, since the
+        // only place it cleared was a successful event start.
+        if (bayes_unresolved_) resolve_undecided_event("undecided_superseded");
         const auto event_id = next_loop_event_id_++;
         double retained_branch_mass = 1.0;
         const auto prior_hypotheses = hypotheses_;
@@ -2709,6 +2775,7 @@ private:
         std::size_t evidence_scans=0, attempted_scans=0;
     } bayes_event_;
     bool bayes_unresolved_=false;
+    std::uint64_t unresolved_since_sequence_=0;
     std::string last_bayes_status_="none";
     double last_bayes_probability_=0;
     std::vector<std::vector<state_type>> motion_proposals_;
