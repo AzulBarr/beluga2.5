@@ -1,5 +1,6 @@
 #include "belugaslam_node/fastslam_oc_grid_node.hpp"
 #include <string_view>
+#include <tf2/LinearMath/Transform.h>
 using namespace rclcpp;
 
 BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
@@ -346,6 +347,20 @@ void BelugaSLAMNode::setup_slam() {
         final_trajectory_csv_.open(final_trajectory_path);
         if (!final_trajectory_csv_) throw std::runtime_error("Cannot open final_trajectory_path");
     }
+    // Keep the estimated body frame unchanged. Export the measured extrinsics so
+    // evaluation can right-compose each pose into the reference's body frame.
+    const auto frames_parent = final_trajectory_path.empty() ? trajectory_path : final_trajectory_path;
+    if (!frames_parent.empty()) {
+        const auto frames_path = frames_parent + ".frames.csv";
+        if (frames_path == trajectory_path || frames_path == final_trajectory_path ||
+            frames_path == get_parameter("performance_diagnostics_path").as_string())
+            throw std::invalid_argument("Trajectory frame sidecar conflicts with an output path");
+        scan_frames_csv_.open(frames_path);
+        if (!scan_frames_csv_) throw std::runtime_error("Cannot open trajectory frame sidecar");
+        scan_frames_csv_ << std::setprecision(17)
+            << "stamp_ns,base_frame,scan_frame,base_from_scan_x,base_from_scan_y,base_from_scan_yaw,deskewed\n";
+        RCLCPP_INFO(get_logger(), "Trajectory frame transforms: %s", frames_path.c_str());
+    }
     const auto performance_path = get_parameter("performance_diagnostics_path").as_string();
     if (!performance_path.empty()) {
         performance_csv_.open(performance_path);
@@ -466,7 +481,8 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
     try {
         auto tf_now = tf_buffer_->lookupTransform(odom_f, base_f, msg->header.stamp, rclcpp::Duration::from_seconds(0.7));
         const auto current_odom = tf_to_se2(tf_now.transform);
-        auto z = laser_to_cartesian(msg, current_odom);
+        const auto scan = laser_to_cartesian(msg, current_odom);
+        const auto& z = scan.points;
         auto t0 = Clock::now();
         timing.tf_convert_ms = elapsed(start, t0);
         if (z.empty()) {
@@ -484,7 +500,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         auto t1 = Clock::now(); timing.motion_ms = elapsed(t0, t1);
         slam_->measurement_model_map(z);
         auto t2 = Clock::now(); timing.matching_ms = elapsed(t1, t2);
-        const auto finished_events = slam_->update_occupancy_grid(z, stamp.seconds(), stamp.nanoseconds());
+        const auto finished_events = slam_->update_occupancy_grid(z, stamp.seconds(), stamp.nanoseconds(), scan.origins);
         auto t3 = Clock::now(); timing.insertion_ms = elapsed(t2, t3);
         slam_->post_update(z, finished_events);
         auto t4 = Clock::now(); timing.backend_ms = elapsed(t3, t4);
@@ -510,6 +526,13 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
         last_processed_stamp_ns_ = stamp.nanoseconds();
         has_processed_scan_ = true;
         ++scans_processed_;
+        if (scan_frames_csv_.is_open()) {
+            scan_frames_csv_ << stamp.nanoseconds() << ',' << base_f << ',' << msg->header.frame_id << ','
+                << scan.base_from_laser.translation().x() << ',' << scan.base_from_laser.translation().y() << ','
+                << scan.base_from_laser.so2().log() << ',' << (scan.deskewed ? 1 : 0) << '\n';
+            if (scans_processed_ % 100 == 0) scan_frames_csv_.flush();
+            if (!scan_frames_csv_) throw std::runtime_error("Cannot write trajectory frame sidecar");
+        }
         // The core assigns a sequence only to scans it actually inserted, so pair the
         // stamp with the sequence it just took instead of assuming they stay in step.
         if (final_trajectory_csv_.is_open()) {
@@ -623,10 +646,12 @@ void BelugaSLAMNode::publish_visualization() {
     ++visualization_ticks_;
 }
 
-std::vector<std::pair<double, double>> BelugaSLAMNode::laser_to_cartesian(const sensor_msgs::msg::LaserScan::SharedPtr msg, const state_type& start_odom) {
-    std::vector<std::pair<double, double>> points;
+BelugaSLAMNode::ConvertedScan BelugaSLAMNode::laser_to_cartesian(const sensor_msgs::msg::LaserScan::SharedPtr msg, const state_type& start_odom) {
+    ConvertedScan scan;
+    auto& points = scan.points;
     points.reserve(msg->ranges.size());
-    if (!std::isfinite(msg->angle_min) || !std::isfinite(msg->angle_increment)) return points;
+    scan.origins.reserve(msg->ranges.size());
+    if (!std::isfinite(msg->angle_min) || !std::isfinite(msg->angle_increment)) return scan;
     Sophus::SE2d::Tangent scan_motion = Sophus::SE2d::Tangent::Zero();
     bool deskew_available = false;
     if (deskew_scan_ && msg->ranges.size() > 1 && std::isfinite(msg->time_increment) && msg->time_increment > 0) {
@@ -648,7 +673,12 @@ std::vector<std::pair<double, double>> BelugaSLAMNode::laser_to_cartesian(const 
         rclcpp::Duration::from_seconds(0.1)
     );
 
-    Sophus::SE2d T_bl_laser = tf_to_se2(tf_laser.transform);
+    scan.base_from_laser = tf_to_se2(tf_laser.transform);
+    scan.deskewed = deskew_available;
+    // Apply the full sensor TF before projecting onto XY (including any mounting
+    // roll/pitch). The SLAM state and exported trajectories remain planar.
+    tf2::Transform T_bl_laser;
+    tf2::fromMsg(tf_laser.transform, T_bl_laser);
 
     const double sensor_max = std::isfinite(msg->range_max) && msg->range_max > 0 ? msg->range_max : range_max;
     const double sensor_min = std::isfinite(msg->range_min) ? std::max(0.1, static_cast<double>(msg->range_min)) : 0.1;
@@ -657,19 +687,21 @@ std::vector<std::pair<double, double>> BelugaSLAMNode::laser_to_cartesian(const 
         if (std::isfinite(r) && r < std::min(range_max, sensor_max) && r > sensor_min) {
             const double angle = static_cast<double>(msg->angle_min) + i * static_cast<double>(msg->angle_increment);
 
-            Eigen::Vector2d p_laser(
-                r * std::cos(angle),
-                r * std::sin(angle)
-            );
-
-            Eigen::Vector2d p_base = T_bl_laser * p_laser;
-            if (deskew_available) p_base = Sophus::SE2d::exp(
-                scan_motion * (static_cast<double>(i)/(msg->ranges.size()-1))) * p_base;
+            const auto hit = T_bl_laser * tf2::Vector3(r * std::cos(angle), r * std::sin(angle), 0.0);
+            Eigen::Vector2d p_base{hit.x(), hit.y()};
+            Eigen::Vector2d origin = scan.base_from_laser.translation();
+            if (deskew_available) {
+                const auto motion = Sophus::SE2d::exp(
+                    scan_motion * (static_cast<double>(i)/(msg->ranges.size()-1)));
+                p_base = motion * p_base;
+                origin = motion * origin;
+            }
 
             points.emplace_back(p_base.x(), p_base.y());
+            scan.origins.emplace_back(origin.x(), origin.y());
         }
     }
-    return points;
+    return scan;
 }
 
 Sophus::SE2d BelugaSLAMNode::tf_to_se2(const geometry_msgs::msg::Transform& t) {

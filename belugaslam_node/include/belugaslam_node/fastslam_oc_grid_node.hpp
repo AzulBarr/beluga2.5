@@ -84,9 +84,15 @@ private:
     /**
      * \brief Converts polar laser readings to Cartesian coordinates in the robot's local frame.
      * \param msg The laser scan message.
-     * \return A vector of (x, y) coordinates.
+     * \return Endpoints and ray origins expressed at the first-ray robot frame.
      */
-    [[nodiscard]] std::vector<std::pair<double, double>> laser_to_cartesian(const sensor_msgs::msg::LaserScan::SharedPtr msg, const state_type& start_odom);
+    struct ConvertedScan {
+        std::vector<std::pair<double, double>> points;
+        std::vector<std::pair<double, double>> origins;
+        state_type base_from_laser;
+        bool deskewed = false;
+    };
+    [[nodiscard]] ConvertedScan laser_to_cartesian(const sensor_msgs::msg::LaserScan::SharedPtr msg, const state_type& start_odom);
     
     /**
      * \brief Converts a geometry_msgs Transform to a Sophus SE2 state.
@@ -158,6 +164,7 @@ private:
     std::uint64_t tf_errors_ = 0, empty_scans_ = 0, out_of_order_scans_ = 0;
     std::ofstream performance_csv_;
     std::ofstream final_trajectory_csv_;
+    std::ofstream scan_frames_csv_;
     // Scan sequence -> stamp of the scan the core gave that sequence to. The core
     // counts only the scans it inserted, so this cannot be derived from scans_received_.
     std::vector<std::int64_t> scan_sequence_stamps_;

@@ -225,6 +225,9 @@ def generate_launch_description():
         executable="belugaslam_node", 
         name="belugaslam",
         output="screen",
+        # The final pose-graph solve and trajectory export run after SIGINT.
+        # Allow them to finish when bag playback triggers launch shutdown.
+        sigterm_timeout='120.0',
         parameters=[{
             "use_sim_time": LaunchConfiguration('use_sim_time'),
             "min_particles": LaunchConfiguration('min_particles'),

@@ -471,6 +471,45 @@ struct InsertionFixture {
 }  // namespace
 
 // A cell that is a return for one beam and merely crossed by another must stay a hit.
+TEST(ScanInsertionTest, OffsetSensorPreservesOccludedCellsBehindItsRealRay) {
+  InsertionFixture f;
+  const std::vector<std::pair<double, double>> hits{{1.05, 1.05}};
+  const std::vector<std::pair<double, double>> origins{{1.05, 0.05}};
+  insert_scan_into_submap_grid(f.grid, IdentityPose(), hits, f.params, f.hits, f.misses,
+                              nullptr, origins);
+  EXPECT_FLOAT_EQ(f.at(0.55, 0.55), 0.0F);  // old base-to-hit diagonal
+  EXPECT_FLOAT_EQ(f.at(1.05, 0.55), f.params.l_free);
+  EXPECT_FLOAT_EQ(f.at(1.05, 1.05), f.params.l_occ);
+}
+
+TEST(ScanInsertionTest, TransformsOriginsIntoRotatedSubmapAndGrowsToIncludeThem) {
+  InsertionFixture f;
+  const Sophus::SE2d pose{Sophus::SO2d{Sophus::Constants<double>::pi()/2.0}, Eigen::Vector2d{0.0, 0.0}};
+  const std::vector<std::pair<double, double>> hits{{1.05, 0.05}};
+  // The sensor origin, outside the original grid, is rotated to (-.05, 3.05).
+  const std::vector<std::pair<double, double>> origins{{3.05, 0.05}};
+  insert_scan_into_submap_grid(f.grid, pose, hits, f.params, f.hits, f.misses, nullptr, origins);
+  EXPECT_FLOAT_EQ(f.at(-0.05, 2.55), f.params.l_free);
+  EXPECT_FLOAT_EQ(f.at(-0.05, 1.05), f.params.l_occ);
+  EXPECT_FLOAT_EQ(f.at(-0.05, 0.55), 0.0F);  // behind the endpoint, toward the base
+}
+
+TEST(ScanInsertionTest, CoLocatedOriginsRetainLegacyGridAndInvalidInputIsTransactional) {
+  InsertionFixture legacy, corrected;
+  const std::vector<std::pair<double, double>> scan{{1.05, .05}, {.05, 1.05}, {-.55, -.55}};
+  const std::vector<std::pair<double, double>> origins(scan.size(), {0.0, 0.0});
+  legacy.insert(scan);
+  insert_scan_into_submap_grid(corrected.grid, IdentityPose(), scan, corrected.params,
+                              corrected.hits, corrected.misses, nullptr, origins);
+  EXPECT_EQ(corrected.grid.data(), legacy.grid.data());
+  const auto before = corrected.grid.data();
+  const std::vector<std::pair<double, double>> invalid{{0., 0.}};
+  EXPECT_THROW(insert_scan_into_submap_grid(corrected.grid, IdentityPose(), scan, corrected.params,
+               corrected.hits, corrected.misses, nullptr, invalid), std::invalid_argument);
+  EXPECT_EQ(corrected.grid.data(), before);
+}
+
+// A cell that is a return for one beam and merely crossed by another must stay a hit.
 // Applying beam by beam would leave l_occ + l_free here instead of l_occ.
 TEST(ScanInsertionTest, HitBeatsAMissFromAnotherBeamInTheSameCell) {
   InsertionFixture f;

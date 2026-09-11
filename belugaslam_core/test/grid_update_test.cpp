@@ -69,6 +69,39 @@ int main(int argc, char** argv) {
     }
   }
   std::cout << comparisons << " complete-grid equivalence checks passed\n";
+  {
+    // A return at (8,8), observed from the laser at (8,2). The old robot-origin
+    // diagonal (2,2)->(8,8) must not carve free space through (5,5).
+    Cells cells(100, 0.0F);
+    scratch.begin(cells.size());
+    scratch.endpoints = {{8, 8}}; scratch.origins = {{8, 2}};
+    belugaslam::apply_scan_cells(cells, 10, 10, 2, 2, 1.2F, -0.2F, 5.0F, scratch, hits, misses);
+    require(cells[55] == 0.0F, "robot-to-hit diagonal was incorrectly marked free");
+    require(cells[58] == -0.2F, "actual laser ray was not marked free");
+    require(cells[88] == 1.2F, "laser hit changed");
+    require(cells[28] == 0.0F, "sensor origin must be excluded");
+  }
+  {
+    // Two acquisition times after deskew: each horizontal beam has its own
+    // origin. Crossing another beam's hit must preserve that hit.
+    Cells cells(100, 0.0F);
+    scratch.begin(cells.size());
+    scratch.endpoints = {{8, 2}, {8, 6}, {5, 2}};
+    scratch.origins = {{4, 2}, {4, 6}, {4, 2}};
+    belugaslam::apply_scan_cells(cells, 10, 10, 1, 1, 1.2F, -0.2F, 5.0F, scratch, hits, misses);
+    require(cells[26] == -0.2F && cells[66] == -0.2F, "deskewed origins were not used per beam");
+    require(cells[25] == 1.2F, "another ray erased a hit");
+    require(cells[33] == 0.0F, "default origin leaked into deskewed rays");
+    scratch.begin(cells.size());
+    require(scratch.origins.empty(), "ray origins leaked into the next scan");
+    scratch.endpoints = {{8, 2}, {8, 6}}; scratch.origins = {{4, 2}};
+    const auto before = cells;
+    bool rejected = false;
+    try { belugaslam::apply_scan_cells(cells, 10, 10, 1, 1, 1.2F, -0.2F, 5.0F, scratch, hits, misses); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected && cells == before, "mismatched origins must fail before mutating the grid");
+  }
+  std::cout << "Offset/per-beam ray origin regression checks passed\n";
   if (argc > 1 && std::string(argv[1]) == "--benchmark") {
     constexpr int w = 600, h = 600, count = 250;
     Endpoints endpoints;

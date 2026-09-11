@@ -1,0 +1,78 @@
+{
+  "source_archive": "beluga2.5(4).zip",
+  "contents": "Modified and new files only; overlay onto the provided source tree.",
+  "files": [
+    {
+      "path": "MIT_FRAME_FIX.md",
+      "status": "new",
+      "sha256": "0ac2b9f0cf4581a0a32f188d46b955b72ca7839f9901202a00b32f4eef4cc25f",
+      "original_sha256": null
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/fastslam_oc_grid_core.hpp",
+      "status": "modified",
+      "sha256": "1d13b6f9b03813e1594c7a9f73d385436832c7a01f44e4ee40bb0a288596ad62",
+      "original_sha256": "06054a7f44f8ca7b8d6d9482365ffb9e8ba97a6323471684f6397cab3c357e6b"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/grid_update.hpp",
+      "status": "modified",
+      "sha256": "a8225c86211958373d6ea7253ce326631a225229d937c4ba61918bdc56cf8bbd",
+      "original_sha256": "81c4562f2d513016a7dfe49f608e0f1806ff5f8cbde9080b28b59abff2d76867"
+    },
+    {
+      "path": "belugaslam_core/include/belugaslam_core/submap.hpp",
+      "status": "modified",
+      "sha256": "ae4707893e357a1a239fa2278e38095c01e80131a2c405d3919d2a6e02e2f1d2",
+      "original_sha256": "74857fa382b34e7a16e7f607ca04c6c1f1abc56720c7043d9a2f6f20645a21ce"
+    },
+    {
+      "path": "belugaslam_core/test/grid_update_test.cpp",
+      "status": "modified",
+      "sha256": "d4bb5b8fa2c0e7c3639c6777e09ada3435ded33c7c88bf8dd8cfa2373f85289d",
+      "original_sha256": "b6efdeeacd7a4f6e52fb54d3bb744680b15901d4553ca8f21be4a0d77c74772c"
+    },
+    {
+      "path": "belugaslam_core/test/submap_graph_test.cpp",
+      "status": "modified",
+      "sha256": "25014829baae7de3e5bd0a72c6ecadeba53c5f806c5d2f9a599be9268e59f7be",
+      "original_sha256": "aa6b770e444b355abd329efeb8edc9b08a31104d007770f63899390ce117afe5"
+    },
+    {
+      "path": "belugaslam_node/include/belugaslam_node/fastslam_oc_grid_node.hpp",
+      "status": "modified",
+      "sha256": "ded5a730ff463f02f0f469a8efb30c617227983fdb72c404687c01856cd9e891",
+      "original_sha256": "ebabd997406986258211d4965e9fe0cb8679560ab0ebd39b55488c7704169b56"
+    },
+    {
+      "path": "belugaslam_node/launch/fastslam_oc_grid.launch.py",
+      "status": "modified",
+      "sha256": "8215b6dc503a0242482add36b6c322ced23b51ed44ef7ef7b3209f932815c26b",
+      "original_sha256": "550520739563570f91ae6dcf090b5d3b4e20bc27f33067db7acedc85fd7897f1"
+    },
+    {
+      "path": "belugaslam_node/src/fastslam_oc_grid_node.cpp",
+      "status": "modified",
+      "sha256": "7b37d9978db053ad64848f7c86482b1ce5ca66190770781d4248c67200588b22",
+      "original_sha256": "286c849e13c5d067d86f2b17bee26abb77b0dd4e1e436d47ff51f19068e5991e"
+    },
+    {
+      "path": "tools/evaluate_frame_trajectory.py",
+      "status": "new",
+      "sha256": "506948401b2477afb2872926d0efea7732df0d7ee9e4e215fbab544f41bdc9da",
+      "original_sha256": null
+    },
+    {
+      "path": "tools/run_mit_frame_test.sh",
+      "status": "new",
+      "sha256": "53b5bf19d460d13bc7edaf46ef9ad2cf3fbac8400efc05738a357946c3ced162",
+      "original_sha256": null
+    },
+    {
+      "path": "tools/test_frame_trajectory.py",
+      "status": "new",
+      "sha256": "530f12a34e3af6849beece407e5aa9af7783fc29fa647181238848ae5e345e5d",
+      "original_sha256": null
+    }
+  ]
+}

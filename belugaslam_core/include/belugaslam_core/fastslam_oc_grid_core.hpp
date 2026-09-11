@@ -1201,10 +1201,16 @@ public:
     /// Update the occupancy grid map of each hypothesis based on the transformed measurement.
     std::vector<FinishedSubmapEvent> update_occupancy_grid(
         const measurement_type& z, double time_seconds,
-        std::int64_t stamp_ns=std::numeric_limits<std::int64_t>::min()) {
+        std::int64_t stamp_ns=std::numeric_limits<std::int64_t>::min(),
+        const measurement_type& ray_origins = {}) {
         std::vector<FinishedSubmapEvent> finished_events;
         std::shared_ptr<const ScanNodeData> shared_scan_data;
 
+        if (!ray_origins.empty() && ray_origins.size() != z.size())
+            throw std::invalid_argument("Each scan endpoint requires one ray origin");
+        for (const auto& origin : ray_origins)
+            if (!std::isfinite(origin.first) || !std::isfinite(origin.second))
+                throw std::invalid_argument("Nonfinite ray origin");
         if (z.empty() || !std::isfinite(time_seconds)) return finished_events;
         if (stamp_ns==std::numeric_limits<std::int64_t>::min()) {
             const long double ns=std::round(static_cast<long double>(time_seconds)*1.e9L);
@@ -1301,7 +1307,7 @@ public:
                 insertion_params.clamp = 5.0f;
                 insertion_params.robot_radius = ROBOT_RADIUS;
                 insert_scan_into_submap_grid(
-                    lo_grid, T_s_r, z, insertion_params, scan_hit_cells_, scan_miss_cells_, &scan_updates_);
+                    lo_grid, T_s_r, z, insertion_params, scan_hit_cells_, scan_miss_cells_, &scan_updates_, ray_origins);
                 // The same endpoints, kept continuous. insert_scan_into_submap_grid
                 // rounds them to cells and that is all the grid ever sees.
                 if (params_.icp_refine) active_submap->insert_surface_points(T_s_r, z, params_.icp.cloud);

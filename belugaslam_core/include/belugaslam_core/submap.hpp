@@ -69,6 +69,8 @@ inline std::vector<std::pair<int, int>> bresenham_line(
  * \param grid The submap's log-odds grid, in submap-local coordinates.
  * \param T_submap_robot Robot pose in the submap frame.
  * \param scan Range returns in the robot frame, the same frame the pose is measured in.
+ * \param ray_origins Optional origins in that same frame, one per return. Empty
+ * means the sensor is co-located with the robot (legacy offline callers).
  * \param hit_scratch,miss_scratch Reused buffers, so the cost per scan is not allocation.
  */
 inline void insert_scan_into_submap_grid(
@@ -76,13 +78,24 @@ inline void insert_scan_into_submap_grid(
     const std::vector<std::pair<double, double>>& scan,
     const ScanInsertionParams& params, std::vector<int>& hit_scratch,
     std::vector<int>& miss_scratch,
-    belugaslam::ScanCellUpdates* reusable_updates = nullptr) {
+    belugaslam::ScanCellUpdates* reusable_updates = nullptr,
+    const std::vector<std::pair<double, double>>& ray_origins = {}) {
+  if (!ray_origins.empty() && ray_origins.size() != scan.size())
+    throw std::invalid_argument("Each scan endpoint requires one ray origin");
+  for (const auto& origin : ray_origins)
+    if (!std::isfinite(origin.first) || !std::isfinite(origin.second))
+      throw std::invalid_argument("Nonfinite ray origin");
   if (scan.empty()) return;
 
   // 1. Grow first, so that no return is silently clipped and every index below is final.
   const Eigen::Vector2d robot_origin = T_submap_robot.translation();
   double min_x = robot_origin.x(), max_x = min_x;
   double min_y = robot_origin.y(), max_y = min_y;
+  for (const auto& origin : ray_origins) {
+    const Eigen::Vector2d sensor = T_submap_robot * Eigen::Vector2d{origin.first, origin.second};
+    min_x = std::min(min_x, sensor.x()); max_x = std::max(max_x, sensor.x());
+    min_y = std::min(min_y, sensor.y()); max_y = std::max(max_y, sensor.y());
+  }
   for (const auto& point : scan) {
     const Eigen::Vector2d hit = T_submap_robot * Eigen::Vector2d{point.first, point.second};
     min_x = std::min(min_x, hit.x());
@@ -118,6 +131,11 @@ inline void insert_scan_into_submap_grid(
   auto& updates = reusable_updates ? *reusable_updates : temporary_updates;
   updates.begin(grid.data().size());
   updates.endpoints.reserve(scan.size());
+  updates.origins.reserve(ray_origins.size());
+  for (const auto& origin : ray_origins) {
+    const Eigen::Vector2d sensor = T_submap_robot * Eigen::Vector2d{origin.first, origin.second};
+    updates.origins.push_back(to_cell(sensor.x(), sensor.y()));
+  }
   for (const auto& point : scan) {
     const Eigen::Vector2d hit = T_submap_robot * Eigen::Vector2d{point.first, point.second};
     updates.endpoints.push_back(to_cell(hit.x(), hit.y()));

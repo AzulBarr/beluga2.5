@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,7 @@ class ScanCellUpdates {
     }
     ++epoch_;
     endpoints.clear();
+    origins.clear();
   }
 
   bool first_visit(std::size_t index) {
@@ -47,6 +49,9 @@ class ScanCellUpdates {
   }
 
   std::vector<std::pair<int, int>> endpoints;
+  // Optional one origin per endpoint (deskewed into the same frame).
+  // Empty retains the co-located, single-origin API used by offline callers.
+  std::vector<std::pair<int, int>> origins;
 
  private:
   std::vector<std::uint32_t> marks_;
@@ -59,6 +64,8 @@ inline void apply_scan_cells(std::vector<float>& cells, int width, int height,
                              int origin_x, int origin_y, float hit, float miss,
                              float clamp, ScanCellUpdates& scratch,
                              std::vector<int>& hits, std::vector<int>& misses) {
+  if (!scratch.origins.empty() && scratch.origins.size() != scratch.endpoints.size())
+    throw std::invalid_argument("Each scan endpoint requires one ray origin");
   hits.clear(); misses.clear();
   for (const auto& endpoint : scratch.endpoints) {
     const auto [x, y] = endpoint;
@@ -68,9 +75,12 @@ inline void apply_scan_cells(std::vector<float>& cells, int width, int height,
     cells[index] = std::min(cells[index] + hit, clamp);
     hits.push_back(index);
   }
-  const int origin = origin_y * width + origin_x;
-  for (const auto& endpoint : scratch.endpoints) {
-    visit_ray_cells(origin_x, origin_y, endpoint.first, endpoint.second, width, height,
+  for (std::size_t i = 0; i < scratch.endpoints.size(); ++i) {
+    const auto& endpoint = scratch.endpoints[i];
+    const auto [ox, oy] = scratch.origins.empty()
+        ? std::pair<int, int>{origin_x, origin_y} : scratch.origins[i];
+    const int origin = oy * width + ox;
+    visit_ray_cells(ox, oy, endpoint.first, endpoint.second, width, height,
         [&](int index) {
           if (index == origin || !scratch.first_visit(static_cast<std::size_t>(index))) return;
           cells[index] = std::max(cells[index] + miss, -clamp);
