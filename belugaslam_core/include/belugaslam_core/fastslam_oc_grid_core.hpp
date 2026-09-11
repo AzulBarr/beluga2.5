@@ -34,6 +34,7 @@
 #include "particle.hpp"
 #include "submap.hpp"
 #include "ceres_probability_tracking.hpp"
+#include "point_to_line_icp.hpp"
 #include "motion_filter.hpp"
 
 /// Beluga Core & Models
@@ -187,6 +188,31 @@ struct FastSLAMParams {
     bool loop_refine = false;
     double loop_refine_translation = 0.15;  // window around the lattice optimum, meters
     double loop_refine_rotation = 0.05;     // window around the lattice optimum, radians
+    /// Pose-graph constraint weights, applied as 1/sigma on the SE(2) residual.
+    /// They are the ONLY thing that tells the optimizer how much each measurement
+    /// class is trusted relative to the others; equal weights make PGO plain
+    /// unweighted least squares. Cartographer's 2D ratios for reference:
+    /// intra-submap 5e2/1.6e3, loop 1.1e4/1e5, i.e. loops outrank intra-submap
+    /// constraints by ~22x in translation and ~62x in rotation. These defaults
+    /// keep the historical 3/5, 5/8, 10/12 so nothing changes until swept.
+    double pgo_odometry_translation_weight = 3.0;
+    double pgo_odometry_rotation_weight = 5.0;
+    double pgo_intra_translation_weight = 5.0;
+    double pgo_intra_rotation_weight = 8.0;
+    double pgo_loop_translation_weight = 10.0;
+    double pgo_loop_rotation_weight = 12.0;
+    /// Huber scale on the WHITENED inter-submap residual, so the raw translation
+    /// it starts to down-weight is pgo_huber_scale / pgo_loop_translation_weight.
+    /// It must be retuned whenever the loop weights move.
+    double pgo_huber_scale = 1.0;
+
+    /// Log-odds increments of one scan insertion. A single hit at 1.2 already
+    /// reads 0.77 and two saturate the matcher's 0.9 clamp, so the probability
+    /// grid the Ceres matcher interpolates is nearly binary. Cartographer's
+    /// 0.55/0.49 are +0.2/-0.04, an order of magnitude softer.
+    float insertion_l_occ = 1.2F;
+    float insertion_l_free = -0.2F;
+
     std::uint32_t random_seed = 42;
     std::string loop_diagnostics_path;
     int worker_threads = 2;  // bounded total concurrency, including the caller
@@ -197,6 +223,12 @@ struct FastSLAMParams {
     std::string tracking_prior_mode = "fixed";  // fixed (step 1) or odometry (steps 1+2)
     belugaslam::OdometryPriorOptions odometry_prior;
     belugaslam::RecoveryOptions recovery;
+    /// Optional point-to-line refinement of the accepted frontend match, against
+    /// the retained endpoint cloud rather than the chamfer field. Off by default:
+    /// it costs one endpoint cloud per active submap and only ever narrows the
+    /// result through a non-worsening gate.
+    bool icp_refine = false;
+    belugaslam::IcpOptions icp;
     std::size_t motion_proposal_samples = 8;
     double map_resolution = GRID_RESOLUTION;
     double split_min_mass = 0.02;
@@ -268,6 +300,15 @@ public:
           bayes_diagnostics_ << std::setprecision(17)
               << "sequence,event_id,hypothesis,association,prior_mass,posterior_mass,log_mass,log_evidence,evidence_scans,attempted_scans,common_beams,loop_probability,status\n";
       }
+      for (const double weight : {params_.pgo_odometry_translation_weight, params_.pgo_odometry_rotation_weight,
+                                  params_.pgo_intra_translation_weight, params_.pgo_intra_rotation_weight,
+                                  params_.pgo_loop_translation_weight, params_.pgo_loop_rotation_weight,
+                                  params_.pgo_huber_scale})
+          if (!std::isfinite(weight) || weight <= 0)
+              throw std::invalid_argument("PGO constraint weights and Huber scale must be finite and positive");
+      if (!std::isfinite(params_.insertion_l_occ) || params_.insertion_l_occ <= 0 ||
+          !std::isfinite(params_.insertion_l_free) || params_.insertion_l_free >= 0)
+          throw std::invalid_argument("insertion_l_occ must be positive and insertion_l_free negative");
       if (params_.worker_threads < 1) throw std::invalid_argument("worker_threads must be positive");
       if (params_.output_selection_mode != "map" && params_.output_selection_mode != "pose_risk")
           throw std::invalid_argument("output_selection_mode must be map or pose_risk");
@@ -291,6 +332,23 @@ public:
           params_.split_persistence < 1 || params_.split_min_particles < 1 || params_.loop_validation_scans < 1 ||
           params_.map_resolution < 0.01 || params_.map_resolution > 1.0)
           throw std::invalid_argument("Invalid tracking, proposal, map or split parameters");
+      if (params_.icp_refine) {
+          for (double x : {params_.icp.cloud.voxel_size, params_.icp.cloud.bucket_size,
+                           params_.icp.cloud.normal_radius, params_.icp.max_correspondence_distance,
+                           params_.icp.sigma, params_.icp.huber_delta, params_.icp.max_translation_correction,
+                           params_.icp.max_rotation_correction, params_.icp.max_rmse, params_.icp.max_condition_number})
+              if (!std::isfinite(x) || x <= 0) throw std::invalid_argument("ICP scales must be finite and positive");
+          // A bucket narrower than the correspondence radius still works, but the
+          // query then sweeps rings of buckets for no benefit.
+          if (params_.icp.cloud.bucket_size < params_.icp.max_correspondence_distance ||
+              params_.icp.cloud.normal_radius > params_.icp.cloud.bucket_size ||
+              params_.icp.cloud.voxel_size >= params_.icp.cloud.normal_radius ||
+              params_.icp.cloud.min_normal_neighbors < 3 || params_.icp.max_iterations < 1 ||
+              params_.icp.min_correspondences == 0 || params_.icp.objective_tolerance < 0 ||
+              !(params_.icp.min_linearity >= 0 && params_.icp.min_linearity <= 1) ||
+              !(params_.icp.min_inlier_ratio >= 0 && params_.icp.min_inlier_ratio <= 1))
+              throw std::invalid_argument("Invalid ICP refinement geometry");
+      }
       if (!std::isfinite(params_.recovery.translation_window) || params_.recovery.translation_window<=0 || params_.recovery.translation_window>3 ||
           !std::isfinite(params_.recovery.rotation_window) || params_.recovery.rotation_window<=0 || params_.recovery.rotation_window>1 ||
           !(params_.recovery.min_overlap>=0 && params_.recovery.min_overlap<=1) ||
@@ -302,7 +360,7 @@ public:
           tracking_diagnostics_.open(params_.tracking_diagnostics_path);
           if (!tracking_diagnostics_) throw std::runtime_error("Cannot open tracking_diagnostics_path");
           tracking_diagnostics_ << std::setprecision(17)
-              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points,tracking_prior_mode,prior_evaluated,prior_cov_xx,prior_cov_xy,prior_cov_xyaw,prior_cov_yy,prior_cov_yyaw,prior_cov_yawyaw\n";
+              << "sequence,hypothesis,usable,overlap,mean_log_likelihood,x,y,yaw,mass,particles,status,consecutive_weak_scans,reference_submap,correction_m,pf_frontend_distance_m,nodes,submaps,pose_source,proposal_pose_decision,proposal_ess,proposal_local_mass,proposal_position_std_m,proposal_yaw_std_rad,proposal_mean_offset_m,tracking_matcher,tracking_points,tracking_prior_mode,prior_evaluated,prior_cov_xx,prior_cov_xy,prior_cov_xyaw,prior_cov_yy,prior_cov_yyaw,prior_cov_yawyaw,icp_decision,icp_inlier_ratio,icp_rmse,icp_condition_number,icp_correction_m\n";
       }
       params_.submap_num_range_data = std::max(1, params_.submap_num_range_data);
       params_.max_points_per_scan_node =
@@ -581,6 +639,46 @@ public:
         return belugaslam::tracking_objective(*submap.tracking_field(),scan,pose,prior,configured);
     }
 
+    /// Point-to-line refinement of an accepted match, seeded by that match and
+    /// regularized by the same odometry prior. It can only ever narrow the result:
+    /// the correction is bounded against the seed and is kept only when it does
+    /// not worsen the frontend's own objective.
+    ///
+    /// The non-worsening gate is a safety net, not an improvement detector, and it
+    /// has to be read that way to be worth anything. frontend_objective is what the
+    /// chamfer matcher already minimized, so normal.pose is a strict local minimum
+    /// of it and any correction scores worse there no matter how much better it
+    /// actually is; the chamfer field cannot resolve below half a map cell, which
+    /// is the whole band this refinement works in. icp.objective_tolerance sets how
+    /// much of that blind spot is allowed, and at zero the refinement is a no-op.
+    belugaslam::PoseSample2 refine_with_icp(const std::shared_ptr<Hypothesis>& h, const Submap& submap,
+        const measurement_type& scan, const belugaslam::TrackingResult& normal,
+        const belugaslam::PoseSample2& prior) const {
+        const auto cloud = submap.surface_cloud();
+        h->icp_decision="no_surface_cloud";
+        if (!cloud || cloud->empty()) return normal.pose;
+        auto options=params_.tracking;
+        options.min_overlap=std::max(options.min_overlap,params_.recovery.min_overlap);
+        const auto configured=frontend_tracking_options(prior,options);
+        const auto result=belugaslam::refine_point_to_line(*cloud,scan,normal.pose,prior,configured,params_.icp);
+        h->icp_decision=result.reason;
+        h->icp_inlier_ratio=result.inlier_ratio; h->icp_rmse=result.rmse;
+        h->icp_condition_number=result.condition_number;
+        if (!result.accepted) return normal.pose;
+        // Compared on the frontend's objective, never on the ICP's own cost: the
+        // two measure different things and only this one is commensurable with
+        // the pose the frontend already accepted.
+        const double refined_cost=frontend_objective(submap,scan,result.pose,prior,options);
+        const double original_cost=frontend_objective(submap,scan,normal.pose,prior,options);
+        if (!(refined_cost<=original_cost+params_.icp.objective_tolerance)) {
+            h->icp_decision="frontend_cost_retained";
+            return normal.pose;
+        }
+        h->icp_decision="icp_accepted";
+        h->icp_correction=std::hypot(result.pose.x-normal.pose.x,result.pose.y-normal.pose.y);
+        return result.pose;
+    }
+
     struct TrackingReference {
         std::shared_ptr<const Submap> submap;
         std::shared_ptr<const belugaslam::TrackingField> field;
@@ -612,7 +710,13 @@ public:
         const auto normal = match_frontend_scan(*submap,scan,pose_sample(initial),params_.tracking);
         h->tracking_usable=normal.accepted; h->tracking_overlap=normal.score.overlap;
         h->tracking_log_likelihood=normal.score.mean_log_likelihood;
-        h->local_pose=submap->global_pose()*from_sample(normal.pose);
+        auto accepted_pose = normal.pose;
+        h->icp_decision="disabled"; h->icp_inlier_ratio=0; h->icp_rmse=0;
+        h->icp_condition_number=0; h->icp_correction=0;
+        if (params_.icp_refine && normal.accepted &&
+            normal.score.overlap>=params_.recovery.min_overlap)
+            accepted_pose = refine_with_icp(h,*submap,scan,normal,pose_sample(initial));
+        h->local_pose=submap->global_pose()*from_sample(accepted_pose);
         const bool weak=!normal.accepted || normal.score.overlap<params_.recovery.min_overlap;
         h->tracking_status=normal.accepted ? (weak ? "weak" : "tracked") : "rejected";
         h->tracking_correction=(predicted.inverse()*h->local_pose).translation().norm();
@@ -908,7 +1012,9 @@ public:
                     << h->tracking_prior_evaluated << ',' << h->tracking_prior_covariance[0] << ','
                     << h->tracking_prior_covariance[1] << ',' << h->tracking_prior_covariance[2] << ','
                     << h->tracking_prior_covariance[4] << ',' << h->tracking_prior_covariance[5] << ','
-                    << h->tracking_prior_covariance[8] << '\n';
+                    << h->tracking_prior_covariance[8] << ',' << h->icp_decision << ','
+                    << h->icp_inlier_ratio << ',' << h->icp_rmse << ',' << h->icp_condition_number << ','
+                    << h->icp_correction << '\n';
             }
             if (next_scan_sequence_ % 100 == 0) tracking_diagnostics_.flush();
         }
@@ -1165,7 +1271,7 @@ public:
                 submaps.local_trajectory_constraints.push_back({
                     previous.id, node.id,
                     previous.local_pose.inverse() * node.local_pose,
-                    3.0, 5.0});
+                    params_.pgo_odometry_translation_weight, params_.pgo_odometry_rotation_weight});
             }
 
             // Every accepted scan creates a node and is inserted into both overlapping
@@ -1174,18 +1280,22 @@ public:
                 const auto T_s_r = active_submap->global_pose().inverse() * tracking_pose;
                 submaps.node_submap_constraints.push_back({
                     active_submap->id(), node.id, T_s_r,
-                    5.0, 8.0, ConstraintTag::kIntraSubmap, 1.0, 1.0});
+                    params_.pgo_intra_translation_weight, params_.pgo_intra_rotation_weight,
+                    ConstraintTag::kIntraSubmap, 1.0, 1.0});
 
                 auto& lo_grid = active_submap->mutable_grid();
 
                 // Grow, hits, misses, one touch per cell, hits win. See the helper.
                 ScanInsertionParams insertion_params;
-                insertion_params.l_occ = l_occ_;
-                insertion_params.l_free = l_free_;
+                insertion_params.l_occ = params_.insertion_l_occ;
+                insertion_params.l_free = params_.insertion_l_free;
                 insertion_params.clamp = 5.0f;
                 insertion_params.robot_radius = ROBOT_RADIUS;
                 insert_scan_into_submap_grid(
                     lo_grid, T_s_r, z, insertion_params, scan_hit_cells_, scan_miss_cells_, &scan_updates_);
+                // The same endpoints, kept continuous. insert_scan_into_submap_grid
+                // rounds them to cells and that is all the grid ever sees.
+                if (params_.icp_refine) active_submap->insert_surface_points(T_s_r, z, params_.icp.cloud);
 
                 active_submap->add_insertion();
             }
@@ -2167,7 +2277,8 @@ public:
         node.local_pose = submap->local_pose() * sample->T_submap_robot;
         node.global_pose = submap->global_pose() * sample->T_submap_robot;
         graph.node_submap_constraints.push_back({submap->id(), node.id, sample->T_submap_robot,
-            5.0, 8.0, ConstraintTag::kIntraSubmap, 1.0, 1.0});
+            params_.pgo_intra_translation_weight, params_.pgo_intra_rotation_weight,
+            ConstraintTag::kIntraSubmap, 1.0, 1.0});
         const auto id = node.id;
         const auto position = std::lower_bound(graph.trajectory_nodes.begin(), graph.trajectory_nodes.end(), sequence,
             [](const auto& n, auto value) { return n.sequence < value; });
@@ -2222,7 +2333,8 @@ public:
             reference_sample->T_submap_robot * candidate.T_reference_query;
         const auto loop_index = graph.node_submap_constraints.size();
         graph.node_submap_constraints.push_back({reference_map->id(), query_id, measurement,
-            10.0, 12.0, ConstraintTag::kInterSubmap, candidate.score, candidate.overlap,
+            params_.pgo_loop_translation_weight, params_.pgo_loop_rotation_weight,
+            ConstraintTag::kInterSubmap, candidate.score, candidate.overlap,
             candidate.reference_sequence, candidate.query_sequence});
         result.status = "forced_solve_failed";
         if (!optimize_pose_graph(trial, false, loop_index)) return result;
@@ -2264,7 +2376,8 @@ public:
         // that is then ignored must fail the fit gate, not acquire extra evidence.
         const auto& edge = graph.node_submap_constraints[loop_index];
         if (params_.loop_robust_polish && belugaslam::weighted_loop_residual_squared(
-                result.fit_translation, result.fit_rotation, edge.translation_weight, edge.rotation_weight) > 1.0) {
+                result.fit_translation, result.fit_rotation, edge.translation_weight, edge.rotation_weight) >
+            params_.pgo_huber_scale * params_.pgo_huber_scale) {
             result.polish_attempted = true;
             const auto polish_start = std::chrono::steady_clock::now();
             const bool settled = optimize_pose_graph(trial, false, std::numeric_limits<std::size_t>::max(), true);
@@ -2490,7 +2603,7 @@ public:
             // loss that silently ignores it could otherwise yield a misleadingly
             // unchanged trajectory and make an impossible loop pass verification.
             ceres::LossFunction* loss = edge.tag == ConstraintTag::kInterSubmap && i != forced_loop_index
-                ? static_cast<ceres::LossFunction*>(new ceres::HuberLoss(1.0)) : nullptr;
+                ? static_cast<ceres::LossFunction*>(new ceres::HuberLoss(params_.pgo_huber_scale)) : nullptr;
             problem.AddResidualBlock(cost, loss, variables.at(variable_id.at(edge.submap_id)).data(), nodes.at(edge.node_id).data());
         }
         for (const auto& edge : graph.local_trajectory_constraints) {
@@ -2614,10 +2727,6 @@ private:
     /// Cartographer's structural invariant: one submap being filled and one being
     /// started, both receiving every accepted scan. Not a tuning knob.
     static constexpr std::size_t kMaxActiveSubmaps = 2;
-
-    /// Log-Odds constants for occupancy grid updates.
-    const float l_occ_ = 1.2f;
-    const float l_free_ = -0.2f;
 
     /// Scratch for one scan insertion, reused so the per-scan cost is not allocation.
     std::vector<int> scan_hit_cells_;

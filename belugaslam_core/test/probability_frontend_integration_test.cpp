@@ -81,7 +81,9 @@ TEST(ProbabilityFrontend, SameMapPFUpdateUnchangedAndFrontendFeedsGraph) {
       EXPECT_EQ(weights,baseline_weights); // exactly one unchanged PF likelihood update
       EXPECT_LT((h->local_pose.translation()-truth.translation()).norm(),.03);
       const auto frontend=h->local_pose;
-      slam->update_occupancy_grid(scan,1.,1000000000);
+      // post_update is the step that refreshes the published pose; without it
+      // best_pose() is still the constructor's identity, not a stale estimate.
+      slam->post_update(scan,slam->update_occupancy_grid(scan,1.,1000000000));
       ASSERT_FALSE(h->submaps.trajectory_nodes.empty());
       EXPECT_LT((frontend.inverse()*h->submaps.trajectory_nodes.back().global_pose).translation().norm(),1e-12);
       EXPECT_LT((frontend.inverse()*slam->best_pose()).translation().norm(),1e-12);

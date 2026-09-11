@@ -6,6 +6,36 @@
   <arg name="min_particles" default="5"/>
   <arg name="max_particles" default="30"/>
   <arg name="record_bag" default="false"/>
+  <!-- 0 plays the whole 667 s recording. The previous hardcoded 180 s covered
+       27% of the run, before most large loop closures, so an APE computed on it
+       is not comparable with published Stata Center numbers. -->
+  <arg name="bag_timeout" default="0"/>
+  <!-- TUM trajectory from the finalized pose graph, i.e. what evo_ape should read
+       to compare against graph-SLAM systems. /best_pose is the online estimate and
+       never receives the retrospective loop corrections. -->
+  <arg name="optimized_trajectory_path" default=""/>
+  <!-- Accuracy sweep knobs; see PGO_WEIGHTS.md. Defaults match the node. -->
+  <arg name="pgo_odometry_translation_weight" default="3.0"/>
+  <arg name="pgo_odometry_rotation_weight" default="5.0"/>
+  <arg name="pgo_intra_translation_weight" default="5.0"/>
+  <arg name="pgo_intra_rotation_weight" default="8.0"/>
+  <arg name="pgo_loop_translation_weight" default="10.0"/>
+  <arg name="pgo_loop_rotation_weight" default="12.0"/>
+  <arg name="pgo_huber_scale" default="1.0"/>
+  <arg name="insertion_l_occ" default="1.2"/>
+  <arg name="insertion_l_free" default="-0.2"/>
+  <arg name="keyframe_min_translation" default="0.15"/>
+  <arg name="keyframe_min_rotation" default="0.0872665"/>
+  <arg name="max_points_per_scan_node" default="180"/>
+  <arg name="tracking_occupied_space_weight" default="5.0"/>
+  <arg name="tracking_odom_translation_sigma" default="0.10"/>
+  <arg name="tracking_odom_rotation_sigma" default="0.05"/>
+  <arg name="tracking_max_points" default="180"/>
+  <arg name="range_max" default="60.0"/>
+  <arg name="random_seed" default="42"/>
+  <arg name="loop_diagnostics_path" default=""/>
+  <arg name="performance_diagnostics_path" default=""/>
+  <arg name="final_trajectory_path" default=""/>
 
   <include file="$(find-pkg-share belugaslam_node)/launch/fastslam_oc_grid.launch.py">
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
@@ -13,9 +43,30 @@
     <arg name="odom_frame" value="odom_combined"/>
     <arg name="base_frame" value="base_footprint"/>
     <arg name="scan_topic" value="/base_scan"/>
-    <arg name="range_max" value="60.0"/>
     <arg name="min_particles" value="$(var min_particles)"/>
     <arg name="max_particles" value="$(var max_particles)"/>
+    <arg name="optimized_trajectory_path" value="$(var optimized_trajectory_path)"/>
+    <arg name="pgo_odometry_translation_weight" value="$(var pgo_odometry_translation_weight)"/>
+    <arg name="pgo_odometry_rotation_weight" value="$(var pgo_odometry_rotation_weight)"/>
+    <arg name="pgo_intra_translation_weight" value="$(var pgo_intra_translation_weight)"/>
+    <arg name="pgo_intra_rotation_weight" value="$(var pgo_intra_rotation_weight)"/>
+    <arg name="pgo_loop_translation_weight" value="$(var pgo_loop_translation_weight)"/>
+    <arg name="pgo_loop_rotation_weight" value="$(var pgo_loop_rotation_weight)"/>
+    <arg name="pgo_huber_scale" value="$(var pgo_huber_scale)"/>
+    <arg name="insertion_l_occ" value="$(var insertion_l_occ)"/>
+    <arg name="insertion_l_free" value="$(var insertion_l_free)"/>
+    <arg name="keyframe_min_translation" value="$(var keyframe_min_translation)"/>
+    <arg name="keyframe_min_rotation" value="$(var keyframe_min_rotation)"/>
+    <arg name="max_points_per_scan_node" value="$(var max_points_per_scan_node)"/>
+    <arg name="tracking_occupied_space_weight" value="$(var tracking_occupied_space_weight)"/>
+    <arg name="tracking_odom_translation_sigma" value="$(var tracking_odom_translation_sigma)"/>
+    <arg name="tracking_odom_rotation_sigma" value="$(var tracking_odom_rotation_sigma)"/>
+    <arg name="tracking_max_points" value="$(var tracking_max_points)"/>
+    <arg name="range_max" value="$(var range_max)"/>
+    <arg name="random_seed" value="$(var random_seed)"/>
+    <arg name="loop_diagnostics_path" value="$(var loop_diagnostics_path)"/>
+    <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
+    <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
   </include>
 
   <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(var rviz_config_file)">
@@ -32,7 +83,7 @@
 
   <group if="$(eval '\'$(var bag_path)\' != \'\'')">
   <executable 
-    cmd="timeout 180 ros2 bag play $(var bag_path) --clock" 
+    cmd="timeout $(var bag_timeout) ros2 bag play $(var bag_path) --clock" 
     output="screen"
     on_exit="shutdown" />
   </group>

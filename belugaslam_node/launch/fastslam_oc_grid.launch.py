@@ -173,10 +173,10 @@ def generate_launch_description():
     declare_performance_diagnostics_path = DeclareLaunchArgument('performance_diagnostics_path', default_value='', description='Optional per-scan timing and rejection CSV')
     declare_final_trajectory_path = DeclareLaunchArgument('final_trajectory_path', default_value='', description='Optional CSV with the online and pose-graph-optimized trajectory, written when the run ends')
 
-    declare_tracking_prior_mode = DeclareLaunchArgument('tracking_prior_mode', default_value='fixed', description='See ADAPTIVE_PRIOR.md')
+    declare_tracking_prior_mode = DeclareLaunchArgument('tracking_prior_mode', default_value='odometry', description='See ADAPTIVE_PRIOR.md')
     declare_tracking_odom_translation_sigma = DeclareLaunchArgument('tracking_odom_translation_sigma', default_value='0.10', description='See ADAPTIVE_PRIOR.md')
     declare_tracking_odom_rotation_sigma = DeclareLaunchArgument('tracking_odom_rotation_sigma', default_value='0.05', description='See ADAPTIVE_PRIOR.md')
-    declare_tracking_matcher = DeclareLaunchArgument('tracking_matcher', default_value='distance', description='See PROBABILITY_MATCHER.md')
+    declare_tracking_matcher = DeclareLaunchArgument('tracking_matcher', default_value='probability_ceres', description='See PROBABILITY_MATCHER.md')
     declare_tracking_occupied_space_weight = DeclareLaunchArgument('tracking_occupied_space_weight', default_value='5.0', description='See PROBABILITY_MATCHER.md')
     declare_tracking_voxel_size = DeclareLaunchArgument('tracking_voxel_size', default_value='0.05', description='See PROBABILITY_MATCHER.md')
     declare_tracking_sigma = DeclareLaunchArgument('tracking_sigma', default_value='0.15', description='See QUALITY_REVIEW.md for tracking_sigma')
@@ -210,6 +210,15 @@ def generate_launch_description():
     declare_recovery_interval = DeclareLaunchArgument('recovery_interval', default_value='3', description='Late-run recovery/cache control; see LATE_RUN_REVIEW.md')
     declare_recovery_confirmations = DeclareLaunchArgument('recovery_confirmations', default_value='2', description='Late-run recovery/cache control; see LATE_RUN_REVIEW.md')
     declare_loop_cache_budget_mb = DeclareLaunchArgument('loop_cache_budget_mb', default_value='64', description='Late-run recovery/cache control; see LATE_RUN_REVIEW.md')
+    declare_pgo_odometry_translation_weight = DeclareLaunchArgument('pgo_odometry_translation_weight', default_value='3.0', description='Pose-graph weight (1/sigma) on the consecutive-node odometry constraint; see PGO_WEIGHTS.md')
+    declare_pgo_odometry_rotation_weight = DeclareLaunchArgument('pgo_odometry_rotation_weight', default_value='5.0', description='Pose-graph rotation weight on the consecutive-node odometry constraint')
+    declare_pgo_intra_translation_weight = DeclareLaunchArgument('pgo_intra_translation_weight', default_value='5.0', description='Pose-graph weight on node-to-active-submap (intra-submap) constraints')
+    declare_pgo_intra_rotation_weight = DeclareLaunchArgument('pgo_intra_rotation_weight', default_value='8.0', description='Pose-graph rotation weight on intra-submap constraints')
+    declare_pgo_loop_translation_weight = DeclareLaunchArgument('pgo_loop_translation_weight', default_value='10.0', description='Pose-graph weight on inter-submap (loop closure) constraints; Cartographer outranks intra-submap by ~22x here')
+    declare_pgo_loop_rotation_weight = DeclareLaunchArgument('pgo_loop_rotation_weight', default_value='12.0', description='Pose-graph rotation weight on loop constraints; Cartographer outranks intra-submap by ~62x here')
+    declare_pgo_huber_scale = DeclareLaunchArgument('pgo_huber_scale', default_value='1.0', description='Huber scale on the whitened loop residual; retune together with the loop weights')
+    declare_insertion_l_occ = DeclareLaunchArgument('insertion_l_occ', default_value='1.2', description='Log-odds added to a hit cell per insertion; 1.2 saturates the matcher clamp in two hits')
+    declare_insertion_l_free = DeclareLaunchArgument('insertion_l_free', default_value='-0.2', description='Log-odds added to a ray-cast free cell per insertion')
 
     belugaslam_node = Node(
         package="belugaslam_node",  
@@ -338,6 +347,15 @@ def generate_launch_description():
             "recovery_interval": ParameterValue(LaunchConfiguration('recovery_interval'), value_type=int),
             "recovery_confirmations": ParameterValue(LaunchConfiguration('recovery_confirmations'), value_type=int),
             "loop_cache_budget_mb": ParameterValue(LaunchConfiguration('loop_cache_budget_mb'), value_type=int),
+            "pgo_odometry_translation_weight": ParameterValue(LaunchConfiguration('pgo_odometry_translation_weight'), value_type=float),
+            "pgo_odometry_rotation_weight": ParameterValue(LaunchConfiguration('pgo_odometry_rotation_weight'), value_type=float),
+            "pgo_intra_translation_weight": ParameterValue(LaunchConfiguration('pgo_intra_translation_weight'), value_type=float),
+            "pgo_intra_rotation_weight": ParameterValue(LaunchConfiguration('pgo_intra_rotation_weight'), value_type=float),
+            "pgo_loop_translation_weight": ParameterValue(LaunchConfiguration('pgo_loop_translation_weight'), value_type=float),
+            "pgo_loop_rotation_weight": ParameterValue(LaunchConfiguration('pgo_loop_rotation_weight'), value_type=float),
+            "pgo_huber_scale": ParameterValue(LaunchConfiguration('pgo_huber_scale'), value_type=float),
+            "insertion_l_occ": ParameterValue(LaunchConfiguration('insertion_l_occ'), value_type=float),
+            "insertion_l_free": ParameterValue(LaunchConfiguration('insertion_l_free'), value_type=float),
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
         arguments=["--ros-args", "--log-level", "INFO"],
@@ -466,6 +484,15 @@ def generate_launch_description():
     declare_recovery_interval,
     declare_recovery_confirmations,
     declare_loop_cache_budget_mb,
+    declare_pgo_odometry_translation_weight,
+    declare_pgo_odometry_rotation_weight,
+    declare_pgo_intra_translation_weight,
+    declare_pgo_intra_rotation_weight,
+    declare_pgo_loop_translation_weight,
+    declare_pgo_loop_rotation_weight,
+    declare_pgo_huber_scale,
+    declare_insertion_l_occ,
+    declare_insertion_l_free,
 
     belugaslam_node,
     ])

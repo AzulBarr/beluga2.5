@@ -21,6 +21,7 @@
 #include "belugaslam_core/grid_update.hpp"
 #include "belugaslam_core/robust_tracking.hpp"
 #include "belugaslam_core/probability_matching.hpp"
+#include "belugaslam_core/point_to_line_icp.hpp"
 #include "belugaslam_core/derived_cache.hpp"
 
 using SubmapId = std::uint64_t;
@@ -161,6 +162,37 @@ public:
         grid_->data(), grid_->width(), grid_->height(), grid_->resolution(), grid_->origin_x(), grid_->origin_y());
     return probability_field_;
   }
+  /// Continuous endpoints kept for sub-resolution refinement. The grid insertion
+  /// path keeps only integer cells, so these have to be captured separately or
+  /// the point-to-line matcher inherits the very quantization it exists to beat.
+  /// Copy-on-write, like the grid: a hypothesis that never inserts never pays.
+  void insert_surface_points(const Sophus::SE2d& T_submap_robot,
+                             const std::vector<std::pair<double, double>>& scan,
+                             const belugaslam::SurfaceCloudParams& params) {
+    if (is_finished_) throw std::runtime_error("Attempted to mutate a finished submap cloud");
+    if (!surface_cloud_) surface_cloud_ = std::make_shared<belugaslam::SurfaceCloud>(params);
+    else if (surface_cloud_.use_count() != 1)
+      surface_cloud_ = std::make_shared<belugaslam::SurfaceCloud>(*surface_cloud_);
+    std::vector<std::pair<double, double>> transformed;
+    transformed.reserve(scan.size());
+    for (const auto& point : scan) {
+      const Eigen::Vector2d hit = T_submap_robot * Eigen::Vector2d{point.first, point.second};
+      transformed.emplace_back(hit.x(), hit.y());
+    }
+    surface_cloud_->insert(transformed);
+    // Insertion is serial; matching is parallel and read-only. Normals are brought
+    // up to date here so the matching phase never mutates shared state.
+    surface_cloud_->refresh_normals();
+  }
+
+  /// Null on a submap that never received an insertion, and on every frozen one:
+  /// the cloud cannot be rebuilt from a cropped grid, so rather than let it
+  /// accumulate over a long trajectory it is dropped at finish(). Tracking always
+  /// matches an active submap, which is the only place this refinement applies.
+  [[nodiscard]] std::shared_ptr<const belugaslam::SurfaceCloud> surface_cloud() const {
+    return surface_cloud_;
+  }
+
   [[nodiscard]] const Sophus::SE2d& global_pose() const { return global_pose_; }
   void set_global_pose(const Sophus::SE2d& pose) { global_pose_ = pose; }
   [[nodiscard]] const Sophus::SE2d& local_pose() const { return local_pose_; }
@@ -190,6 +222,7 @@ public:
     grid_->crop_to_known_cells(kCropMarginCells);
     tracking_field_.reset(); probability_field_.reset();
     is_finished_ = true;
+    surface_cloud_.reset();
     compute_radial_signature();
     loop_cache_ = std::make_shared<belugaslam::DerivedCache<LoopMatchingData>>();
   }
@@ -324,6 +357,7 @@ private:
   std::shared_ptr<LogOddsGrid> grid_;
   mutable std::shared_ptr<const belugaslam::TrackingField> tracking_field_;
   mutable std::shared_ptr<const belugaslam::ProbabilityField> probability_field_;
+  std::shared_ptr<belugaslam::SurfaceCloud> surface_cloud_;
   int num_insertions_;
   bool is_finished_;
   SubmapRole role_;
@@ -685,6 +719,8 @@ struct Hypothesis {
   std::size_t tracking_failures = 0;
   std::string tracking_status = "bootstrap";
   double tracking_log_likelihood = 0.0, tracking_correction = 0.0;
+  std::string icp_decision = "disabled";
+  double icp_inlier_ratio = 0.0, icp_rmse = 0.0, icp_condition_number = 0.0, icp_correction = 0.0;
   belugaslam::PriorMatrix3 tracking_prior_covariance{};
   bool tracking_prior_evaluated = false;
   bool has_pending_recovery = false;

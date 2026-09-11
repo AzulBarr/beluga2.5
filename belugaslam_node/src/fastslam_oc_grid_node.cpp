@@ -93,6 +93,25 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     declare_parameter("tracking_odom_translation_sigma", 0.10);
     declare_parameter("tracking_odom_rotation_sigma", 0.05);
     declare_parameter("tracking_matcher", std::string("distance"));
+    // Point-to-line refinement of the accepted frontend match. Defaults mirror
+    // belugaslam::IcpOptions; off unless icp_refine is set.
+    declare_parameter("icp_refine", false);
+    declare_parameter("icp_voxel_size", 0.04);
+    declare_parameter("icp_bucket_size", 0.25);
+    declare_parameter("icp_normal_radius", 0.20);
+    declare_parameter("icp_min_normal_neighbors", 4);
+    declare_parameter("icp_max_correspondence_distance", 0.25);
+    declare_parameter("icp_min_linearity", 0.55);
+    declare_parameter("icp_sigma", 0.05);
+    declare_parameter("icp_huber_delta", 0.05);
+    declare_parameter("icp_iterations", 8);
+    declare_parameter("icp_max_translation_correction", 0.15);
+    declare_parameter("icp_max_rotation_correction", 0.052);
+    declare_parameter("icp_min_inlier_ratio", 0.55);
+    declare_parameter("icp_max_rmse", 0.10);
+    declare_parameter("icp_max_condition_number", 200.0);
+    declare_parameter("icp_min_correspondences", 30);
+    declare_parameter("icp_objective_tolerance", 0.03);
     declare_parameter("tracking_occupied_space_weight", 5.0);
     declare_parameter("tracking_voxel_size", 0.05);
     declare_parameter("tracking_sigma", 0.15);
@@ -126,6 +145,17 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("recovery_interval", 3);
     this->declare_parameter("recovery_confirmations", 2);
     this->declare_parameter("loop_cache_budget_mb", 64);
+    // Pose-graph constraint weights and insertion log-odds. Defaults reproduce
+    // the previously hardcoded values exactly; see PGO_WEIGHTS.md for the sweep.
+    declare_parameter("pgo_odometry_translation_weight", 3.0);
+    declare_parameter("pgo_odometry_rotation_weight", 5.0);
+    declare_parameter("pgo_intra_translation_weight", 5.0);
+    declare_parameter("pgo_intra_rotation_weight", 8.0);
+    declare_parameter("pgo_loop_translation_weight", 10.0);
+    declare_parameter("pgo_loop_rotation_weight", 12.0);
+    declare_parameter("pgo_huber_scale", 1.0);
+    declare_parameter("insertion_l_occ", 1.2);
+    declare_parameter("insertion_l_free", -0.2);
 
 
     setup_slam();
@@ -373,6 +403,35 @@ void BelugaSLAMNode::setup_slam() {
     params.recovery.interval = static_cast<decltype(params.recovery.interval)>(get_parameter("recovery_interval").as_int());
     if (get_parameter("recovery_confirmations").as_int()<0 || get_parameter("recovery_confirmations").as_int()>100000) throw std::invalid_argument("Invalid recovery_confirmations");
     params.recovery.confirmations = static_cast<decltype(params.recovery.confirmations)>(get_parameter("recovery_confirmations").as_int());
+    params.icp_refine = get_parameter("icp_refine").as_bool();
+    params.icp.cloud.voxel_size = get_parameter("icp_voxel_size").as_double();
+    params.icp.cloud.bucket_size = get_parameter("icp_bucket_size").as_double();
+    params.icp.cloud.normal_radius = get_parameter("icp_normal_radius").as_double();
+    if (get_parameter("icp_min_normal_neighbors").as_int()<3 || get_parameter("icp_min_normal_neighbors").as_int()>1000) throw std::invalid_argument("Invalid icp_min_normal_neighbors");
+    params.icp.cloud.min_normal_neighbors = static_cast<decltype(params.icp.cloud.min_normal_neighbors)>(get_parameter("icp_min_normal_neighbors").as_int());
+    params.icp.max_correspondence_distance = get_parameter("icp_max_correspondence_distance").as_double();
+    params.icp.min_linearity = get_parameter("icp_min_linearity").as_double();
+    params.icp.sigma = get_parameter("icp_sigma").as_double();
+    params.icp.huber_delta = get_parameter("icp_huber_delta").as_double();
+    if (get_parameter("icp_iterations").as_int()<1 || get_parameter("icp_iterations").as_int()>1000) throw std::invalid_argument("Invalid icp_iterations");
+    params.icp.max_iterations = static_cast<decltype(params.icp.max_iterations)>(get_parameter("icp_iterations").as_int());
+    params.icp.max_translation_correction = get_parameter("icp_max_translation_correction").as_double();
+    params.icp.max_rotation_correction = get_parameter("icp_max_rotation_correction").as_double();
+    params.icp.min_inlier_ratio = get_parameter("icp_min_inlier_ratio").as_double();
+    params.icp.max_rmse = get_parameter("icp_max_rmse").as_double();
+    params.icp.max_condition_number = get_parameter("icp_max_condition_number").as_double();
+    if (get_parameter("icp_min_correspondences").as_int()<1 || get_parameter("icp_min_correspondences").as_int()>100000) throw std::invalid_argument("Invalid icp_min_correspondences");
+    params.icp.min_correspondences = static_cast<decltype(params.icp.min_correspondences)>(get_parameter("icp_min_correspondences").as_int());
+    params.icp.objective_tolerance = get_parameter("icp_objective_tolerance").as_double();
+    params.pgo_odometry_translation_weight = get_parameter("pgo_odometry_translation_weight").as_double();
+    params.pgo_odometry_rotation_weight = get_parameter("pgo_odometry_rotation_weight").as_double();
+    params.pgo_intra_translation_weight = get_parameter("pgo_intra_translation_weight").as_double();
+    params.pgo_intra_rotation_weight = get_parameter("pgo_intra_rotation_weight").as_double();
+    params.pgo_loop_translation_weight = get_parameter("pgo_loop_translation_weight").as_double();
+    params.pgo_loop_rotation_weight = get_parameter("pgo_loop_rotation_weight").as_double();
+    params.pgo_huber_scale = get_parameter("pgo_huber_scale").as_double();
+    params.insertion_l_occ = static_cast<float>(get_parameter("insertion_l_occ").as_double());
+    params.insertion_l_free = static_cast<float>(get_parameter("insertion_l_free").as_double());
     if (get_parameter("loop_cache_budget_mb").as_int()<0 || get_parameter("loop_cache_budget_mb").as_int()>100000) throw std::invalid_argument("Invalid loop_cache_budget_mb");
     params.loop_cache_budget_mb = static_cast<decltype(params.loop_cache_budget_mb)>(get_parameter("loop_cache_budget_mb").as_int());
 
