@@ -36,6 +36,12 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_max_branches", 2);
     this->declare_parameter("max_hypotheses", 4);
     this->declare_parameter("loop_candidate_distance", 10.0);
+    this->declare_parameter("loop_use_scan_context_2d", true);
+    this->declare_parameter("loop_scan_context_max_distance", 0.70);
+    this->declare_parameter("loop_scan_context_ring_key_weight", 0.35);
+    this->declare_parameter("loop_scan_context_pose_weight", 0.02);
+    this->declare_parameter("loop_scan_context_lateral_rings", 1);
+    this->declare_parameter("loop_scan_context_yaw_seed", true);
     this->declare_parameter("loop_search_translation", 3.0);
     this->declare_parameter("loop_search_rotation", 0.7);
     this->declare_parameter("loop_min_score", 0.55);
@@ -262,6 +268,12 @@ void BelugaSLAMNode::setup_slam() {
     params.loop_max_branches = static_cast<std::size_t>(get_parameter("loop_max_branches").as_int());
     params.max_hypotheses = static_cast<std::size_t>(get_parameter("max_hypotheses").as_int());
     params.loop_candidate_distance = get_parameter("loop_candidate_distance").as_double();
+    params.loop_use_scan_context_2d = get_parameter("loop_use_scan_context_2d").as_bool();
+    params.loop_scan_context_max_distance = get_parameter("loop_scan_context_max_distance").as_double();
+    params.loop_scan_context_ring_key_weight = get_parameter("loop_scan_context_ring_key_weight").as_double();
+    params.loop_scan_context_pose_weight = get_parameter("loop_scan_context_pose_weight").as_double();
+    params.loop_scan_context_lateral_rings = get_parameter("loop_scan_context_lateral_rings").as_int();
+    params.loop_scan_context_yaw_seed = get_parameter("loop_scan_context_yaw_seed").as_bool();
     params.loop_search_translation = get_parameter("loop_search_translation").as_double();
     params.loop_search_rotation = get_parameter("loop_search_rotation").as_double();
     params.loop_min_score = get_parameter("loop_min_score").as_double();

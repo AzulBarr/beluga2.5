@@ -23,6 +23,7 @@
 #include "belugaslam_core/probability_matching.hpp"
 #include "belugaslam_core/point_to_line_icp.hpp"
 #include "belugaslam_core/derived_cache.hpp"
+#include "belugaslam_core/scan_context_2d.hpp"
 
 using SubmapId = std::uint64_t;
 using ScanNodeId = std::uint64_t;
@@ -242,6 +243,7 @@ public:
     is_finished_ = true;
     surface_cloud_.reset();
     compute_radial_signature();
+    scan_context_2d_ = belugaslam::make_scan_context_2d(*grid_);
     loop_cache_ = std::make_shared<belugaslam::DerivedCache<LoopMatchingData>>();
   }
 
@@ -292,6 +294,7 @@ public:
   }
 
   [[nodiscard]] const std::vector<double>& radial_signature() const { return radial_signature_; }
+  [[nodiscard]] const belugaslam::ScanContext2D& scan_context_2d() const { return scan_context_2d_; }
 
 private:
   void compute_radial_signature() {
@@ -380,6 +383,7 @@ private:
   bool is_finished_;
   SubmapRole role_;
   std::vector<double> radial_signature_;
+  belugaslam::ScanContext2D scan_context_2d_;
   std::shared_ptr<belugaslam::DerivedCache<LoopMatchingData>> loop_cache_;
 };
 
