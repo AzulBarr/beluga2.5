@@ -119,6 +119,12 @@ def generate_launch_description():
     declare_loop_max_branches = DeclareLaunchArgument('loop_max_branches', default_value='2', description='Maximum loop hypotheses spawned per event')
     declare_max_hypotheses = DeclareLaunchArgument('max_hypotheses', default_value='4', description='Global bound on graph hypotheses')
     declare_loop_candidate_distance = DeclareLaunchArgument('loop_candidate_distance', default_value='10.0', description='Maximum pose-prior distance for loop retrieval')
+    declare_loop_use_scan_context_2d = DeclareLaunchArgument('loop_use_scan_context_2d', default_value='true', description='Use 2-D Scan Context++-style descriptor retrieval')
+    declare_loop_scan_context_max_distance = DeclareLaunchArgument('loop_scan_context_max_distance', default_value='0.70', description='Maximum full 2-D Scan Context descriptor distance')
+    declare_loop_scan_context_ring_key_weight = DeclareLaunchArgument('loop_scan_context_ring_key_weight', default_value='0.35', description='Weight of yaw-invariant ring-key distance in retrieval ranking')
+    declare_loop_scan_context_pose_weight = DeclareLaunchArgument('loop_scan_context_pose_weight', default_value='0.02', description='Weak pose-distance prior in Scan Context retrieval ranking')
+    declare_loop_scan_context_lateral_rings = DeclareLaunchArgument('loop_scan_context_lateral_rings', default_value='1', description='Adjacent radial bins tolerated during full context matching')
+    declare_loop_scan_context_yaw_seed = DeclareLaunchArgument('loop_scan_context_yaw_seed', default_value='true', description='Use Scan Context circular shift as an additional loop scan-matching yaw seed')
     declare_loop_search_translation = DeclareLaunchArgument('loop_search_translation', default_value='3.0', description='Correlative matcher translation half-window')
     declare_loop_search_rotation = DeclareLaunchArgument('loop_search_rotation', default_value='0.7', description='Correlative matcher rotation half-window')
     declare_loop_min_score = DeclareLaunchArgument('loop_min_score', default_value='0.55', description='Minimum distance-field match score')
@@ -265,6 +271,12 @@ def generate_launch_description():
             "loop_max_branches": LaunchConfiguration('loop_max_branches'),
             "max_hypotheses": LaunchConfiguration('max_hypotheses'),
             "loop_candidate_distance": LaunchConfiguration('loop_candidate_distance'),
+            "loop_use_scan_context_2d": ParameterValue(LaunchConfiguration('loop_use_scan_context_2d'), value_type=bool),
+            "loop_scan_context_max_distance": LaunchConfiguration('loop_scan_context_max_distance'),
+            "loop_scan_context_ring_key_weight": LaunchConfiguration('loop_scan_context_ring_key_weight'),
+            "loop_scan_context_pose_weight": LaunchConfiguration('loop_scan_context_pose_weight'),
+            "loop_scan_context_lateral_rings": LaunchConfiguration('loop_scan_context_lateral_rings'),
+            "loop_scan_context_yaw_seed": ParameterValue(LaunchConfiguration('loop_scan_context_yaw_seed'), value_type=bool),
             "loop_search_translation": LaunchConfiguration('loop_search_translation'),
             "loop_search_rotation": LaunchConfiguration('loop_search_rotation'),
             "loop_min_score": LaunchConfiguration('loop_min_score'),
@@ -406,6 +418,12 @@ def generate_launch_description():
     declare_loop_max_branches,
     declare_max_hypotheses,
     declare_loop_candidate_distance,
+    declare_loop_use_scan_context_2d,
+    declare_loop_scan_context_max_distance,
+    declare_loop_scan_context_ring_key_weight,
+    declare_loop_scan_context_pose_weight,
+    declare_loop_scan_context_lateral_rings,
+    declare_loop_scan_context_yaw_seed,
     declare_loop_search_translation,
     declare_loop_search_rotation,
     declare_loop_min_score,

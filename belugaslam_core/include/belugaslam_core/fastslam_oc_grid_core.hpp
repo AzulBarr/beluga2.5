@@ -145,6 +145,15 @@ struct FastSLAMParams {
     std::size_t loop_max_branches = 2;
     std::size_t max_hypotheses = 4;
     double loop_candidate_distance = 10.0;
+    // 2-D Scan Context++-style retrieval. The descriptor proposes places; the
+    // existing geometric matcher and belief verifier still decide whether a loop
+    // is usable/accepted. Pose distance remains only a bounded feasibility prior.
+    bool loop_use_scan_context_2d = true;
+    double loop_scan_context_max_distance = 0.70;
+    double loop_scan_context_ring_key_weight = 0.35;
+    double loop_scan_context_pose_weight = 0.02;
+    int loop_scan_context_lateral_rings = 1;
+    bool loop_scan_context_yaw_seed = true;
     double loop_search_translation = 3.0;
     double loop_search_rotation = 0.7;
     double loop_min_score = 0.55;
@@ -407,9 +416,14 @@ public:
       if (!(params_.loop_branch_prior > 0.0 && params_.loop_branch_prior < 1.0) ||
           !(params_.loop_belief_threshold >= 0.0 && params_.loop_belief_threshold <= 1.0))
           throw std::invalid_argument("Invalid loop branch prior or belief threshold");
-      for (double value : {params_.loop_candidate_distance, params_.loop_search_translation, params_.loop_search_rotation}) {
+      for (double value : {params_.loop_candidate_distance, params_.loop_search_translation, params_.loop_search_rotation,
+                           params_.loop_scan_context_max_distance, params_.loop_scan_context_ring_key_weight,
+                           params_.loop_scan_context_pose_weight}) {
           if (!std::isfinite(value) || value < 0.0) throw std::invalid_argument("Loop search bounds must be finite and nonnegative");
       }
+      if (params_.loop_scan_context_max_distance > 1.0 || params_.loop_scan_context_lateral_rings < 0 ||
+          params_.loop_scan_context_lateral_rings > 4)
+          throw std::invalid_argument("Invalid 2-D Scan Context retrieval parameters");
       for (double value : {params_.loop_min_score, params_.loop_min_overlap}) {
           if (!(value >= 0.0 && value <= 1.0)) throw std::invalid_argument("Loop geometric thresholds must be in [0,1]");
       }
@@ -2328,20 +2342,44 @@ public:
             // keyframe IDs; raw sequence IDs are the shared association identity.
             const auto* query = graph.find_node(inserted.back());
             if (!query || !query->constant_data || query->constant_data->returns.size() < params_.loop_min_points) continue;
-            struct Retrieved { std::shared_ptr<Submap> map; double rank; };
+            struct Retrieved {
+                std::shared_ptr<Submap> map;
+                double rank = std::numeric_limits<double>::infinity();
+                double context_distance = 1.0;
+                double context_yaw = 0.0;
+                bool has_context = false;
+            };
             std::vector<Retrieved> retrieved;
             for (std::size_t i = 0; i < query_index; ++i) {
                 if (query_index - i <= params_.loop_recent_submaps) continue;
                 const auto& reference = graph.history[i];
                 const double distance = (reference->global_pose().translation() - query->global_pose.translation()).norm();
                 if (distance > params_.loop_candidate_distance) continue;
-                double signature_distance = 0.0;
-                const auto& a = reference->radial_signature();
-                const auto& b = query_map->radial_signature();
-                for (std::size_t j = 0; j < std::min(a.size(), b.size()); ++j) {
-                    signature_distance += (a[j] - b[j]) * (a[j] - b[j]);
+
+                if (params_.loop_use_scan_context_2d) {
+                    const auto& a = reference->scan_context_2d();
+                    const auto& b = query_map->scan_context_2d();
+                    const double key_distance = belugaslam::scan_context_ring_key_distance(a, b);
+                    const auto context = belugaslam::match_scan_context_2d(
+                        a, b, std::max(0, params_.loop_scan_context_lateral_rings));
+                    if (!std::isfinite(key_distance) || !std::isfinite(context.distance) ||
+                        context.distance > params_.loop_scan_context_max_distance) continue;
+                    // Descriptor similarity is primary. Global pose is retained only
+                    // as a weak feasibility prior because the downstream matcher is
+                    // translation-bounded; it no longer dominates place retrieval.
+                    const double rank = context.distance +
+                        params_.loop_scan_context_ring_key_weight * key_distance +
+                        params_.loop_scan_context_pose_weight * distance;
+                    retrieved.push_back({reference, rank, context.distance, context.yaw, true});
+                } else {
+                    // Controlled ablation / legacy fallback.
+                    double signature_distance = 0.0;
+                    const auto& a = reference->radial_signature();
+                    const auto& b = query_map->radial_signature();
+                    for (std::size_t j = 0; j < std::min(a.size(), b.size()); ++j)
+                        signature_distance += (a[j] - b[j]) * (a[j] - b[j]);
+                    retrieved.push_back({reference, distance + 4.0 * signature_distance, 1.0, 0.0, false});
                 }
-                retrieved.push_back({reference, distance + 4.0 * signature_distance});
             }
             std::stable_sort(retrieved.begin(), retrieved.end(), [](const auto& a, const auto& b) { return a.rank < b.rank; });
             if (retrieved.size() > params_.loop_max_candidates) retrieved.resize(params_.loop_max_candidates);
@@ -2353,8 +2391,24 @@ public:
             std::vector<ScanMatchResult> matches(retrieved.size());
             parallel_indices(retrieved.size(), [&](std::size_t i) {
                 const auto& entry = retrieved[i];
-                matches[i] = match_scan_to_submap(*query->constant_data, *entry.map,
-                    entry.map->global_pose().inverse() * query->global_pose);
+                const auto odometric_seed = entry.map->global_pose().inverse() * query->global_pose;
+                matches[i] = match_scan_to_submap(*query->constant_data, *entry.map, odometric_seed);
+
+                // Scan Context's circular shift provides a second yaw hypothesis.
+                // Keep translation from the current graph (the descriptor is not a
+                // metric 2-D registration), but replace yaw with the context estimate
+                // plus the query scan's pose inside its own finished submap.
+                if (entry.has_context && params_.loop_scan_context_yaw_seed) {
+                    const auto T_querymap_query = query_map->global_pose().inverse() * query->global_pose;
+                    const double context_node_yaw = entry.context_yaw + T_querymap_query.so2().log();
+                    const Sophus::SE2d context_seed{
+                        Sophus::SO2d{context_node_yaw}, odometric_seed.translation()};
+                    const auto context_match = match_scan_to_submap(*query->constant_data, *entry.map, context_seed);
+                    const auto quality = [](const ScanMatchResult& value) {
+                        return value.valid ? value.score * value.overlap : -1.0;
+                    };
+                    if (quality(context_match) > quality(matches[i])) matches[i] = context_match;
+                }
                 if (!matches[i].valid || params_.loop_validation_scans == 1) return;
                 std::size_t checked = 1;
                 double score_sum = matches[i].score;
