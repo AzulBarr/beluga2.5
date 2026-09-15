@@ -70,6 +70,7 @@
   <arg name="scan_reliable" default="false"/>
   <arg name="performance_diagnostics_path" default=""/>
   <arg name="final_trajectory_path" default=""/>
+  <arg name="detection_events_path" default=""/>
 
   <arg name="tracking_prior_mode" default="fixed"/>
   <arg name="tracking_odom_translation_sigma" default="0.10"/>
@@ -201,6 +202,7 @@
     <arg name="scan_reliable" value="$(var scan_reliable)"/>
     <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
     <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
+    <arg name="detection_events_path" value="$(var detection_events_path)"/>
     <arg name="tracking_prior_mode" value="$(var tracking_prior_mode)"/>
     <arg name="tracking_odom_translation_sigma" value="$(var tracking_odom_translation_sigma)"/>
     <arg name="tracking_odom_rotation_sigma" value="$(var tracking_odom_rotation_sigma)"/>

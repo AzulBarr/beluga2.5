@@ -96,6 +96,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("scan_reliable", false);
     this->declare_parameter("performance_diagnostics_path", "");
     this->declare_parameter("final_trajectory_path", "");
+    this->declare_parameter("detection_events_path", "");
 
     declare_parameter("tracking_prior_mode", std::string("fixed"));
     declare_parameter("tracking_odom_translation_sigma", 0.10);
@@ -362,6 +363,13 @@ void BelugaSLAMNode::setup_slam() {
         final_trajectory_csv_.open(final_trajectory_path);
         if (!final_trajectory_csv_) throw std::runtime_error("Cannot open final_trajectory_path");
     }
+    const auto detection_events_path = get_parameter("detection_events_path").as_string();
+    if (!detection_events_path.empty()) {
+        detection_events_csv_.open(detection_events_path);
+        if (!detection_events_csv_) throw std::runtime_error("Cannot open detection_events_path");
+        detection_events_csv_ << std::setprecision(17)
+            << "event_id,type,stamp_ns,stamp_s,x,y,yaw,hypothesis\n";
+    }
     // Keep the estimated body frame unchanged. Export the measured extrinsics so
     // evaluation can right-compose each pose into the reference's body frame.
     const auto frames_parent = final_trajectory_path.empty() ? trajectory_path : final_trajectory_path;
@@ -561,6 +569,7 @@ void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr
                 scan_sequence_stamps_.back() = stamp.nanoseconds();
             }
         }
+        write_detection_events();
         record_performance(stamp, "processed", start, timing);
     } catch (const tf2::TransformException& ex) {
         ++tf_errors_;
@@ -891,6 +900,27 @@ void BelugaSLAMNode::publish_uncertainty_map() {
         msg.data[i] = static_cast<int8_t>(100.0 * H / std::log(2.0));
     }
     uncertainty_map_pub_->publish(msg);
+}
+
+// Appended as the core produces them, not at shutdown: the event history is the
+// record of what the detectors did, and a run that is killed still keeps it.
+void BelugaSLAMNode::write_detection_events() {
+    if (!detection_events_csv_.is_open() || !slam_) return;
+    const auto& events = slam_->detection_events();
+    for (auto i = written_detection_events_; i < events.size(); ++i) {
+        const auto& event = events[i];
+        detection_events_csv_ << event.id << ','
+            << (event.type == belugaslam::EventType::kLoopClosure ? "loop_closure" : "spatial_cluster") << ','
+            << event.timestamp_ns << ','
+            << static_cast<double>(event.timestamp_ns) * 1e-9 << ','
+            << event.pose.translation().x() << ',' << event.pose.translation().y() << ','
+            << event.pose.so2().log() << ',' << event.hypothesis_id << '\n';
+    }
+    if (written_detection_events_ != events.size()) {
+        written_detection_events_ = events.size();
+        detection_events_csv_.flush();
+        if (!detection_events_csv_) throw std::runtime_error("Cannot write detection events");
+    }
 }
 
 void BelugaSLAMNode::publish_detection_markers() {

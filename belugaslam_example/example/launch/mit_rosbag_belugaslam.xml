@@ -36,6 +36,7 @@
   <arg name="loop_diagnostics_path" default=""/>
   <arg name="performance_diagnostics_path" default=""/>
   <arg name="final_trajectory_path" default=""/>
+  <arg name="detection_events_path" default=""/>
 
   <!-- Scan-informed PF; false reproduces the odometry proposal. -->
   <arg name="scan_informed_proposal" default="true"/>
@@ -81,6 +82,7 @@
     <arg name="loop_diagnostics_path" value="$(var loop_diagnostics_path)"/>
     <arg name="performance_diagnostics_path" value="$(var performance_diagnostics_path)"/>
     <arg name="final_trajectory_path" value="$(var final_trajectory_path)"/>
+    <arg name="detection_events_path" value="$(var detection_events_path)"/>
   </include>
 
   <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(var rviz_config_file)">

@@ -178,6 +178,7 @@ def generate_launch_description():
     declare_scan_reliable = DeclareLaunchArgument('scan_reliable', default_value='false', description='Request reliable scan delivery only with a reliable publisher')
     declare_performance_diagnostics_path = DeclareLaunchArgument('performance_diagnostics_path', default_value='', description='Optional per-scan timing and rejection CSV')
     declare_final_trajectory_path = DeclareLaunchArgument('final_trajectory_path', default_value='', description='Optional CSV with the online and pose-graph-optimized trajectory, written when the run ends')
+    declare_detection_events_path = DeclareLaunchArgument('detection_events_path', default_value='', description='Optional CSV with every spatial cluster fork and installed loop branch, appended with its scan timestamp as it happens')
 
     declare_tracking_prior_mode = DeclareLaunchArgument('tracking_prior_mode', default_value='odometry', description='See ADAPTIVE_PRIOR.md')
     declare_tracking_odom_translation_sigma = DeclareLaunchArgument('tracking_odom_translation_sigma', default_value='0.10', description='See ADAPTIVE_PRIOR.md')
@@ -329,6 +330,7 @@ def generate_launch_description():
             "scan_reliable": ParameterValue(LaunchConfiguration('scan_reliable'), value_type=bool),
             "performance_diagnostics_path": ParameterValue(LaunchConfiguration('performance_diagnostics_path'), value_type=str),
             "final_trajectory_path": ParameterValue(LaunchConfiguration('final_trajectory_path'), value_type=str),
+            "detection_events_path": ParameterValue(LaunchConfiguration('detection_events_path'), value_type=str),
             "tracking_prior_mode": ParameterValue(LaunchConfiguration('tracking_prior_mode'), value_type=str),
             "tracking_odom_translation_sigma": ParameterValue(LaunchConfiguration('tracking_odom_translation_sigma'), value_type=float),
             "tracking_odom_rotation_sigma": ParameterValue(LaunchConfiguration('tracking_odom_rotation_sigma'), value_type=float),
@@ -476,6 +478,7 @@ def generate_launch_description():
     declare_scan_reliable,
     declare_performance_diagnostics_path,
     declare_final_trajectory_path,
+    declare_detection_events_path,
     declare_tracking_prior_mode,
     declare_tracking_odom_translation_sigma,
     declare_tracking_odom_rotation_sigma,
