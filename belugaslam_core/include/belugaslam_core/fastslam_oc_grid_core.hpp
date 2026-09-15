@@ -441,7 +441,7 @@ public:
           loop_diagnostics_.open(params_.loop_diagnostics_path);
           if (!loop_diagnostics_) throw std::runtime_error("Cannot open loop_diagnostics_path");
           loop_diagnostics_ << std::setprecision(17);
-          loop_diagnostics_ << "candidate_id,query_sequence,reference_sequence,source_hypothesis,"
+          loop_diagnostics_ << "candidate_id,query_sequence,reference_sequence,query_time,reference_time,source_hypothesis,"
               "candidate_dx,candidate_dy,candidate_dtheta,verifier_mode,hypothesis,prior_weight,"
               "trial_usable,fit_translation,fit_rotation,translation_rmse,rotation_rmse,compatibility,"
               "belief_score,map_score,uniform_score,geometry_score,eligible,selected,forced_fit_translation,forced_fit_rotation,forced_compatibility,settled_compatibility,polish_attempted,polish_ms,verification_status,trial_installed,event_id,query_consumed,retained_branch_mass\n";
@@ -2739,10 +2739,30 @@ public:
                 << " belief=" << report.evidence.weighted << " MAP=" << report.evidence.map
                 << " uniform=" << report.evidence.uniform << " selected=" << report.selected << std::endl;
             if (!loop_diagnostics_.is_open() || !loop_diagnostics_) continue;
+            // The marker's stamp is its *publication* time, not the time of either
+            // endpoint of this association. Use immutable trajectory sample stamps
+            // from the hypothesis that produced the candidate instead.
+            const auto origin = std::find_if(prior_hypotheses.begin(), prior_hypotheses.end(),
+                [&](const auto& hypothesis) { return hypothesis->id == report.candidate.source_hypothesis; });
+            const auto* source_graph = origin == prior_hypotheses.end() ? nullptr : &(*origin)->submaps;
+            const auto* query_sample = source_graph ? source_graph->find_sample(report.candidate.query_sequence) : nullptr;
+            const auto* reference_sample = source_graph ? source_graph->find_sample(report.candidate.reference_sequence) : nullptr;
+            const auto write_time = [&](const TrajectorySample* sample) {
+                if (sample && sample->stamp_ns > 0) {
+                    constexpr std::int64_t kNsPerSecond = 1000000000LL;
+                    loop_diagnostics_ << sample->stamp_ns / kNsPerSecond << '.'
+                        << std::setw(9) << std::setfill('0') << sample->stamp_ns % kNsPerSecond
+                        << std::setfill(' ');
+                }
+            };
             for (std::size_t h = 0; h < prior_hypotheses.size(); ++h) {
                 const auto& trial = report.trials[h];
-                loop_diagnostics_ << report.candidate.candidate_id << ',' << report.candidate.query_sequence << ',' << report.candidate.reference_sequence << ','
-                    << report.candidate.source_hypothesis << ',' << report.candidate.T_reference_query.translation().x() << ','
+                loop_diagnostics_ << report.candidate.candidate_id << ',' << report.candidate.query_sequence << ','
+                    << report.candidate.reference_sequence << ',';
+                write_time(query_sample);
+                loop_diagnostics_ << ',';
+                write_time(reference_sample);
+                loop_diagnostics_ << ',' << report.candidate.source_hypothesis << ',' << report.candidate.T_reference_query.translation().x() << ','
                     << report.candidate.T_reference_query.translation().y() << ',' << report.candidate.T_reference_query.so2().log() << ','
                     << params_.loop_verifier_mode << ',' << prior_hypotheses[h]->id << ',' << masses[h] << ','
                     << trial.usable << ',' << trial.fit_translation << ',' << trial.fit_rotation << ','
