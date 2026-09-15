@@ -756,6 +756,20 @@ struct Hypothesis {
   std::uint64_t last_recovery_attempt = std::numeric_limits<std::uint64_t>::max();
   struct PendingSplit { Sophus::SE2d pose; std::size_t count = 0; std::uint64_t sequence = 0; };
   std::vector<PendingSplit> pending_splits;
+
+  /** Provenance of the fork that created this hypothesis, kept only for reporting.
+   *
+   * A fork always produces two sides that share a parent; one of them starts with
+   * less probability mass. Remembering which side that was lets the frontend report
+   * the case where the weaker side is later the published one, which is exactly the
+   * moment the estimate changes its mind about the map it had been building.
+   */
+  std::string fork_origin = "initial";  // "spatial_cluster" | "loop_closure"
+  std::uint64_t fork_sequence = 0;
+  std::size_t fork_rival_id = 0;
+  double fork_mass = 1.0, fork_rival_mass = 0.0;
+  bool fork_weaker = false;
+  bool fork_selected = false;  // already the published hypothesis when the fork happened
 };
 
 #endif  // __BELUGASLAM_CORE_SUBMAP_HPP__

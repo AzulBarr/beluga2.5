@@ -34,6 +34,7 @@
 
 #include "particle.hpp"
 #include "submap.hpp"
+#include "detection_event.hpp"
 #include "ceres_probability_tracking.hpp"
 #include "point_to_line_icp.hpp"
 #include "motion_filter.hpp"
@@ -479,11 +480,12 @@ public:
         return hypotheses_.empty() ? 0 : hypotheses_.front()->submaps.history.size(); 
     }
 
-    /// Returns all detected loop closure poses (persistent, for RViz visualization)
-    [[nodiscard]] const std::vector<Sophus::SE2d>& loop_closure_poses() const { return loop_closure_poses_; }
-
-    /// Returns all spatial cluster split poses (persistent, for RViz visualization)
-    [[nodiscard]] const std::vector<Sophus::SE2d>& spatial_split_poses() const { return spatial_split_poses_; }
+    /// Append-only history of every spatial fork and installed loop branch, in the
+    /// order they happened. Entries are never removed: an event says the detector
+    /// produced this, not that the estimate kept it.
+    [[nodiscard]] const std::vector<belugaslam::DetectionEvent>& detection_events() const {
+        return detection_events_;
+    }
 
     /// Samples from the motion distribution to propagate particle states.
     /**
@@ -1311,6 +1313,9 @@ public:
                 throw std::invalid_argument("Trajectory timestamp outside int64 range");
             stamp_ns=static_cast<std::int64_t>(ns);
         }
+        // The forks and loop branches that produce events run later in the same scan
+        // cycle, in calls the node makes without a stamp. Keep this one.
+        last_scan_stamp_ns_ = stamp_ns;
         const std::uint64_t sequence = next_scan_sequence_++;
 
         for (auto& hypothesis : hypotheses_) {
@@ -1498,6 +1503,57 @@ public:
         trim_derived_caches();
     }
 
+    /// Appends one detector event, stamped with the scan that caused it.
+    void record_detection_event(belugaslam::EventType type, const Sophus::SE2d& pose,
+                                std::size_t hypothesis_id) {
+        detection_events_.push_back({detection_events_.size(), type, pose,
+                                     last_scan_stamp_ns_, hypothesis_id});
+    }
+
+    /// Remembers which of the two sides of a fork started with less probability
+    /// mass. Call it once both sides carry their installed, normalized masses.
+    void record_fork(const std::shared_ptr<Hypothesis>& parent,
+                     const std::shared_ptr<Hypothesis>& child, const char* origin) {
+        if (!parent || !child || parent == child) return;
+        const auto masses = hypothesis_masses();
+        const auto p = masses.find(parent->id), c = masses.find(child->id);
+        // A pruned branch never became a real alternative; nothing to report later.
+        if (p == masses.end() || c == masses.end()) return;
+        const auto stamp = [&](const std::shared_ptr<Hypothesis>& h, double mass,
+                               const std::shared_ptr<Hypothesis>& rival, double rival_mass) {
+            h->fork_origin = origin; h->fork_sequence = next_scan_sequence_;
+            h->fork_mass = mass; h->fork_rival_id = rival->id; h->fork_rival_mass = rival_mass;
+            h->fork_weaker = mass < rival_mass;
+            h->fork_selected = best_hypothesis_ == h;
+        };
+        stamp(child, c->second, parent, p->second);
+        // The parent is the weaker side whenever a child is born with more mass.
+        // Keep the strongest rival it has lost to so the report names that one.
+        if (p->second < c->second && (!parent->fork_weaker || c->second > parent->fork_rival_mass))
+            stamp(parent, p->second, child, c->second);
+    }
+
+    /// Blue notice, once per hypothesis: the side of a fork that was born with less
+    /// mass than its rival is now the published one.
+    void report_underdog_selection() {
+        // fork_selected excludes the side that was already being published when it
+        // was outweighed: nothing was reconsidered there.
+        if (!best_hypothesis_ || !best_hypothesis_->fork_weaker || best_hypothesis_->fork_selected) return;
+        if (!reported_underdog_ids_.insert(best_hypothesis_->id).second) return;
+        const auto masses = hypothesis_masses();
+        const auto rival = masses.find(best_hypothesis_->fork_rival_id);
+        std::cout << "\n\033[1;34m[CAMBIO DE HIPOTESIS] Se selecciono la hipotesis " << best_hypothesis_->id
+                  << ", creada por " << (best_hypothesis_->fork_origin == "loop_closure"
+                        ? "cierre de lazo (LC)" : "cluster espacial")
+                  << " en el scan " << best_hypothesis_->fork_sequence << " junto a la hipotesis "
+                  << best_hypothesis_->fork_rival_id << ": al nacer tenia MENOS peso ("
+                  << best_hypothesis_->fork_mass << " vs " << best_hypothesis_->fork_rival_mass << "), ahora pesa "
+                  << masses.at(best_hypothesis_->id);
+        if (rival != masses.end()) std::cout << " vs " << rival->second;
+        else std::cout << " y la rival ya fue descartada";
+        std::cout << "\033[0m" << std::endl;
+    }
+
     // Population branching can change a mode's mass without moving any particle.
     // Keep the selected pose/map tied to the population that will be published.
     void refresh_output_selection() {
@@ -1533,6 +1589,7 @@ public:
         best_hypothesis_ = selected.hypothesis;
         best_pose_ = best_hypothesis_->has_local_pose ? best_hypothesis_->local_pose : selected.fallback_pose;
         publication_dirty_ = true;
+        report_underdog_selection();
     }
 
     void trim_derived_caches() {
@@ -1697,6 +1754,9 @@ public:
 
     void detect_and_split_modes(std::vector<double>& weights_view) {
         auto hypotheses_snapshot = hypotheses_;
+        // Masses are only partitioned at the end of each parent's pass, so the
+        // fork provenance is stamped after this function's final normalization.
+        std::vector<std::pair<std::shared_ptr<Hypothesis>,std::shared_ptr<Hypothesis>>> forks;
         
         std::map<size_t, std::vector<size_t>> hypothesis_particle_indices;
         for (size_t i = 0; i < particles_.size(); ++i) {
@@ -1815,10 +1875,14 @@ public:
                             split_pose = c_states[local_idx];
                         }
                     }
-                    spatial_split_poses_.push_back(split_pose);
+                    // The event marks the creation of a hypothesis by a persistent
+                    // spatial mode, not the first frame where clustering saw two groups.
+                    record_detection_event(belugaslam::EventType::kSpatialCluster,
+                                           split_pose, target_hypothesis->id);
                     
                     if (params_.verbose_backend) std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id
                               << " se bifurco en la hipotesis " << target_hypothesis->id << "\033[0m" << std::endl;
+                    forks.emplace_back(hypothesis, target_hypothesis);
                 }
                 is_first_spatial_cluster = false;
 
@@ -1845,6 +1909,7 @@ public:
             }
         }
         normalize_hypothesis_masses();
+        for (const auto& [parent,child] : forks) record_fork(parent,child,"spatial_cluster");
     }
 
     /// Converts world coordinates to grid indices and linear index for map access.
@@ -2183,6 +2248,7 @@ public:
             if (!null_maps.back() || (eligible[i] && !loop_maps.back())) return deferred("bayes_deferred_reference");
         }
         std::vector<PopulationBranch> pool;
+        std::vector<std::pair<std::shared_ptr<Hypothesis>,std::shared_ptr<Hypothesis>>> loop_forks;
         const auto initialize = [&](const auto& h,const auto& map,bool loop) {
             h->validation_map=map;h->validation_loop=loop;h->validation_event=event_id;
             h->validation_age=0;h->validation_status="pending";h->predictive_log_evidence=0;
@@ -2205,8 +2271,14 @@ public:
                 child->T_global_local*parent->T_global_local.inverse(),false});
             pool.back().log_mass=parent->log_mass+std::log(loop_prior);
             trial.installed=true;trial.status="bayes_pending";
+            loop_forks.emplace_back(parent,child);
+            // Recorded at branch creation, before any deferred validation: a branch
+            // this event's own evidence later rejects still happened.
+            record_detection_event(belugaslam::EventType::kLoopClosure,
+                                   child->local_pose, child->id);
         }
         install_population(pool,params_.max_particles);
+        for (const auto& [parent,child] : loop_forks) record_fork(parent,child,"loop_closure");
         bayes_event_={};bayes_event_.active=true;bayes_event_.id=event_id;
         // Branch creation runs after insertion. next_scan_sequence_ is the first
         // FUTURE scan, regardless of the older query sequence used by retrieval.
@@ -2248,7 +2320,6 @@ public:
             survivors.back().log_mass=h->log_mass;
         }
         install_population(survivors,params_.max_particles);
-        if (keep_loop) for (const auto& h : hypotheses_) loop_closure_poses_.push_back(h->local_pose);
         return true;
     }
 
@@ -2685,6 +2756,7 @@ public:
         }
         if (!accepted.empty() && params_.loop_update_mode == "heuristic") {
             std::vector<PopulationBranch> pool;
+            std::vector<std::pair<std::shared_ptr<Hypothesis>,std::shared_ptr<Hypothesis>>> loop_forks;
             for (std::size_t h = 0; h < prior_hypotheses.size(); ++h) {
                 if (masses[h] <= 0.0) continue;
                 pool.push_back({prior_hypotheses[h], prior_hypotheses[h],
@@ -2700,6 +2772,7 @@ public:
                     pool.push_back({child, prior_hypotheses[h],
                         masses[h] * params_.loop_branch_prior * compatibility / accepted.size(),
                         child->T_global_local * prior_hypotheses[h]->T_global_local.inverse(), false, index});
+                    loop_forks.emplace_back(prior_hypotheses[h], child);
                 }
             }
             std::stable_sort(pool.begin(), pool.end(), [](const auto& a, const auto& b) { return a.mass > b.mass; });
@@ -2722,17 +2795,15 @@ public:
                     for (auto& trial : report.trials) {
                         if (trial.hypothesis == branch.hypothesis) trial.installed = true;
                     }
+                    // The surviving pool is what actually becomes a branch. Recorded
+                    // here, before PGO and before any future evidence prunes it.
+                    record_detection_event(belugaslam::EventType::kLoopClosure,
+                                           branch.hypothesis->local_pose, branch.hypothesis->id);
                 }
             }
             install_population(pool, params_.max_particles);
+            for (const auto& [parent,child] : loop_forks) record_fork(parent,child,"loop_closure");
             consumed_loop_queries_.insert(reports[accepted.front()].candidate.query_sequence);
-            for (auto index : accepted) {
-                if (!reports[index].selected) continue;
-                // Marker is diagnostic only; the actual constraints carry stable scan IDs.
-                for (const auto& branch : pool) {
-                    if (!branch.no_loop) { loop_closure_poses_.push_back(branch.hypothesis->local_pose); break; }
-                }
-            }
         }
         for (const auto& report : reports) {
             if (params_.verbose_backend) std::cout << "[LOOP VERIFY] r=" << report.candidate.reference_sequence << " q=" << report.candidate.query_sequence
@@ -2965,6 +3036,7 @@ private:
 
     /// Derived publication views are refreshed only when a consumer asks for them.
     std::shared_ptr<Hypothesis> best_hypothesis_;
+    std::set<std::size_t> reported_underdog_ids_;
     std::size_t map_hypothesis_id_ = 0;
     double map_position_risk_m2_ = 0.0, selected_position_risk_m2_ = 0.0;
     mutable bool publication_dirty_ = true;
@@ -2975,10 +3047,11 @@ private:
     state_type best_pose_;
 
     /// Persistent record of all loop closure detection poses for RViz visualization
-    std::vector<Sophus::SE2d> loop_closure_poses_;
+    std::vector<belugaslam::DetectionEvent> detection_events_;
+    std::int64_t last_scan_stamp_ns_ = 0;
 
     /// Persistent record of all spatial divergence split poses for RViz visualization
-    std::vector<Sophus::SE2d> spatial_split_poses_;
+
 
     std::mt19937 rng_ = std::mt19937(std::random_device{}());
 };  

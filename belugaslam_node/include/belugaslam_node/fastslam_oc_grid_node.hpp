@@ -111,11 +111,9 @@ private:
 
     void publish_uncertainty_map();
 
-    /// Publishes persistent markers at loop closure detection poses
-    void publish_loop_closure_markers(const rclcpp::Time& stamp);
-
-    /// Publishes persistent red markers at spatial cluster split poses
-    void publish_spatial_split_markers(const rclcpp::Time& stamp);
+    /// Publishes one persistent marker per core detection event, green for loop
+    /// closures and red for spatial cluster forks, each stamped with its own scan.
+    void publish_detection_markers();
 
     std::unique_ptr<BelugaSLAM> slam_; // Pointer to the BelugaSLAM core implementation.
     
@@ -156,7 +154,7 @@ private:
     double map_publish_period_ = 1.0;
     double visualization_publish_period_ = 0.2;
     std::size_t trajectory_max_poses_ = 5000;
-    std::size_t marker_loop_count_ = 0, marker_split_count_ = 0;
+    std::size_t published_detection_events_ = 0;
     std::chrono::steady_clock::time_point last_map_publish_{};
     double last_map_ms_ = 0.0, last_visualization_ms_ = 0.0;
     std::uint64_t visualization_ticks_ = 0;

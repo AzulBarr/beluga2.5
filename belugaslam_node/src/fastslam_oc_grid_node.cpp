@@ -644,13 +644,9 @@ void BelugaSLAMNode::publish_visualization() {
         trajectory_msg_.header.stamp = latest_scan_stamp_;
         trajectory_pub_->publish(trajectory_msg_);
     }
-    if (slam_->loop_closure_poses().size() != marker_loop_count_) {
-        publish_loop_closure_markers(latest_scan_stamp_);
-        marker_loop_count_ = slam_->loop_closure_poses().size();
-    }
-    if (slam_->spatial_split_poses().size() != marker_split_count_) {
-        publish_spatial_split_markers(latest_scan_stamp_);
-        marker_split_count_ = slam_->spatial_split_poses().size();
+    if (slam_->detection_events().size() != published_detection_events_) {
+        publish_detection_markers();
+        published_detection_events_ = slam_->detection_events().size();
     }
     const auto now = std::chrono::steady_clock::now();
     if (map_publications_ == 0 || std::chrono::duration<double>(now - last_map_publish_).count() >= map_publish_period_) {
@@ -897,86 +893,49 @@ void BelugaSLAMNode::publish_uncertainty_map() {
     uncertainty_map_pub_->publish(msg);
 }
 
-void BelugaSLAMNode::publish_loop_closure_markers(const rclcpp::Time& stamp) {
-    const auto& lc_poses = slam_->loop_closure_poses();
-    if (lc_poses.empty()) return;
+void BelugaSLAMNode::publish_detection_markers() {
+    const auto& events = slam_->detection_events();
+    if (events.empty()) return;
 
-    visualization_msgs::msg::MarkerArray marker_array;
+    visualization_msgs::msg::MarkerArray loop_markers, split_markers;
 
-    for (size_t i = 0; i < lc_poses.size(); ++i) {
+    for (const auto& event : events) {
+        const bool is_loop = event.type == belugaslam::EventType::kLoopClosure;
+
         visualization_msgs::msg::Marker marker;
         marker.header.frame_id = "map";
-        marker.header.stamp = stamp;
-        marker.ns = "loop_closures";
-        marker.id = static_cast<int>(i);
+        // The event's own scan, not the current one: republishing the whole array
+        // must not restamp markers that were created long ago.
+        marker.header.stamp = rclcpp::Time(event.timestamp_ns, RCL_ROS_TIME);
+        marker.ns = is_loop ? "loop_closures" : "spatial_splits";
+        marker.id = static_cast<int>(event.id);
         marker.type = visualization_msgs::msg::Marker::SPHERE;
         marker.action = visualization_msgs::msg::Marker::ADD;
 
-        marker.pose.position.x = lc_poses[i].translation().x();
-        marker.pose.position.y = lc_poses[i].translation().y();
-        marker.pose.position.z = 0.3; // Slightly above the ground plane
+        marker.pose.position.x = event.pose.translation().x();
+        marker.pose.position.y = event.pose.translation().y();
+        marker.pose.position.z = is_loop ? 0.3 : 0.35;  // separate the two planes
 
         tf2::Quaternion q;
-        q.setRPY(0, 0, lc_poses[i].so2().log());
+        q.setRPY(0, 0, event.pose.so2().log());
         marker.pose.orientation = tf2::toMsg(q);
 
         marker.scale.x = 0.5;
         marker.scale.y = 0.5;
         marker.scale.z = 0.5;
 
-        // Bright green, fully opaque
-        marker.color.r = 0.0;
-        marker.color.g = 1.0;
+        // Green for loop closures, red for spatial forks, fully opaque.
+        marker.color.r = is_loop ? 0.0 : 1.0;
+        marker.color.g = is_loop ? 1.0 : 0.0;
         marker.color.b = 0.0;
         marker.color.a = 1.0;
 
         // Never expire
         marker.lifetime = rclcpp::Duration::from_seconds(0);
 
-        marker_array.markers.push_back(marker);
+        (is_loop ? loop_markers : split_markers).markers.push_back(marker);
     }
 
-    loop_closure_markers_pub_->publish(marker_array);
-}
-
-void BelugaSLAMNode::publish_spatial_split_markers(const rclcpp::Time& stamp) {
-    const auto& split_poses = slam_->spatial_split_poses();
-    if (split_poses.empty()) return;
-
-    visualization_msgs::msg::MarkerArray marker_array;
-
-    for (size_t i = 0; i < split_poses.size(); ++i) {
-        visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = "map";
-        marker.header.stamp = stamp;
-        marker.ns = "spatial_splits";
-        marker.id = static_cast<int>(i);
-        marker.type = visualization_msgs::msg::Marker::SPHERE;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-
-        marker.pose.position.x = split_poses[i].translation().x();
-        marker.pose.position.y = split_poses[i].translation().y();
-        marker.pose.position.z = 0.35; // Slightly offset above ground plane
-
-        tf2::Quaternion q;
-        q.setRPY(0, 0, split_poses[i].so2().log());
-        marker.pose.orientation = tf2::toMsg(q);
-
-        marker.scale.x = 0.5;
-        marker.scale.y = 0.5;
-        marker.scale.z = 0.5;
-
-        // Bright red, fully opaque
-        marker.color.r = 1.0;
-        marker.color.g = 0.0;
-        marker.color.b = 0.0;
-        marker.color.a = 1.0;
-
-        // Never expire
-        marker.lifetime = rclcpp::Duration::from_seconds(0);
-
-        marker_array.markers.push_back(marker);
-    }
-
-    spatial_split_markers_pub_->publish(marker_array);
+    if (!loop_markers.markers.empty()) loop_closure_markers_pub_->publish(loop_markers);
+    if (!split_markers.markers.empty()) spatial_split_markers_pub_->publish(split_markers);
 }
