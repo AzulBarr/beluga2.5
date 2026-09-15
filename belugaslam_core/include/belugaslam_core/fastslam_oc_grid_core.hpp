@@ -487,6 +487,18 @@ public:
         return detection_events_;
     }
 
+    /// Resolves the forks still undecided when the run ends, by final mass. Call
+    /// once, after the final optimization, before exporting the event history.
+    void finalize_detection_events() {
+        const auto masses = hypothesis_masses();
+        for (auto& event : detection_events_) {
+            if (event.outcome != belugaslam::EventOutcome::kPending || !event.has_rival) continue;
+            const auto child = masses.find(event.hypothesis_id), rival = masses.find(event.rival_id);
+            settle_event(event, child != masses.end() &&
+                (rival == masses.end() || child->second > rival->second));
+        }
+    }
+
     /// Samples from the motion distribution to propagate particle states.
     /**
      * This function computes a motion sampler based on the provided control action 
@@ -1504,9 +1516,9 @@ public:
     }
 
     /// Appends one detector event, stamped with the scan that caused it.
-    void record_detection_event(belugaslam::EventType type, const Sophus::SE2d& pose,
-                                std::size_t hypothesis_id) {
-        detection_events_.push_back({detection_events_.size(), type, pose,
+    void record_detection_event(belugaslam::EventType type, belugaslam::EventSide side,
+                                const Sophus::SE2d& pose, std::size_t hypothesis_id) {
+        detection_events_.push_back({detection_events_.size(), type, side, pose,
                                      last_scan_stamp_ns_, hypothesis_id});
     }
 
@@ -1531,6 +1543,45 @@ public:
         // Keep the strongest rival it has lost to so the report names that one.
         if (p->second < c->second && (!parent->fork_weaker || c->second > parent->fork_rival_mass))
             stamp(parent, p->second, child, c->second);
+        // Carry the same two masses into the events this fork appended. A loop fork
+        // appends one per side; a spatial fork only appends the child's.
+        fill_fork_event(child->id, parent->id, c->second, p->second);
+        fill_fork_event(parent->id, child->id, p->second, c->second);
+    }
+
+    /// Completes the newest event of this hypothesis that is still missing its rival.
+    void fill_fork_event(std::size_t id, std::size_t rival_id, double mass, double rival_mass) {
+        for (auto event = detection_events_.rbegin(); event != detection_events_.rend(); ++event) {
+            if (event->hypothesis_id != id || event->has_rival) continue;
+            event->has_rival = true;
+            event->rival_id = rival_id;
+            event->birth_mass = mass;
+            event->rival_birth_mass = rival_mass;
+            // Exactly equal masses (loop_branch_prior 0.5) leave neither side weaker.
+            event->born_weaker = mass < rival_mass;
+            return;
+        }
+    }
+
+    /// Latches the outcome of every fork whose two sides can no longer change places:
+    /// one of them is gone. Called wherever the population changes.
+    void refresh_event_outcomes() {
+        std::set<std::size_t> alive;
+        for (const auto& h : hypotheses_) alive.insert(h->id);
+        for (auto& event : detection_events_) {
+            if (event.outcome != belugaslam::EventOutcome::kPending || !event.has_rival) continue;
+            const bool child_alive = alive.count(event.hypothesis_id) > 0;
+            const bool rival_alive = alive.count(event.rival_id) > 0;
+            // A pruned hypothesis never comes back, so either death settles the pair.
+            if (child_alive && rival_alive) continue;
+            settle_event(event, child_alive && !rival_alive);
+        }
+    }
+
+    static void settle_event(belugaslam::DetectionEvent& event, bool won) {
+        event.outcome = event.born_weaker
+            ? (won ? belugaslam::EventOutcome::kWeakerWon : belugaslam::EventOutcome::kWeakerLost)
+            : (won ? belugaslam::EventOutcome::kStrongerWon : belugaslam::EventOutcome::kStrongerLost);
     }
 
     /// Blue notice, once per hypothesis: the side of a fork that was born with less
@@ -1589,6 +1640,7 @@ public:
         best_hypothesis_ = selected.hypothesis;
         best_pose_ = best_hypothesis_->has_local_pose ? best_hypothesis_->local_pose : selected.fallback_pose;
         publication_dirty_ = true;
+        refresh_event_outcomes();
         report_underdog_selection();
     }
 
@@ -1878,6 +1930,7 @@ public:
                     // The event marks the creation of a hypothesis by a persistent
                     // spatial mode, not the first frame where clustering saw two groups.
                     record_detection_event(belugaslam::EventType::kSpatialCluster,
+                                           belugaslam::EventSide::kSpatialChild,
                                            split_pose, target_hypothesis->id);
                     
                     if (params_.verbose_backend) std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id
@@ -2273,9 +2326,14 @@ public:
             trial.installed=true;trial.status="bayes_pending";
             loop_forks.emplace_back(parent,child);
             // Recorded at branch creation, before any deferred validation: a branch
-            // this event's own evidence later rejects still happened.
+            // this event's own evidence later rejects still happened. Both sides of
+            // the fork are recorded, since either can be the one born weaker.
             record_detection_event(belugaslam::EventType::kLoopClosure,
+                                   belugaslam::EventSide::kLoopChild,
                                    child->local_pose, child->id);
+            record_detection_event(belugaslam::EventType::kLoopClosure,
+                                   belugaslam::EventSide::kLoopNull,
+                                   parent->local_pose, parent->id);
         }
         install_population(pool,params_.max_particles);
         for (const auto& [parent,child] : loop_forks) record_fork(parent,child,"loop_closure");
@@ -2786,6 +2844,7 @@ public:
             if (pool.size() >= 2 && best_null.hypothesis &&
                 std::none_of(pool.begin(), pool.end(), [](const auto& b) { return b.no_loop; })) pool.back() = best_null;
             double kept_mass = 0.0;
+            std::set<std::size_t> installed_parents;
             for (const auto& branch : pool) kept_mass += branch.mass;
             retained_branch_mass = unpruned_mass > 0 ? kept_mass / unpruned_mass : 1.0;
             for (const auto& branch : pool) {
@@ -2798,8 +2857,18 @@ public:
                     // The surviving pool is what actually becomes a branch. Recorded
                     // here, before PGO and before any future evidence prunes it.
                     record_detection_event(belugaslam::EventType::kLoopClosure,
+                                           belugaslam::EventSide::kLoopChild,
                                            branch.hypothesis->local_pose, branch.hypothesis->id);
+                    installed_parents.insert(branch.source->id);
                 }
+            }
+            // One event for the side that carries on without the loop, whenever that
+            // side survived the pool: the fork only exists if both sides do.
+            for (const auto& branch : pool) {
+                if (!branch.no_loop || !installed_parents.count(branch.hypothesis->id)) continue;
+                record_detection_event(belugaslam::EventType::kLoopClosure,
+                                       belugaslam::EventSide::kLoopNull,
+                                       branch.hypothesis->local_pose, branch.hypothesis->id);
             }
             install_population(pool, params_.max_particles);
             for (const auto& [parent,child] : loop_forks) record_fork(parent,child,"loop_closure");

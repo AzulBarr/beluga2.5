@@ -25,6 +25,7 @@
   <arg name="proposal_pose_min_ess" default="5.0"/>
   <arg name="proposal_pose_min_local_mass" default="0.90"/>
   <arg name="proposal_pose_max_log_drop" default="0.02"/>
+  <arg name="loop_undecided_max_scans" default="20"/>
   <arg name="loop_belief_threshold" default="0.25"/>
   <arg name="loop_translation_scale" default="0.30"/>
   <arg name="loop_rotation_scale" default="0.10"/>
@@ -158,6 +159,7 @@
     <arg name="proposal_pose_min_ess" value="$(var proposal_pose_min_ess)"/>
     <arg name="proposal_pose_min_local_mass" value="$(var proposal_pose_min_local_mass)"/>
     <arg name="proposal_pose_max_log_drop" value="$(var proposal_pose_max_log_drop)"/>
+    <arg name="loop_undecided_max_scans" value="$(var loop_undecided_max_scans)"/>
     <arg name="loop_belief_threshold" value="$(var loop_belief_threshold)"/>
     <arg name="loop_translation_scale" value="$(var loop_translation_scale)"/>
     <arg name="loop_rotation_scale" value="$(var loop_rotation_scale)"/>

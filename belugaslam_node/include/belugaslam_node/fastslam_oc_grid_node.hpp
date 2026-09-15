@@ -111,8 +111,10 @@ private:
 
     void publish_uncertainty_map();
 
-    /// Appends the core detection events not yet written to the events CSV.
-    void write_detection_events();
+    /// Appends the core detection events not yet written to the events CSV, or
+    /// rewrites the whole file once their outcome is final.
+    void write_detection_events(bool rewrite = false);
+    void write_detection_events_header();
 
     /// Publishes one persistent marker per core detection event, green for loop
     /// closures and red for spatial cluster forks, each stamped with its own scan.
@@ -167,6 +169,7 @@ private:
     std::ofstream final_trajectory_csv_;
     std::ofstream scan_frames_csv_;
     std::ofstream detection_events_csv_;
+    std::string detection_events_path_;
     std::size_t written_detection_events_ = 0;
     // Scan sequence -> stamp of the scan the core gave that sequence to. The core
     // counts only the scans it inserted, so this cannot be derived from scans_received_.

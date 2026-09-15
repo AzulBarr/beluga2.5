@@ -217,6 +217,15 @@ BelugaSLAMNode::~BelugaSLAMNode() {
             std::cerr<<"[TRAJECTORY EXPORT] "<<error.what()<<std::endl;
         }
     }
+    // The outcome of a fork is only known once the run is over, so the live file is
+    // rewritten with the resolved column. An exception escaping a destructor aborts
+    // the process; a failed export must not.
+    if (slam_ && detection_events_csv_.is_open()) {
+        try { slam_->finalize_detection_events(); write_detection_events(true); }
+        catch (const std::exception& error) {
+            std::cerr<<"[EVENT EXPORT] detection events not finalized: "<<error.what()<<std::endl;
+        }
+    }
     // An exception escaping a destructor aborts the process; a failed export must not.
     try { write_final_trajectory(); }
     catch (const std::exception& error) {
@@ -367,8 +376,8 @@ void BelugaSLAMNode::setup_slam() {
     if (!detection_events_path.empty()) {
         detection_events_csv_.open(detection_events_path);
         if (!detection_events_csv_) throw std::runtime_error("Cannot open detection_events_path");
-        detection_events_csv_ << std::setprecision(17)
-            << "event_id,type,stamp_ns,stamp_s,x,y,yaw,hypothesis\n";
+        detection_events_path_ = detection_events_path;
+        write_detection_events_header();
     }
     // Keep the estimated body frame unchanged. Export the measured extrinsics so
     // evaluation can right-compose each pose into the reference's body frame.
@@ -902,21 +911,59 @@ void BelugaSLAMNode::publish_uncertainty_map() {
     uncertainty_map_pub_->publish(msg);
 }
 
+void BelugaSLAMNode::write_detection_events_header() {
+    detection_events_csv_ << std::setprecision(17)
+        << "event_id,type,side,stamp_ns,stamp_s,x,y,yaw,hypothesis,rival,"
+           "birth_mass,rival_birth_mass,born_weaker,outcome,"
+           "spatial_weak_died,spatial_weak_won,lc_child_weak_died,lc_child_weak_won\n";
+}
+
 // Appended as the core produces them, not at shutdown: the event history is the
-// record of what the detectors did, and a run that is killed still keeps it.
-void BelugaSLAMNode::write_detection_events() {
+// record of what the detectors did, and a run that is killed still keeps it. The
+// outcome column is only final after the rewrite, since a fork is decided by what
+// happens to it later; a killed run leaves the undecided ones as "pending".
+void BelugaSLAMNode::write_detection_events(bool rewrite) {
     if (!detection_events_csv_.is_open() || !slam_) return;
     const auto& events = slam_->detection_events();
+    if (rewrite) {
+        detection_events_csv_.close();
+        detection_events_csv_.open(detection_events_path_, std::ios::trunc);
+        if (!detection_events_csv_) throw std::runtime_error("Cannot rewrite detection events");
+        write_detection_events_header();
+        written_detection_events_ = 0;
+    }
     for (auto i = written_detection_events_; i < events.size(); ++i) {
         const auto& event = events[i];
+        const char* outcome = "pending";
+        switch (event.outcome) {
+            case belugaslam::EventOutcome::kWeakerWon: outcome = "weaker_won"; break;
+            case belugaslam::EventOutcome::kWeakerLost: outcome = "weaker_lost"; break;
+            case belugaslam::EventOutcome::kStrongerWon: outcome = "stronger_won"; break;
+            case belugaslam::EventOutcome::kStrongerLost: outcome = "stronger_lost"; break;
+            case belugaslam::EventOutcome::kPending: break;
+        }
+        const char* side = "spatial_child";
+        if (event.side == belugaslam::EventSide::kLoopChild) side = "loop_child";
+        if (event.side == belugaslam::EventSide::kLoopNull) side = "loop_null";
+        // One-hot counters for the four cases of interest. Everything they encode is
+        // also in side/born_weaker/outcome; they are here to be summed directly.
+        const bool weak_died = event.outcome == belugaslam::EventOutcome::kWeakerLost;
+        const bool weak_won = event.outcome == belugaslam::EventOutcome::kWeakerWon;
+        const bool spatial = event.side == belugaslam::EventSide::kSpatialChild;
+        const bool loop_child = event.side == belugaslam::EventSide::kLoopChild;
         detection_events_csv_ << event.id << ','
             << (event.type == belugaslam::EventType::kLoopClosure ? "loop_closure" : "spatial_cluster") << ','
-            << event.timestamp_ns << ','
+            << side << ',' << event.timestamp_ns << ','
             << static_cast<double>(event.timestamp_ns) * 1e-9 << ','
             << event.pose.translation().x() << ',' << event.pose.translation().y() << ','
-            << event.pose.so2().log() << ',' << event.hypothesis_id << '\n';
+            << event.pose.so2().log() << ',' << event.hypothesis_id << ','
+            << (event.has_rival ? static_cast<long long>(event.rival_id) : -1) << ','
+            << event.birth_mass << ',' << event.rival_birth_mass << ','
+            << (event.born_weaker ? 1 : 0) << ',' << outcome << ','
+            << (spatial && weak_died ? 1 : 0) << ',' << (spatial && weak_won ? 1 : 0) << ','
+            << (loop_child && weak_died ? 1 : 0) << ',' << (loop_child && weak_won ? 1 : 0) << '\n';
     }
-    if (written_detection_events_ != events.size()) {
+    if (rewrite || written_detection_events_ != events.size()) {
         written_detection_events_ = events.size();
         detection_events_csv_.flush();
         if (!detection_events_csv_) throw std::runtime_error("Cannot write detection events");
