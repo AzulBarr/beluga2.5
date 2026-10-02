@@ -4,3 +4,9 @@ perf.data
 .vscode/
 install/
 log/
+belugaslam_example/bags/intel/__pycache__/carmen_reader.cpython-312.pyc
+belugaslam_node/launch/__pycache__/fastslam_oc_grid.launch.cpython-312.pyc
+tools/__pycache__/body_frame_offset.cpython-312.pyc
+.gitignore
+tools/__pycache__/test_body_frame_offset.cpython-312.pyc
+tools/__pycache__/evaluate_trajectory.cpython-312.pyc

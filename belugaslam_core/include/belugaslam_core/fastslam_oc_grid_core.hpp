@@ -274,7 +274,7 @@ public:
             //auto& oc_grid = std::get<3>(p);
 
             /// Determine the ray origin in grid coordinates from the current particle pose.
-            int gx0, gy0, dummy_idx;
+            int gx0, gy0, dummy_idx = -1;
             if (!world_to_index(pose.translation().x(), pose.translation().y(), gx0, gy0, dummy_idx, lo_grid)) continue; // Skip particles currently outside the map bounds.
             
             /// Clear the area occupied by the robot to remove potential sensor artifacts.
@@ -284,7 +284,7 @@ public:
                 /// Project the local sensor hit into world coordinates using the particle's pose hypothesis.
                 auto world_point = pose * Eigen::Vector2d(local_point.first, local_point.second);
 
-                int gx1, gy1, hit_idx;
+                int gx1, gy1, hit_idx = -1;
                 bool impact_in_map = world_to_index(world_point.x(), world_point.y(), gx1, gy1, hit_idx, lo_grid);
 
                 /// Update cells along the beam path as free space using Bresenham's algorithm.

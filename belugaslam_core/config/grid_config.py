@@ -8,7 +8,7 @@ and generates the corresponding C++ header file.
 import os
 
 # MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag P.O.: 3, Beluga Rosbag HQ S.: 4
-ENV = 1
+ENV = 4
 
 ###################### fastslam_oc_grid.hpp ######################
 
@@ -20,9 +20,9 @@ kROBOT_RADIUS = 0.01 #m
 ###################### PARTICLE.hpp ######################
 
 if ENV == 1:
-    GRID_COLS = 400
-    GRID_ROWS = 250
-    GRID_RESOLUTION = 0.1 #m
+    GRID_COLS = 800
+    GRID_ROWS = 500
+    GRID_RESOLUTION = 0.05 #m
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
     # Define dónde se ubica el borde inferior izquierdo o centro de la cuadrícula con respecto al punto (0,0) del mundo.
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.15
@@ -39,8 +39,8 @@ elif ENV == 3:
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.875
 elif ENV == 4:
-    GRID_ROWS = 500
-    GRID_RESOLUTION = 0.075
+    GRID_ROWS = 750
+    GRID_RESOLUTION = 0.05
     GRID_COLS = GRID_ROWS
     ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
     ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
