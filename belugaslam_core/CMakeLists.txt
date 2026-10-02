@@ -65,10 +65,10 @@ ament_export_include_directories(include)
 # Offline replay calls the SAME BelugaSLAM class as the ROS node, with no TF,
 # message queues or reference poses. It is useful for separating numerical
 # regressions from delivery/timing failures at large particle counts.
-add_executable(intel_accuracy_replay ../tools/intel_accuracy_replay.cpp)
-target_link_libraries(intel_accuracy_replay ${PROJECT_NAME})
-target_compile_features(intel_accuracy_replay PRIVATE cxx_std_17)
-install(TARGETS intel_accuracy_replay DESTINATION lib/${PROJECT_NAME})
+#TODO: sacar add_executable(intel_accuracy_replay ../tools/intel_accuracy_replay.cpp)
+# target_link_libraries(intel_accuracy_replay ${PROJECT_NAME})
+# target_compile_features(intel_accuracy_replay PRIVATE cxx_std_17)
+# install(TARGETS intel_accuracy_replay DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   add_executable(scan_context_2d_test test/scan_context_2d_test.cpp)

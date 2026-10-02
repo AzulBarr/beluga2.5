@@ -1,5 +1,0 @@
-In file included from work/beluga2.5/belugaslam_core/test/ceres_probability_tracking_test.cpp:1:
-work/beluga2.5/belugaslam_core/include/belugaslam_core/ceres_probability_tracking.hpp:5:10: fatal error: ceres/ceres.h: No such file or directory
-    5 | #include <ceres/ceres.h>
-      |          ^~~~~~~~~~~~~~~
-compilation terminated.
