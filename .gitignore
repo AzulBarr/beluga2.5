@@ -6,5 +6,3 @@ install/
 log/
 __pycache__/
 tirar/
-belugaslam_benchmark/
-belugaslam_example/

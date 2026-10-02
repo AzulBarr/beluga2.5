@@ -104,20 +104,20 @@ struct FastSLAMParams {
     /// \brief Maximum particle filter population error between the true distribution and the
     /// estimated distribution. It is used in KLD resampling \cite fox2001adaptivekldsampling
     /// to limit the allowed number of particles to the minimum necessary.
-    double kld_epsilon = 0.5;
+    double kld_epsilon = 0.5; //TODO: no se usa
 
     /// \brief Upper standard normal quantile for \f$P\f$, where \f$P\f$ is the probability that the error in
     /// the estimated distribution will be less than `kld_epsilon` in KLD resampling \cite fox2001adaptivekldsampling .
-    double kld_z = 3.0;
+    double kld_z = 3.0; //TODO: no se usa
 
     /// \brief Spatial resolution along the x-axis to create buckets for KLD resampling.
-    double spatial_resolution_x = 0.5;
+    double spatial_resolution_x = 0.5; //TODO: no se usa
 
     /// \brief Spatial resolution along the y-axis to create buckets for KLD resampling.
-    double spatial_resolution_y = 0.5;
+    double spatial_resolution_y = 0.5; //TODO: no se usa
 
     /// \brief Spatial resolution around the z-axis to create buckets for KLD resampling.
-    double spatial_resolution_theta = 10 * Sophus::Constants<double>::pi() / 180;
+    double spatial_resolution_theta = 10 * Sophus::Constants<double>::pi() / 180; //TODO: no se usa
 
     /// \brief Legacy setting; production scan evidence uses tracking.effective_beams.
     double likelihood_scaling_factor = 0.05;
@@ -297,7 +297,7 @@ public:
           measurement_model_(std::move(measurement_model)),
           params_(params),
           worker_arena_(std::max(1, params.worker_threads)),
-          spatial_hasher_{params.spatial_resolution_x, 
+          spatial_hasher_{params.spatial_resolution_x, //TODO: no se usa
                           params.spatial_resolution_y,
                           params.spatial_resolution_theta} {
 
@@ -3101,7 +3101,7 @@ private:
     std::vector<int> scan_miss_cells_;
     belugaslam::ScanCellUpdates scan_updates_;
 
-    beluga::spatial_hash<state_type> spatial_hasher_;
+    beluga::spatial_hash<state_type> spatial_hasher_; //TODO: no se usa
 
     /// Derived publication views are refreshed only when a consumer asks for them.
     std::shared_ptr<Hypothesis> best_hypothesis_;

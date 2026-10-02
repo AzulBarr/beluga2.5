@@ -4,29 +4,28 @@
 using namespace rclcpp;
 
 BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
-    this->declare_parameter("min_particles", 10);
-    this->declare_parameter("max_particles", 50);
+    this->declare_parameter("min_particles", 10); //TODO: sacar porque el numero de particulas es el maximo
+    this->declare_parameter("max_particles", 50); //TODO: cambiar nombre a num_particles
     this->declare_parameter("odom_frame", "odom");
     this->declare_parameter("base_frame", "base_link");
     this->declare_parameter("publish_trajectory", false);
-    this->declare_parameter("save_map", true);
+    this->declare_parameter("save_map", true); //TODO: no se usa
     this->declare_parameter("range_max", 25.0);
-    this->declare_parameter("kld_epsilon", 0.5);
-    this->declare_parameter("kld_z", 3.0);
-    this->declare_parameter("spatial_resolution_x", 0.05);
-    this->declare_parameter("spatial_resolution_y", 0.05);
-    this->declare_parameter("spatial_resolution_theta", 10 * Sophus::Constants<double>::pi() / 180);
-    // Accepted for existing launch files; insertion is now filtered after matching.
-    this->declare_parameter("min_update_distance", 0.0);
-    this->declare_parameter("min_update_angle", 0.0);
+    this->declare_parameter("kld_epsilon", 0.5); //TODO: no se usa
+    this->declare_parameter("kld_z", 3.0); //TODO: no se usa
+    this->declare_parameter("spatial_resolution_x", 0.05); //TODO: no se usa
+    this->declare_parameter("spatial_resolution_y", 0.05); //TODO: no se usa
+    this->declare_parameter("spatial_resolution_theta", 10 * Sophus::Constants<double>::pi() / 180); //TODO: no se usa
+    this->declare_parameter("min_update_distance", 0.0); //TODO: no se usa
+    this->declare_parameter("min_update_angle", 0.0); //TODO: no se usa
     this->declare_parameter("uncertainty_map_publish_interval", 10);
     this->declare_parameter("alpha1", 0.1);
     this->declare_parameter("alpha2", 0.05);
     this->declare_parameter("alpha3", 0.1);
     this->declare_parameter("alpha4", 0.05);
     this->declare_parameter("alpha5", 0.1);
-    this->declare_parameter("likelihood_scaling_factor", 0.05);
-    this->declare_parameter("submap_num_range_data", 30);
+    this->declare_parameter("likelihood_scaling_factor", 0.05); //TODO: no se usa
+    this->declare_parameter("submap_num_range_data", 30); 
     this->declare_parameter("keyframe_min_translation", 0.15);
     this->declare_parameter("keyframe_min_rotation", 5.0 * Sophus::Constants<double>::pi() / 180.0);
     this->declare_parameter("keyframe_max_time", 5.0);
@@ -35,7 +34,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_max_candidates", 6);
     this->declare_parameter("loop_max_branches", 2);
     this->declare_parameter("max_hypotheses", 4);
-    this->declare_parameter("loop_candidate_distance", 10.0);
+    this->declare_parameter("loop_candidate_distance", 10.0);//TODO: voy por aca
     this->declare_parameter("loop_use_scan_context_2d", true);
     this->declare_parameter("loop_scan_context_max_distance", 0.70);
     this->declare_parameter("loop_scan_context_ring_key_weight", 0.35);
@@ -256,15 +255,15 @@ void BelugaSLAMNode::setup_slam() {
     params.min_particles = static_cast<std::size_t>(get_parameter("min_particles").as_int());
     params.max_particles = static_cast<std::size_t>(get_parameter("max_particles").as_int());
     publish_trajectory = this->get_parameter("publish_trajectory").as_bool();
-    save_grid = this->get_parameter("save_map").as_bool();
+    save_grid = this->get_parameter("save_map").as_bool(); //TODO: no se usa
     odom_f = this->get_parameter("odom_frame").as_string();
     base_f = this->get_parameter("base_frame").as_string();
     range_max = this->get_parameter("range_max").as_double();
-    params.kld_epsilon = get_parameter("kld_epsilon").as_double();
-    params.kld_z = get_parameter("kld_z").as_double();
-    params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double();
-    params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double();
-    params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double();
+    params.kld_epsilon = get_parameter("kld_epsilon").as_double(); //TODO: no se usa
+    params.kld_z = get_parameter("kld_z").as_double(); //TODO: no se usa
+    params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double(); //TODO: no se usa
+    params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double(); //TODO: no se usa
+    params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double(); //TODO: no se usa
     params.likelihood_scaling_factor = get_parameter("likelihood_scaling_factor").as_double();
     if (params.likelihood_scaling_factor != 0.05)
         RCLCPP_WARN(get_logger(), "likelihood_scaling_factor is legacy; use tracking_effective_beams for normalized robust scan evidence");
