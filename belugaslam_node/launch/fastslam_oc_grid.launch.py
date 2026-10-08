@@ -66,7 +66,7 @@ def generate_launch_description():
         'spatial_resolution_y',
         default_value='0.5',
         description='Spatial resolution in y for KLD sampling'
-    ) 
+    )
     declare_spatial_resolution_theta = DeclareLaunchArgument( #TODO: no se usa
         'spatial_resolution_theta',
         default_value='0.17',
@@ -81,7 +81,7 @@ def generate_launch_description():
             'min_update_angle',
             default_value='0.0',
             description='Deprecated and ignored; use keyframe_min_rotation for insertion'
-    )    
+    )
     declare_uncertainty_map_publish_interval = DeclareLaunchArgument(
         'uncertainty_map_publish_interval',
         default_value='10',
@@ -93,40 +93,40 @@ def generate_launch_description():
     declare_alpha3 = DeclareLaunchArgument('alpha3', default_value='0.1', description='Translation noise from translation')
     declare_alpha4 = DeclareLaunchArgument('alpha4', default_value='0.05', description='Translation noise from rotation')
     declare_alpha5 = DeclareLaunchArgument('alpha5', default_value='0.1', description='Deprecated; use motion_distance_threshold (alpha1-alpha4 are the noise coefficients)')
-    
+
     declare_likelihood_scaling_factor = DeclareLaunchArgument(
         'likelihood_scaling_factor', 
-        default_value='0.05', 
+        default_value='0.05',
         description='Scaling factor for scan matching likelihood'
     )
     declare_submap_num_range_data = DeclareLaunchArgument(
         'submap_num_range_data', 
-        default_value='30', 
+        default_value='30',
         description='Keyframes accepted into a submap before the next one starts; the submap is frozen at twice this count, so it ends up with 60 keyframes and overlaps its neighbour by 30'
     )
     declare_keyframe_min_translation = DeclareLaunchArgument(
         'keyframe_min_translation', 
-        default_value='0.15', 
+        default_value='0.15',
         description='Insertion motion filter translation threshold in meters'
     )
     declare_keyframe_min_rotation = DeclareLaunchArgument(
         'keyframe_min_rotation', 
-        default_value='0.0872665', 
+        default_value='0.0872665',
         description='Insertion motion filter rotation threshold in radians'
     )
     declare_keyframe_max_time = DeclareLaunchArgument(
         'keyframe_max_time', 
-        default_value='5.0', 
+        default_value='5.0',
         description='Maximum scan timestamp interval between insertions in seconds'
     )
     declare_max_points_per_scan_node = DeclareLaunchArgument(
         'max_points_per_scan_node', 
-        default_value='180', 
+        default_value='180',
         description='Maximum stored endpoints per graph scan node'
     )
     declare_loop_recent_submaps = DeclareLaunchArgument(
         'loop_recent_submaps', 
-        default_value='5', 
+        default_value='5',
         description='Recent submaps excluded from loop search'
     )
     declare_loop_max_candidates = DeclareLaunchArgument(
@@ -144,7 +144,7 @@ def generate_launch_description():
         default_value='4', 
         description='Global bound on graph hypotheses'
     )
-    declare_loop_candidate_distance = DeclareLaunchArgument( #TODO: voy por aca
+    declare_loop_candidate_distance = DeclareLaunchArgument( 
         'loop_candidate_distance', 
         default_value='10.0', 
         description='Maximum pose-prior distance for loop retrieval'
@@ -154,7 +154,7 @@ def generate_launch_description():
         default_value='true', 
         description='Use 2-D Scan Context++-style descriptor retrieval'
     )
-    declare_loop_scan_context_max_distance = DeclareLaunchArgument(
+    declare_loop_scan_context_max_distance = DeclareLaunchArgument(#TODO: voy por aca
         'loop_scan_context_max_distance', 
         default_value='0.70', 
         description='Maximum full 2-D Scan Context descriptor distance'

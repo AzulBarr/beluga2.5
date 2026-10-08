@@ -40,7 +40,7 @@ def main():
 
     # 5. Build the final command
     cmd = [
-        'ros2', 'launch', 'belugaslam_example', 'beluga_rosbag_belugaslam.xml',
+        'ros2', 'launch', 'belugaslam_example', 'beluga_rosbag_belugaslam.xml', #TODO: ya no existe
         f'slam_prefix:={perf_prefix}',
         f'bag_rate:={args.rate}',
         'use_sim_time:=true'

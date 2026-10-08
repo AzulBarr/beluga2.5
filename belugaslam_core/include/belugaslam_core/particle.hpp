@@ -8,7 +8,7 @@
 #include <vector>
 #include <sophus/se2.hpp>
 #include <sophus/so2.hpp>
-#include <beluga/sensor/likelihood_field_prob_model.hpp>
+//#include <beluga/sensor/likelihood_field_prob_model.hpp>
 #include <beluga/sensor/data/occupancy_grid.hpp>
 #include <beluga/primitives.hpp>
 

@@ -43,7 +43,7 @@
 #include <beluga/algorithm/estimation.hpp>
 #include <beluga/containers/tuple_vector.hpp>
 #include <beluga/motion/differential_drive_model.hpp>
-#include <beluga/sensor/likelihood_field_prob_model.hpp>
+//#include <beluga/sensor/likelihood_field_prob_model.hpp>
 #include <beluga/algorithm/spatial_hash.hpp>
 
 /// Beluga Views & Actions
@@ -269,7 +269,7 @@ struct FastSLAMParams {
  * 
  * \section FastSLAMComponents Components
  * - MotionModel: \ref beluga::DifferentialDriveModel using state_type.
- * - MeasurementModel: \ref beluga::LikelihoodFieldProbModel using \ref GridTypeOC.
+ * - MeasurementModel: \ref beluga::LikelihoodFieldProbModel using \ref GridTypeOC. TODO: sacar
  * - FastSLAMParams: configuration parameters for the FastSLAM algorithm, such as the number of particles.
  */
 class BelugaSLAM {
@@ -277,7 +277,7 @@ public:
     /// Motion model type: sampled odometry model for a differential drive.
     using MotionModel = beluga::DifferentialDriveModel<state_type>;
     /// Measurement model type: Likelihood field prob sensor model for range finders.
-    using MeasurementModel = beluga::LikelihoodFieldProbModel<GridTypeOC>;
+    //using MeasurementModel = beluga::LikelihoodFieldProbModel<GridTypeOC>;
     /// Measurement type of the sensor: a point cloud for the range finder.
     using measurement_type = std::vector<std::pair<double, double>>;
     /// Current and previous odometry estimates as motion model control action.
@@ -286,15 +286,15 @@ public:
     /// Construct a BelugaSLAM instance.
     /**
      * \param motion_model Motion model instance.
-     * \param measurement_model Measurement model Instance.
+     * \param measurement_model Measurement model Instance. TODO: sacar
      * \param params Parameters for FastSLAM implementation.
      */
     BelugaSLAM(
         MotionModel motion_model,
-        MeasurementModel measurement_model,
+        //MeasurementModel measurement_model,
         const FastSLAMParams& params = FastSLAMParams{})
         : motion_model_(std::move(motion_model)),
-          measurement_model_(std::move(measurement_model)),
+          //measurement_model_(std::move(measurement_model)),
           params_(params),
           worker_arena_(std::max(1, params.worker_threads)),
           spatial_hasher_{params.spatial_resolution_x, //TODO: no se usa
@@ -534,21 +534,21 @@ public:
      * are penalised heavily, so the filter cannot improve its score by ejecting the scan
      * into unobserved space.
      */
-    [[nodiscard]] double endpoint_log_score(
-        const state_type& pose, const measurement_type& z_sparse,
-        const GridTypeLO& grid) const {
-        double log_prob_sum = 0.0;
-        for (const auto& local_point : z_sparse) {
-            const auto hit = pose * Eigen::Vector2d(local_point.first, local_point.second);
-            int gx, gy, hit_idx;
-            if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, grid)) {
-                log_prob_sum += grid.at(hit_idx);
-            } else {
-                log_prob_sum -= 5.0;
-            }
-        }
-        return log_prob_sum;
-    }
+    // [[nodiscard]] double endpoint_log_score( TODO: sacar
+    //     const state_type& pose, const measurement_type& z_sparse,
+    //     const GridTypeLO& grid) const {
+    //     double log_prob_sum = 0.0;
+    //     for (const auto& local_point : z_sparse) {
+    //         const auto hit = pose * Eigen::Vector2d(local_point.first, local_point.second);
+    //         int gx, gy, hit_idx;
+    //         if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, grid)) {
+    //             log_prob_sum += grid.at(hit_idx);
+    //         } else {
+    //             log_prob_sum -= 5.0;
+    //         }
+    //     }
+    //     return log_prob_sum;
+    // }
 
     /// Three-level discrete scan matching around an initial pose.
     /**
@@ -556,48 +556,48 @@ public:
      * then +-0.02 m / +-1 deg. Retained as a reference utility for tests and API
      * compatibility. Production tracking uses robust_tracking.hpp; particles use
      * stochastic motion proposals and their mean likelihood importance factor.
-     */
-    [[nodiscard]] state_type refine_pose_on_grid(
-        const state_type& initial_pose, const measurement_type& z_sparse,
-        const GridTypeLO& grid, double& best_log_score) const {
-        static const auto dxys1 = {-0.1, 0.0, 0.1};
-        static const auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0,
-                                      5 * Sophus::Constants<double>::pi() / 180};
-        static const auto dxys2 = {-0.05, 0.0, 0.05};
-        static const auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0,
-                                      2.5 * Sophus::Constants<double>::pi() / 180};
-        static const auto dxys3 = {-0.02, 0.0, 0.02};
-        static const auto dthetas3 = {-1.0 * Sophus::Constants<double>::pi() / 180, 0.0,
-                                      1.0 * Sophus::Constants<double>::pi() / 180};
+     */ 
+    // [[nodiscard]] state_type refine_pose_on_grid( TODO: sacar
+    //     const state_type& initial_pose, const measurement_type& z_sparse,
+    //     const GridTypeLO& grid, double& best_log_score) const {
+    //     static const auto dxys1 = {-0.1, 0.0, 0.1};
+    //     static const auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0,
+    //                                   5 * Sophus::Constants<double>::pi() / 180};
+    //     static const auto dxys2 = {-0.05, 0.0, 0.05};
+    //     static const auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0,
+    //                                   2.5 * Sophus::Constants<double>::pi() / 180};
+    //     static const auto dxys3 = {-0.02, 0.0, 0.02};
+    //     static const auto dthetas3 = {-1.0 * Sophus::Constants<double>::pi() / 180, 0.0,
+    //                                   1.0 * Sophus::Constants<double>::pi() / 180};
 
-        auto best_pose = initial_pose;
-        best_log_score = endpoint_log_score(initial_pose, z_sparse, grid);
+    //     auto best_pose = initial_pose;
+    //     best_log_score = endpoint_log_score(initial_pose, z_sparse, grid);
 
-        const auto sweep = [&](const state_type& around, const auto& dxys, const auto& dthetas) {
-            for (double dx : dxys) {
-                for (double dy : dxys) {
-                    for (double dtheta : dthetas) {
-                        const auto candidate = state_type{
-                            Sophus::SO2d{around.so2().log() + dtheta},
-                            Eigen::Vector2d{around.translation().x() + dx,
-                                            around.translation().y() + dy}};
-                        const double score = endpoint_log_score(candidate, z_sparse, grid);
-                        if (score > best_log_score) {
-                            best_log_score = score;
-                            best_pose = candidate;
-                        }
-                    }
-                }
-            }
-        };
+    //     const auto sweep = [&](const state_type& around, const auto& dxys, const auto& dthetas) {
+    //         for (double dx : dxys) {
+    //             for (double dy : dxys) {
+    //                 for (double dtheta : dthetas) {
+    //                     const auto candidate = state_type{
+    //                         Sophus::SO2d{around.so2().log() + dtheta},
+    //                         Eigen::Vector2d{around.translation().x() + dx,
+    //                                         around.translation().y() + dy}};
+    //                     const double score = endpoint_log_score(candidate, z_sparse, grid);
+    //                     if (score > best_log_score) {
+    //                         best_log_score = score;
+    //                         best_pose = candidate;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     };
 
-        sweep(initial_pose, dxys1, dthetas1);
-        const auto after_level1 = best_pose;
-        sweep(after_level1, dxys2, dthetas2);
-        const auto after_level2 = best_pose;
-        sweep(after_level2, dxys3, dthetas3);
-        return best_pose;
-    }
+    //     sweep(initial_pose, dxys1, dthetas1);
+    //     const auto after_level1 = best_pose;
+    //     sweep(after_level1, dxys2, dthetas2);
+    //     const auto after_level2 = best_pose;
+    //     sweep(after_level2, dxys3, dthetas3);
+    //     return best_pose;
+    // }
 
     /// Weighted mean of the particles currently assigned to a hypothesis.
     [[nodiscard]] state_type hypothesis_mean_pose(
@@ -613,20 +613,20 @@ public:
     }
 
     /// Match directly in the reference submap's native grid. No world raster is
-    /// created, so grid growth and arbitrary submap poses cannot clip tracking.
-    [[nodiscard]] state_type refine_pose_on_submap(
-        const state_type& initial_pose, const measurement_type& z_sparse,
-        const Submap* submap, double& best_log_score) const {
-        if (!submap || z_sparse.empty()) {
-            best_log_score = 0.0;
-            return initial_pose;
-        }
-        const auto T_world_submap = submap->global_pose();
-        const auto local_initial_pose = T_world_submap.inverse() * initial_pose;
-        const auto local_pose = refine_pose_on_grid(
-            local_initial_pose, z_sparse, submap->grid(), best_log_score);
-        return T_world_submap * local_pose;
-    }
+    /// created, so grid growth and arbitrary submap poses cannot clip tracking. TODO: sacar
+    // [[nodiscard]] state_type refine_pose_on_submap(
+    //     const state_type& initial_pose, const measurement_type& z_sparse,
+    //     const Submap* submap, double& best_log_score) const {
+    //     if (!submap || z_sparse.empty()) {
+    //         best_log_score = 0.0;
+    //         return initial_pose;
+    //     }
+    //     const auto T_world_submap = submap->global_pose();
+    //     const auto local_initial_pose = T_world_submap.inverse() * initial_pose;
+    //     const auto local_pose = refine_pose_on_grid(
+    //         local_initial_pose, z_sparse, submap->grid(), best_log_score);
+    //     return T_world_submap * local_pose;
+    // }
 
     /// Updates particle weights based on the measurement model and the received measurement.
     /**
@@ -2730,15 +2730,16 @@ public:
         return result;
     }
 
-    void detect_loop_closure(const std::vector<FinishedSubmapEvent>& events) {
-        if (events.empty()) return;
-        const auto retrieval_start = std::chrono::steady_clock::now();
-        const auto candidates = retrieve_loop_candidates(events);
-        backend_timing_.retrieval_ms = elapsed_ms(retrieval_start);
-        backend_timing_.candidates = candidates.size();
-        if (candidates.empty()) return;
-        verify_loop_candidates(candidates);
-    }
+    // TODO: sacar
+    // void detect_loop_closure(const std::vector<FinishedSubmapEvent>& events) {
+    //     if (events.empty()) return;
+    //     const auto retrieval_start = std::chrono::steady_clock::now();
+    //     const auto candidates = retrieve_loop_candidates(events);
+    //     backend_timing_.retrieval_ms = elapsed_ms(retrieval_start);
+    //     backend_timing_.candidates = candidates.size();
+    //     if (candidates.empty()) return;
+    //     verify_loop_candidates(candidates);
+    // }
 
     void verify_loop_candidates(const std::vector<LoopCandidate>& proposed_candidates) {
         if (bayes_event_.active) return;
@@ -3083,7 +3084,7 @@ private:
     beluga::TupleVector<FastSLAMParticle> particles_;
 
     MotionModel motion_model_;
-    MeasurementModel measurement_model_;
+    //MeasurementModel measurement_model_; //TODO: sacar
     FastSLAMParams params_;
     mutable tbb::task_arena worker_arena_;
     BackendTiming backend_timing_;

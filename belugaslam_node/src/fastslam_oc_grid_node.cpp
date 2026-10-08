@@ -23,7 +23,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("alpha2", 0.05);
     this->declare_parameter("alpha3", 0.1);
     this->declare_parameter("alpha4", 0.05);
-    this->declare_parameter("alpha5", 0.1);
+    this->declare_parameter("alpha5", 0.1);//TODO: no se usa
     this->declare_parameter("likelihood_scaling_factor", 0.05); //TODO: no se usa
     this->declare_parameter("submap_num_range_data", 30); 
     this->declare_parameter("keyframe_min_translation", 0.15);
@@ -34,10 +34,10 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_max_candidates", 6);
     this->declare_parameter("loop_max_branches", 2);
     this->declare_parameter("max_hypotheses", 4);
-    this->declare_parameter("loop_candidate_distance", 10.0);//TODO: voy por aca
+    this->declare_parameter("loop_candidate_distance", 10.0);
     this->declare_parameter("loop_use_scan_context_2d", true);
     this->declare_parameter("loop_scan_context_max_distance", 0.70);
-    this->declare_parameter("loop_scan_context_ring_key_weight", 0.35);
+    this->declare_parameter("loop_scan_context_ring_key_weight", 0.35);//TODO: voy por aca
     this->declare_parameter("loop_scan_context_pose_weight", 0.02);
     this->declare_parameter("loop_scan_context_lateral_rings", 1);
     this->declare_parameter("loop_scan_context_yaw_seed", true);
@@ -245,8 +245,8 @@ void BelugaSLAMNode::setup_slam() {
     beluga::DifferentialDriveModelParam motion_params{a1, a2, a3, a4, motion_threshold};
     beluga::DifferentialDriveModel<state_type> motion_model{motion_params};
 
-    beluga::LikelihoodFieldProbModelParam sensor_params{100.0, 2.0, 0.5, 0.5, 0.2, true};
-    beluga::LikelihoodFieldProbModel<GridTypeOC> measurement_model(sensor_params, GridTypeOC());
+    //beluga::LikelihoodFieldProbModelParam sensor_params{100.0, 2.0, 0.5, 0.5, 0.2, true};
+    //beluga::LikelihoodFieldProbModel<GridTypeOC> measurement_model(sensor_params, GridTypeOC());
 
     auto params = FastSLAMParams{};
     if (get_parameter("min_particles").as_int() < 1 ||
@@ -490,7 +490,7 @@ void BelugaSLAMNode::setup_slam() {
 
 
     /// BelugaSLAM instance
-    slam_ = std::make_unique<BelugaSLAM> (motion_model, measurement_model, params);
+    slam_ = std::make_unique<BelugaSLAM> (motion_model, params);//measurement_model, params);
 
     std::cout << "\033[1;32m[BelugaSLAM] SLAM setup completed with " << params.min_particles
               << " - " << params.max_particles << " particles\033[0m" << std::endl;

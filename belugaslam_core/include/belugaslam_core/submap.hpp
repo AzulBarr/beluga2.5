@@ -267,9 +267,9 @@ public:
   void release_tracking_field() const { tracking_field_.reset(); probability_field_.reset(); }
 
   /** Distance to the closest occupied cell in local submap coordinates. */
-  [[nodiscard]] float distance_at(double x, double y) const {
-    return loop_cell_at(x,y,loop_matching_data()).first;
-  }
+  // [[nodiscard]] float distance_at(double x, double y) const { TODO: sacar
+  //   return loop_cell_at(x,y,loop_matching_data()).first;
+  // }
   void prepare_loop_matching() const { (void)loop_matching_data(); }
   [[nodiscard]] std::pair<float, double> loop_cell_at(double x, double y) const {
     return loop_cell_at(x,y,loop_matching_data());
