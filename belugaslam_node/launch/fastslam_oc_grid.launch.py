@@ -131,47 +131,47 @@ def generate_launch_description():
     )
     declare_loop_max_candidates = DeclareLaunchArgument(
         'loop_max_candidates', 
-        default_value='6', 
+        default_value='6',
         description='Maximum retrieved submaps geometrically verified per event'
     )
     declare_loop_max_branches = DeclareLaunchArgument( #solo sirve para loop_update_mode = heuristic
         'loop_max_branches', #Más candidatos no le dan más probabilidad al lazo, solo la dividen. gnera màs costo computacional pero esta restringido por max_hypotheses
-        default_value='2', 
+        default_value='2',
         description='Maximum loop hypotheses spawned per event'
     )
     declare_max_hypotheses = DeclareLaunchArgument(
         'max_hypotheses', 
-        default_value='4', 
+        default_value='4',
         description='Global bound on graph hypotheses'
     )
     declare_loop_candidate_distance = DeclareLaunchArgument( 
         'loop_candidate_distance', 
-        default_value='10.0', 
+        default_value='10.0',
         description='Maximum pose-prior distance for loop retrieval'
     )
     declare_loop_use_scan_context_2d = DeclareLaunchArgument(
         'loop_use_scan_context_2d', 
-        default_value='true', 
+        default_value='true',
         description='Use 2-D Scan Context++-style descriptor retrieval'
     )
-    declare_loop_scan_context_max_distance = DeclareLaunchArgument(#TODO: voy por aca
+    declare_loop_scan_context_max_distance = DeclareLaunchArgument(
         'loop_scan_context_max_distance', 
-        default_value='0.70', 
+        default_value='0.70',
         description='Maximum full 2-D Scan Context descriptor distance'
     )
     declare_loop_scan_context_ring_key_weight = DeclareLaunchArgument(
         'loop_scan_context_ring_key_weight', 
-        default_value='0.35', 
+        default_value='0.35',
         description='Weight of yaw-invariant ring-key distance in retrieval ranking'
     )
     declare_loop_scan_context_pose_weight = DeclareLaunchArgument(
         'loop_scan_context_pose_weight', 
-        default_value='0.02', 
+        default_value='0.02',
         description='Weak pose-distance prior in Scan Context retrieval ranking'
     )
     declare_loop_scan_context_lateral_rings = DeclareLaunchArgument(
-        'loop_scan_context_lateral_rings', 
-        default_value='1', 
+        'loop_scan_context_lateral_rings',
+        default_value='1',
         description='Adjacent radial bins tolerated during full context matching'
     )
     declare_loop_scan_context_yaw_seed = DeclareLaunchArgument(
@@ -201,28 +201,28 @@ def generate_launch_description():
     )
     declare_enable_loop_closure = DeclareLaunchArgument(
         'enable_loop_closure', 
-        default_value='true', 
+        default_value='true',
         description='Enable loop candidate verification and branching'
     )
     declare_enable_pgo = DeclareLaunchArgument(
         'enable_pgo', 
-        default_value='true', 
+        default_value='true',
         description='Enable periodic PGO; false also prevents loop application'
     )
     declare_loop_verifier_mode = DeclareLaunchArgument(
         'loop_verifier_mode', 
-        default_value='belief', 
+        default_value='belief',
         description='Loop verifier: belief, map, uniform or geometry'
     )
-    declare_output_selection_mode = DeclareLaunchArgument(
+    declare_output_selection_mode = DeclareLaunchArgument(#TODO: voy por aca
         'output_selection_mode', 
-        default_value='map', 
-        choices=['map', 'pose_risk'], 
+        default_value='map',
+        choices=['map', 'pose_risk'],
         description='Published pose/map selection; pose_risk minimizes retained frontend squared position loss'
     )
     declare_frontend_pose_mode = DeclareLaunchArgument(
         'frontend_pose_mode', 
-        default_value='frontend', 
+        default_value='frontend',
         choices=['frontend', 'proposal_mean', 'proposal_seed'], 
         description='Per-hypothesis pose: matcher, guarded proposal mean, or non-worsening proposal-seeded refinement'
     )

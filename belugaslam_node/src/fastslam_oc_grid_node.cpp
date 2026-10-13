@@ -37,7 +37,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_candidate_distance", 10.0);
     this->declare_parameter("loop_use_scan_context_2d", true);
     this->declare_parameter("loop_scan_context_max_distance", 0.70);
-    this->declare_parameter("loop_scan_context_ring_key_weight", 0.35);//TODO: voy por aca
+    this->declare_parameter("loop_scan_context_ring_key_weight", 0.35);
     this->declare_parameter("loop_scan_context_pose_weight", 0.02);
     this->declare_parameter("loop_scan_context_lateral_rings", 1);
     this->declare_parameter("loop_scan_context_yaw_seed", true);
@@ -45,11 +45,10 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_search_rotation", 0.7);
     this->declare_parameter("loop_min_score", 0.55);
     this->declare_parameter("loop_min_overlap", 0.35);
-
     this->declare_parameter("enable_loop_closure", true);
     this->declare_parameter("enable_pgo", true);
     this->declare_parameter("loop_verifier_mode", "belief");
-    this->declare_parameter("output_selection_mode", "map");
+    this->declare_parameter("output_selection_mode", "map");//TODO: voy por aca
     this->declare_parameter("frontend_pose_mode", "frontend");
     this->declare_parameter("optimized_trajectory_path", "");
     this->declare_parameter("proposal_pose_min_ess", 5.0);
