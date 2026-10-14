@@ -95,32 +95,8 @@ inline double joint_particle_weight(const Particle& p) {
 
 /// Parameters to construct a BelugaSLAM instance.
 struct FastSLAMParams {
-    /// Minimum number of particles for adaptive resampling.
-    std::size_t min_particles = 10UL;
-
     /// Maximum number of particles for adaptive resampling.
-    std::size_t max_particles = 50UL;
-
-    /// \brief Maximum particle filter population error between the true distribution and the
-    /// estimated distribution. It is used in KLD resampling \cite fox2001adaptivekldsampling
-    /// to limit the allowed number of particles to the minimum necessary.
-    double kld_epsilon = 0.5; //TODO: no se usa
-
-    /// \brief Upper standard normal quantile for \f$P\f$, where \f$P\f$ is the probability that the error in
-    /// the estimated distribution will be less than `kld_epsilon` in KLD resampling \cite fox2001adaptivekldsampling .
-    double kld_z = 3.0; //TODO: no se usa
-
-    /// \brief Spatial resolution along the x-axis to create buckets for KLD resampling.
-    double spatial_resolution_x = 0.5; //TODO: no se usa
-
-    /// \brief Spatial resolution along the y-axis to create buckets for KLD resampling.
-    double spatial_resolution_y = 0.5; //TODO: no se usa
-
-    /// \brief Spatial resolution around the z-axis to create buckets for KLD resampling.
-    double spatial_resolution_theta = 10 * Sophus::Constants<double>::pi() / 180; //TODO: no se usa
-
-    /// \brief Legacy setting; production scan evidence uses tracking.effective_beams.
-    double likelihood_scaling_factor = 0.05;
+    std::size_t num_particles = 50UL;
 
     /// \brief Cartographer's overlapping submap lifecycle, driven by one number.
     /// The counted unit is a KEYFRAME, not a raw scan: insertion sits behind the
@@ -269,7 +245,6 @@ struct FastSLAMParams {
  * 
  * \section FastSLAMComponents Components
  * - MotionModel: \ref beluga::DifferentialDriveModel using state_type.
- * - MeasurementModel: \ref beluga::LikelihoodFieldProbModel using \ref GridTypeOC. TODO: sacar
  * - FastSLAMParams: configuration parameters for the FastSLAM algorithm, such as the number of particles.
  */
 class BelugaSLAM {
@@ -286,20 +261,14 @@ public:
     /// Construct a BelugaSLAM instance.
     /**
      * \param motion_model Motion model instance.
-     * \param measurement_model Measurement model Instance. TODO: sacar
      * \param params Parameters for FastSLAM implementation.
      */
     BelugaSLAM(
         MotionModel motion_model,
-        //MeasurementModel measurement_model,
         const FastSLAMParams& params = FastSLAMParams{})
         : motion_model_(std::move(motion_model)),
-          //measurement_model_(std::move(measurement_model)),
           params_(params),
-          worker_arena_(std::max(1, params.worker_threads)),
-          spatial_hasher_{params.spatial_resolution_x, //TODO: no se usa
-                          params.spatial_resolution_y,
-                          params.spatial_resolution_theta} {
+          worker_arena_(std::max(1, params.worker_threads)){
 
       params_.loop_bayes.validate();
       params_.probability_matching.validate();
@@ -398,12 +367,9 @@ public:
               throw std::invalid_argument("Motion filter thresholds must be finite and nonnegative");
           }
       }
-      
-      if (!std::isfinite(params_.likelihood_scaling_factor) || params_.likelihood_scaling_factor < 0.0)
-          throw std::invalid_argument("likelihood_scaling_factor must be finite and nonnegative");
-      if (params_.min_particles == 0 || params_.max_particles < params_.min_particles)
-          throw std::invalid_argument("Require 1 <= min_particles <= max_particles");
-      params_.max_hypotheses = std::min(params_.max_hypotheses, params_.max_particles);
+      if (params_.num_particles == 0)
+          throw std::invalid_argument("Require 1 <= num_particles");
+      params_.max_hypotheses = std::min(params_.max_hypotheses, params_.num_particles);
       if (params_.loop_undecided_max_scans > 100000)
           throw std::invalid_argument("loop_undecided_max_scans is implausibly large");
       if (params_.loop_verifier_mode != "belief" && params_.loop_verifier_mode != "map" &&
@@ -454,8 +420,7 @@ public:
       hypotheses_.push_back(initial_hypothesis);
 
       // Start with the configured particle budget. Previously a single hypothesis
-      // could remain at min_particles forever (five in the Intel launch).
-      particles_.resize(params_.max_particles);
+      particles_.resize(params_.num_particles);
       for (auto&& p : particles_) {
         std::get<0>(p) = state_type{};
         set_conditional_log_weight(p, -std::log(static_cast<double>(particles_.size())));
@@ -528,77 +493,6 @@ public:
         }
     }
 
-    /// Endpoint score of a pose against a log-odds grid.
-    /**
-     * Sums the log-odds under every scan endpoint. Endpoints that fall outside the grid
-     * are penalised heavily, so the filter cannot improve its score by ejecting the scan
-     * into unobserved space.
-     */
-    // [[nodiscard]] double endpoint_log_score( TODO: sacar
-    //     const state_type& pose, const measurement_type& z_sparse,
-    //     const GridTypeLO& grid) const {
-    //     double log_prob_sum = 0.0;
-    //     for (const auto& local_point : z_sparse) {
-    //         const auto hit = pose * Eigen::Vector2d(local_point.first, local_point.second);
-    //         int gx, gy, hit_idx;
-    //         if (world_to_index(hit.x(), hit.y(), gx, gy, hit_idx, grid)) {
-    //             log_prob_sum += grid.at(hit_idx);
-    //         } else {
-    //             log_prob_sum -= 5.0;
-    //         }
-    //     }
-    //     return log_prob_sum;
-    // }
-
-    /// Three-level discrete scan matching around an initial pose.
-    /**
-     * Coarse to fine: +-0.1 m / +-5 deg, then +-0.05 m / +-2.5 deg around the winner,
-     * then +-0.02 m / +-1 deg. Retained as a reference utility for tests and API
-     * compatibility. Production tracking uses robust_tracking.hpp; particles use
-     * stochastic motion proposals and their mean likelihood importance factor.
-     */ 
-    // [[nodiscard]] state_type refine_pose_on_grid( TODO: sacar
-    //     const state_type& initial_pose, const measurement_type& z_sparse,
-    //     const GridTypeLO& grid, double& best_log_score) const {
-    //     static const auto dxys1 = {-0.1, 0.0, 0.1};
-    //     static const auto dthetas1 = {-5 * Sophus::Constants<double>::pi() / 180, 0.0,
-    //                                   5 * Sophus::Constants<double>::pi() / 180};
-    //     static const auto dxys2 = {-0.05, 0.0, 0.05};
-    //     static const auto dthetas2 = {-2.5 * Sophus::Constants<double>::pi() / 180, 0.0,
-    //                                   2.5 * Sophus::Constants<double>::pi() / 180};
-    //     static const auto dxys3 = {-0.02, 0.0, 0.02};
-    //     static const auto dthetas3 = {-1.0 * Sophus::Constants<double>::pi() / 180, 0.0,
-    //                                   1.0 * Sophus::Constants<double>::pi() / 180};
-
-    //     auto best_pose = initial_pose;
-    //     best_log_score = endpoint_log_score(initial_pose, z_sparse, grid);
-
-    //     const auto sweep = [&](const state_type& around, const auto& dxys, const auto& dthetas) {
-    //         for (double dx : dxys) {
-    //             for (double dy : dxys) {
-    //                 for (double dtheta : dthetas) {
-    //                     const auto candidate = state_type{
-    //                         Sophus::SO2d{around.so2().log() + dtheta},
-    //                         Eigen::Vector2d{around.translation().x() + dx,
-    //                                         around.translation().y() + dy}};
-    //                     const double score = endpoint_log_score(candidate, z_sparse, grid);
-    //                     if (score > best_log_score) {
-    //                         best_log_score = score;
-    //                         best_pose = candidate;
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     };
-
-    //     sweep(initial_pose, dxys1, dthetas1);
-    //     const auto after_level1 = best_pose;
-    //     sweep(after_level1, dxys2, dthetas2);
-    //     const auto after_level2 = best_pose;
-    //     sweep(after_level2, dxys3, dthetas3);
-    //     return best_pose;
-    // }
-
     /// Weighted mean of the particles currently assigned to a hypothesis.
     [[nodiscard]] state_type hypothesis_mean_pose(
         const std::shared_ptr<Hypothesis>& hypothesis) const {
@@ -611,22 +505,6 @@ public:
         }
         return weighted_mean_pose(poses, weights);
     }
-
-    /// Match directly in the reference submap's native grid. No world raster is
-    /// created, so grid growth and arbitrary submap poses cannot clip tracking. TODO: sacar
-    // [[nodiscard]] state_type refine_pose_on_submap(
-    //     const state_type& initial_pose, const measurement_type& z_sparse,
-    //     const Submap* submap, double& best_log_score) const {
-    //     if (!submap || z_sparse.empty()) {
-    //         best_log_score = 0.0;
-    //         return initial_pose;
-    //     }
-    //     const auto T_world_submap = submap->global_pose();
-    //     const auto local_initial_pose = T_world_submap.inverse() * initial_pose;
-    //     const auto local_pose = refine_pose_on_grid(
-    //         local_initial_pose, z_sparse, submap->grid(), best_log_score);
-    //     return T_world_submap * local_pose;
-    // }
 
     /// Updates particle weights based on the measurement model and the received measurement.
     /**
@@ -1798,9 +1676,7 @@ public:
             refresh_output_selection();
             return;
         }
-        const auto budget = branches.size() > 1 ? params_.max_particles :
-            std::min(params_.max_particles, std::max(params_.min_particles, particles_.size()));
-        install_population(branches, std::max(budget, branches.size()));
+        install_population(branches, std::max(params_.num_particles, branches.size()));
         refresh_output_selection();
     }
 
@@ -1933,8 +1809,7 @@ public:
                                            belugaslam::EventSide::kSpatialChild,
                                            split_pose, target_hypothesis->id);
                     
-                    if (params_.verbose_backend) std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hipotesis " << hypothesis->id
-                              << " se bifurco en la hipotesis " << target_hypothesis->id << "\033[0m" << std::endl;
+                    if (params_.verbose_backend) std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hipotesis " << target_hypothesis->id << "\033[0m" << std::endl;
                     forks.emplace_back(hypothesis, target_hypothesis);
                 }
                 is_first_spatial_cluster = false;
@@ -2272,7 +2147,7 @@ public:
             return false;
         };
         if (!children) return deferred("bayes_deferred_geometry");
-        if (parents.size()+children > params_.max_hypotheses || parents.size()+children > params_.max_particles)
+        if (parents.size()+children > params_.max_hypotheses || parents.size()+children > params_.num_particles)
             return deferred("bayes_deferred_budget");
         auto snapshot = [&](const std::shared_ptr<Hypothesis>& h) -> std::shared_ptr<const belugaslam::ValidationMap> {
             const auto& graph=h->submaps;
@@ -2335,7 +2210,7 @@ public:
                                    belugaslam::EventSide::kLoopNull,
                                    parent->local_pose, parent->id);
         }
-        install_population(pool,params_.max_particles);
+        install_population(pool,params_.num_particles);
         for (const auto& [parent,child] : loop_forks) record_fork(parent,child,"loop_closure");
         bayes_event_={};bayes_event_.active=true;bayes_event_.id=event_id;
         // Branch creation runs after insertion. next_scan_sequence_ is the first
@@ -2377,7 +2252,7 @@ public:
             survivors.push_back({h,h,std::exp(h->log_mass),state_type{},true});
             survivors.back().log_mass=h->log_mass;
         }
-        install_population(survivors,params_.max_particles);
+        install_population(survivors,params_.num_particles);
         return true;
     }
 
@@ -2730,17 +2605,6 @@ public:
         return result;
     }
 
-    // TODO: sacar
-    // void detect_loop_closure(const std::vector<FinishedSubmapEvent>& events) {
-    //     if (events.empty()) return;
-    //     const auto retrieval_start = std::chrono::steady_clock::now();
-    //     const auto candidates = retrieve_loop_candidates(events);
-    //     backend_timing_.retrieval_ms = elapsed_ms(retrieval_start);
-    //     backend_timing_.candidates = candidates.size();
-    //     if (candidates.empty()) return;
-    //     verify_loop_candidates(candidates);
-    // }
-
     void verify_loop_candidates(const std::vector<LoopCandidate>& proposed_candidates) {
         if (bayes_event_.active) return;
         std::vector<LoopCandidate> candidates;
@@ -2871,7 +2735,7 @@ public:
                                        belugaslam::EventSide::kLoopNull,
                                        branch.hypothesis->local_pose, branch.hypothesis->id);
             }
-            install_population(pool, params_.max_particles);
+            install_population(pool, params_.num_particles);
             for (const auto& [parent,child] : loop_forks) record_fork(parent,child,"loop_closure");
             consumed_loop_queries_.insert(reports[accepted.front()].candidate.query_sequence);
         }
@@ -3084,7 +2948,6 @@ private:
     beluga::TupleVector<FastSLAMParticle> particles_;
 
     MotionModel motion_model_;
-    //MeasurementModel measurement_model_; //TODO: sacar
     FastSLAMParams params_;
     mutable tbb::task_arena worker_arena_;
     BackendTiming backend_timing_;
@@ -3101,8 +2964,6 @@ private:
     std::vector<int> scan_hit_cells_;
     std::vector<int> scan_miss_cells_;
     belugaslam::ScanCellUpdates scan_updates_;
-
-    beluga::spatial_hash<state_type> spatial_hasher_; //TODO: no se usa
 
     /// Derived publication views are refreshed only when a consumer asks for them.
     std::shared_ptr<Hypothesis> best_hypothesis_;

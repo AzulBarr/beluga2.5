@@ -76,8 +76,6 @@ private:
      */
     void broadcast_map_to_odom(const rclcpp::Time& stamp, const state_type& current_odom);
     
-    //void save_map();
-
     /// Writes the run trajectory, online and optimized, once the run is over.
     void write_final_trajectory();
 
@@ -145,7 +143,6 @@ private:
     std::string odom_f;
     std::string base_f;
     bool publish_trajectory;
-    bool save_grid;
     double range_max;
     bool deskew_scan_ = true;
     int uncertainty_map_publish_interval;

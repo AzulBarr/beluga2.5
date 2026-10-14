@@ -461,7 +461,6 @@ struct estimate_fn {
       // Return zero yaw and infinite variance.
       covariance.coeffRef(2, 2) = std::numeric_limits<double>::infinity();
       mean.so2() = Sophus::SO2<Scalar>{0.0};
-      // TODO(nahuel): Consider breaking the existing API and return
       // an optional to handle degenerate cases just like Sophus does.
     } else {
       // See circular standard deviation in

@@ -8,8 +8,7 @@
   <arg name="laser_angle_min_deg" default="-90.0" />
   <arg name="laser_angle_increment_deg" default="1.0" />
   <arg name="rviz_config_file" default="$(find-pkg-share belugaslam_example)/RVIZFiles/config.rviz" />
-  <arg name="min_particles" default="5" />
-  <arg name="max_particles" default="30" />
+  <arg name="num_particles" default="35" />
   <arg name="record_bag" default="false" />
   <arg name="base_frame" default="base_footprint" />
   <arg name="submap_num_range_data" default="15" />
@@ -137,8 +136,7 @@
     <arg name="laser_angle_min_deg" value="$(var laser_angle_min_deg)" />
     <arg name="laser_angle_increment_deg" value="$(var laser_angle_increment_deg)" />
     <arg name="rviz_config_file" value="$(var rviz_config_file)" />
-    <arg name="min_particles" value="$(var min_particles)" />
-    <arg name="max_particles" value="$(var max_particles)" />
+    <arg name="num_particles" value="$(var num_particles)" />
     <arg name="record_bag" value="$(var record_bag)" />
     <arg name="base_frame" value="$(var base_frame)" />
     <arg name="submap_num_range_data" value="$(var submap_num_range_data)" />

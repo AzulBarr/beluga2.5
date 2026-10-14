@@ -4,33 +4,24 @@
 using namespace rclcpp;
 
 BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
-    this->declare_parameter("min_particles", 10); //TODO: sacar porque el numero de particulas es el maximo
-    this->declare_parameter("max_particles", 50); //TODO: cambiar nombre a num_particles
+    this->declare_parameter("num_particles", 35);
     this->declare_parameter("odom_frame", "odom");
     this->declare_parameter("base_frame", "base_link");
     this->declare_parameter("publish_trajectory", false);
-    this->declare_parameter("save_map", true); //TODO: no se usa
     this->declare_parameter("range_max", 25.0);
-    this->declare_parameter("kld_epsilon", 0.5); //TODO: no se usa
-    this->declare_parameter("kld_z", 3.0); //TODO: no se usa
-    this->declare_parameter("spatial_resolution_x", 0.05); //TODO: no se usa
-    this->declare_parameter("spatial_resolution_y", 0.05); //TODO: no se usa
-    this->declare_parameter("spatial_resolution_theta", 10 * Sophus::Constants<double>::pi() / 180); //TODO: no se usa
-    this->declare_parameter("min_update_distance", 0.0); //TODO: no se usa
-    this->declare_parameter("min_update_angle", 0.0); //TODO: no se usa
     this->declare_parameter("uncertainty_map_publish_interval", 10);
     this->declare_parameter("alpha1", 0.1);
     this->declare_parameter("alpha2", 0.05);
     this->declare_parameter("alpha3", 0.1);
     this->declare_parameter("alpha4", 0.05);
-    this->declare_parameter("alpha5", 0.1);//TODO: no se usa
-    this->declare_parameter("likelihood_scaling_factor", 0.05); //TODO: no se usa
     this->declare_parameter("submap_num_range_data", 30); 
+    this->declare_parameter("random_seed", 42);
     this->declare_parameter("keyframe_min_translation", 0.15);
     this->declare_parameter("keyframe_min_rotation", 5.0 * Sophus::Constants<double>::pi() / 180.0);
     this->declare_parameter("keyframe_max_time", 5.0);
     this->declare_parameter("max_points_per_scan_node", 180);
     this->declare_parameter("loop_recent_submaps", 5);
+    this->declare_parameter("worker_threads", 2);
     this->declare_parameter("loop_max_candidates", 6);
     this->declare_parameter("loop_max_branches", 2);
     this->declare_parameter("max_hypotheses", 4);
@@ -48,9 +39,9 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("enable_loop_closure", true);
     this->declare_parameter("enable_pgo", true);
     this->declare_parameter("loop_verifier_mode", "belief");
-    this->declare_parameter("output_selection_mode", "map");//TODO: voy por aca
+    this->declare_parameter("output_selection_mode", "map");
     this->declare_parameter("frontend_pose_mode", "frontend");
-    this->declare_parameter("optimized_trajectory_path", "");
+    this->declare_parameter("loop_null_compatibility", 0.2);
     this->declare_parameter("proposal_pose_min_ess", 5.0);
     this->declare_parameter("proposal_pose_min_local_mass", 0.90);
     this->declare_parameter("proposal_pose_max_log_drop", 0.02);
@@ -61,17 +52,15 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_max_fit_translation", 0.30);
     this->declare_parameter("loop_max_fit_rotation", 0.12);
     this->declare_parameter("loop_branch_prior", 0.5);
-    declare_parameter("loop_update_mode", "bayes");
-    declare_parameter("loop_bayes_min_scans", 10);
-    declare_parameter("loop_bayes_max_scans", 30);
-    declare_parameter("loop_bayes_accept_probability", 0.95);
-    declare_parameter("loop_bayes_reject_probability", 0.05);
-    declare_parameter("loop_bayes_beta", 0.1);
-    declare_parameter("loop_bayes_min_known_fraction", 0.35);
-    declare_parameter("loop_geometry_min_compatibility", 0.01);
-    declare_parameter("hypothesis_prune_mass", 1e-06);
-    declare_parameter("loop_bayes_diagnostics_path", "");
-    this->declare_parameter("loop_null_compatibility", 0.2);
+    this->declare_parameter("loop_update_mode", "bayes");
+    this->declare_parameter("loop_bayes_min_scans", 10);
+    this->declare_parameter("loop_bayes_max_scans", 30);
+    this->declare_parameter("loop_bayes_accept_probability", 0.95);
+    this->declare_parameter("loop_bayes_reject_probability", 0.05);
+    this->declare_parameter("loop_bayes_beta", 0.1);
+    this->declare_parameter("loop_bayes_min_known_fraction", 0.35);
+    this->declare_parameter("loop_geometry_min_compatibility", 0.01);
+    this->declare_parameter("hypothesis_prune_mass", 1e-06);
     this->declare_parameter("loop_max_verifications", 6);
     this->declare_parameter("loop_trajectory_samples", 200);
     this->declare_parameter("loop_min_points", 30);
@@ -82,70 +71,43 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("loop_refine", false);
     this->declare_parameter("loop_refine_translation", 0.15);
     this->declare_parameter("loop_refine_rotation", 0.05);
-    this->declare_parameter("random_seed", 42);
-    this->declare_parameter("loop_diagnostics_path", "");
-
-    this->declare_parameter("worker_threads", 2);
     this->declare_parameter("verbose_backend", false);
-    this->declare_parameter("map_publish_period", 1.0);
+    this->declare_parameter("map_publish_period", 1.0); 
     this->declare_parameter("visualization_publish_period", 0.2);
     this->declare_parameter("trajectory_max_poses", 5000);
     this->declare_parameter("scan_queue_depth", 50);
     this->declare_parameter("scan_reliable", false);
-    this->declare_parameter("performance_diagnostics_path", "");
-    this->declare_parameter("final_trajectory_path", "");
-    this->declare_parameter("detection_events_path", "");
-
-    declare_parameter("tracking_prior_mode", std::string("fixed"));
-    declare_parameter("tracking_odom_translation_sigma", 0.10);
-    declare_parameter("tracking_odom_rotation_sigma", 0.05);
-    declare_parameter("tracking_matcher", std::string("distance"));
-    // Point-to-line refinement of the accepted frontend match. Defaults mirror
-    // belugaslam::IcpOptions; off unless icp_refine is set.
-    declare_parameter("icp_refine", false);
-    declare_parameter("icp_voxel_size", 0.04);
-    declare_parameter("icp_bucket_size", 0.25);
-    declare_parameter("icp_normal_radius", 0.20);
-    declare_parameter("icp_min_normal_neighbors", 4);
-    declare_parameter("icp_max_correspondence_distance", 0.25);
-    declare_parameter("icp_min_linearity", 0.55);
-    declare_parameter("icp_sigma", 0.05);
-    declare_parameter("icp_huber_delta", 0.05);
-    declare_parameter("icp_iterations", 8);
-    declare_parameter("icp_max_translation_correction", 0.15);
-    declare_parameter("icp_max_rotation_correction", 0.052);
-    declare_parameter("icp_min_inlier_ratio", 0.55);
-    declare_parameter("icp_max_rmse", 0.10);
-    declare_parameter("icp_max_condition_number", 200.0);
-    declare_parameter("icp_min_correspondences", 30);
-    declare_parameter("icp_objective_tolerance", 0.03);
-    declare_parameter("tracking_occupied_space_weight", 5.0);
-    declare_parameter("tracking_voxel_size", 0.05);
-    declare_parameter("tracking_sigma", 0.15);
-    declare_parameter("tracking_outlier_probability", 0.05);
-    declare_parameter("tracking_translation_prior_sigma", 0.50);
-    declare_parameter("tracking_rotation_prior_sigma", 0.20);
-    declare_parameter("tracking_max_translation", 0.50);
-    declare_parameter("tracking_max_rotation", 0.25);
-    declare_parameter("tracking_min_overlap", 0.35);
-    declare_parameter("tracking_inlier_distance", 0.20);
-    declare_parameter("tracking_effective_beams", 20.0);
-    declare_parameter("tracking_prior_information_scale", 1.0);
-    declare_parameter("tracking_min_points", 12);
-    declare_parameter("tracking_max_points", 180);
-    declare_parameter("tracking_max_iterations", 20);
-    declare_parameter("motion_proposal_samples", 8);
-    declare_parameter("scan_informed_proposal", true);
-    declare_parameter("scan_proposal_fraction", 0.8);
-    declare_parameter("scan_proposal_adapt_to_prior", true);
-    declare_parameter("map_resolution", 0.05);
-    declare_parameter("split_min_mass", 0.02);
-    declare_parameter("split_min_particles", 2);
-    declare_parameter("split_persistence", 3);
-    declare_parameter("loop_validation_scans", 3);
-    declare_parameter("tracking_diagnostics_path", "");
-    declare_parameter("motion_distance_threshold", 0.01);
-    declare_parameter("deskew_scan", true);
+    this->declare_parameter("tracking_prior_mode", std::string("fixed"));
+    this->declare_parameter("tracking_odom_translation_sigma", 0.10);
+    this->declare_parameter("tracking_odom_rotation_sigma", 0.05);
+    this->declare_parameter("tracking_matcher", std::string("distance"));
+    this->declare_parameter("tracking_occupied_space_weight", 5.0);
+    this->declare_parameter("tracking_voxel_size", 0.05);
+    this->declare_parameter("tracking_sigma", 0.15);
+    this->declare_parameter("tracking_outlier_probability", 0.05);
+    this->declare_parameter("tracking_translation_prior_sigma", 0.50);
+    this->declare_parameter("tracking_rotation_prior_sigma", 0.20);
+    this->declare_parameter("tracking_max_translation", 0.50);
+    this->declare_parameter("tracking_max_rotation", 0.25);
+    this->declare_parameter("tracking_min_overlap", 0.35);
+    this->declare_parameter("tracking_inlier_distance", 0.20);
+    this->declare_parameter("tracking_effective_beams", 20.0);
+    this->declare_parameter("tracking_min_points", 12);
+    this->declare_parameter("tracking_max_points", 180);
+    this->declare_parameter("tracking_max_iterations", 20);
+    this->declare_parameter("motion_proposal_samples", 8);
+    this->declare_parameter("scan_informed_proposal", true);
+    this->declare_parameter("icp_refine", false);
+    this->declare_parameter("scan_proposal_fraction", 0.8);
+    this->declare_parameter("scan_proposal_adapt_to_prior", true);
+    this->declare_parameter("map_resolution", 0.05);
+    this->declare_parameter("split_min_mass", 0.02);
+    this->declare_parameter("split_min_particles", 2);
+    this->declare_parameter("split_persistence", 3);
+    this->declare_parameter("loop_validation_scans", 3);
+    this->declare_parameter("motion_distance_threshold", 0.01);
+    this->declare_parameter("deskew_scan", true);
+    this->declare_parameter("tracking_prior_information_scale", 1.0);
     this->declare_parameter("tracking_recovery", true);
     this->declare_parameter("recovery_translation_window", 1.0);
     this->declare_parameter("recovery_rotation_window", 0.35);
@@ -155,18 +117,41 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("recovery_interval", 3);
     this->declare_parameter("recovery_confirmations", 2);
     this->declare_parameter("loop_cache_budget_mb", 64);
-    // Pose-graph constraint weights and insertion log-odds. Defaults reproduce
-    // the previously hardcoded values exactly; see PGO_WEIGHTS.md for the sweep.
-    declare_parameter("pgo_odometry_translation_weight", 3.0);
-    declare_parameter("pgo_odometry_rotation_weight", 5.0);
-    declare_parameter("pgo_intra_translation_weight", 5.0);
-    declare_parameter("pgo_intra_rotation_weight", 8.0);
-    declare_parameter("pgo_loop_translation_weight", 10.0);
-    declare_parameter("pgo_loop_rotation_weight", 12.0);
-    declare_parameter("pgo_huber_scale", 1.0);
-    declare_parameter("insertion_l_occ", 1.2);
-    declare_parameter("insertion_l_free", -0.2);
-
+    this->declare_parameter("pgo_odometry_translation_weight", 3.0);
+    this->declare_parameter("pgo_odometry_rotation_weight", 5.0);
+    this->declare_parameter("pgo_intra_translation_weight", 5.0);
+    this->declare_parameter("pgo_intra_rotation_weight", 8.0);
+    this->declare_parameter("pgo_loop_translation_weight", 10.0);
+    this->declare_parameter("pgo_loop_rotation_weight", 12.0);
+    this->declare_parameter("pgo_huber_scale", 1.0);
+    this->declare_parameter("insertion_l_occ", 1.2);
+    this->declare_parameter("insertion_l_free", -0.2);
+    
+    // TODO: add to launch
+    this->declare_parameter("icp_voxel_size", 0.04);
+    this->declare_parameter("icp_bucket_size", 0.25);
+    this->declare_parameter("icp_normal_radius", 0.20);
+    this->declare_parameter("icp_min_normal_neighbors", 4);
+    this->declare_parameter("icp_max_correspondence_distance", 0.25);
+    this->declare_parameter("icp_min_linearity", 0.55);
+    this->declare_parameter("icp_sigma", 0.05);
+    this->declare_parameter("icp_huber_delta", 0.05);
+    this->declare_parameter("icp_iterations", 8);
+    this->declare_parameter("icp_max_translation_correction", 0.15);
+    this->declare_parameter("icp_max_rotation_correction", 0.052);
+    this->declare_parameter("icp_min_inlier_ratio", 0.55);
+    this->declare_parameter("icp_max_rmse", 0.10);
+    this->declare_parameter("icp_max_condition_number", 200.0);
+    this->declare_parameter("icp_min_correspondences", 30);
+    this->declare_parameter("icp_objective_tolerance", 0.03);
+    
+    this->declare_parameter("optimized_trajectory_path", "");
+    this->declare_parameter("loop_bayes_diagnostics_path", "");
+    this->declare_parameter("loop_diagnostics_path", "");
+    this->declare_parameter("performance_diagnostics_path", "");
+    this->declare_parameter("final_trajectory_path", "");
+    this->declare_parameter("detection_events_path", "");
+    this->declare_parameter("tracking_diagnostics_path", "");
 
     setup_slam();
 
@@ -239,8 +224,6 @@ void BelugaSLAMNode::setup_slam() {
     const double motion_threshold = get_parameter("motion_distance_threshold").as_double();
     for (double value : {a1,a2,a3,a4,motion_threshold})
         if (!std::isfinite(value) || value < 0) throw std::invalid_argument("Motion noise/threshold must be finite and nonnegative");
-    if (get_parameter("alpha5").as_double() != 0.1)
-        RCLCPP_WARN(get_logger(), "alpha5 is deprecated and ignored: this differential-drive model has four noise coefficients. Use motion_distance_threshold.");
     beluga::DifferentialDriveModelParam motion_params{a1, a2, a3, a4, motion_threshold};
     beluga::DifferentialDriveModel<state_type> motion_model{motion_params};
 
@@ -248,24 +231,13 @@ void BelugaSLAMNode::setup_slam() {
     //beluga::LikelihoodFieldProbModel<GridTypeOC> measurement_model(sensor_params, GridTypeOC());
 
     auto params = FastSLAMParams{};
-    if (get_parameter("min_particles").as_int() < 1 ||
-        get_parameter("max_particles").as_int() < get_parameter("min_particles").as_int())
-        throw std::invalid_argument("Require 1 <= min_particles <= max_particles");
-    params.min_particles = static_cast<std::size_t>(get_parameter("min_particles").as_int());
-    params.max_particles = static_cast<std::size_t>(get_parameter("max_particles").as_int());
+    if (get_parameter("num_particles").as_int() < 1)
+        throw std::invalid_argument("Require 1 <= num_particles");
+    params.num_particles = static_cast<std::size_t>(get_parameter("num_particles").as_int());
     publish_trajectory = this->get_parameter("publish_trajectory").as_bool();
-    save_grid = this->get_parameter("save_map").as_bool(); //TODO: no se usa
     odom_f = this->get_parameter("odom_frame").as_string();
     base_f = this->get_parameter("base_frame").as_string();
     range_max = this->get_parameter("range_max").as_double();
-    params.kld_epsilon = get_parameter("kld_epsilon").as_double(); //TODO: no se usa
-    params.kld_z = get_parameter("kld_z").as_double(); //TODO: no se usa
-    params.spatial_resolution_x = get_parameter("spatial_resolution_x").as_double(); //TODO: no se usa
-    params.spatial_resolution_y = get_parameter("spatial_resolution_y").as_double(); //TODO: no se usa
-    params.spatial_resolution_theta = get_parameter("spatial_resolution_theta").as_double(); //TODO: no se usa
-    params.likelihood_scaling_factor = get_parameter("likelihood_scaling_factor").as_double();
-    if (params.likelihood_scaling_factor != 0.05)
-        RCLCPP_WARN(get_logger(), "likelihood_scaling_factor is legacy; use tracking_effective_beams for normalized robust scan evidence");
     params.submap_num_range_data = get_parameter("submap_num_range_data").as_int();
     params.keyframe_min_translation = get_parameter("keyframe_min_translation").as_double();
     params.keyframe_min_rotation = get_parameter("keyframe_min_rotation").as_double();
@@ -286,13 +258,6 @@ void BelugaSLAMNode::setup_slam() {
     params.loop_search_rotation = get_parameter("loop_search_rotation").as_double();
     params.loop_min_score = get_parameter("loop_min_score").as_double();
     params.loop_min_overlap = get_parameter("loop_min_overlap").as_double();
-    if (get_parameter("min_update_angle").as_double() != 0.0 ||
-        get_parameter("min_update_distance").as_double() != 0.0) {
-        RCLCPP_WARN(get_logger(),
-            "min_update_angle/min_update_distance are deprecated and ignored. "
-            "Use keyframe_min_rotation/keyframe_min_translation/keyframe_max_time "
-            "to filter insertion after scan matching.");
-    }
     uncertainty_map_publish_interval = get_parameter("uncertainty_map_publish_interval").as_int();
 
     params.enable_loop_closure = get_parameter("enable_loop_closure").as_bool();
@@ -491,8 +456,8 @@ void BelugaSLAMNode::setup_slam() {
     /// BelugaSLAM instance
     slam_ = std::make_unique<BelugaSLAM> (motion_model, params);//measurement_model, params);
 
-    std::cout << "\033[1;32m[BelugaSLAM] SLAM setup completed with " << params.min_particles
-              << " - " << params.max_particles << " particles\033[0m" << std::endl;
+    std::cout << "\033[1;32m[BelugaSLAM] SLAM setup completed with " << params.num_particles
+              << " particles\033[0m" << std::endl;
 }
 
 void BelugaSLAMNode::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
