@@ -42,9 +42,7 @@ beluga2.5/
 │   ├── include/
 │   │   ├── belugaslam_core/ # Multi-hypothesis tracking, submaps, Scan Context 2D, PGO, Bayes evidence
 │   │   └── beluga/          # Vendored Beluga 2.0 primitives (MCL, motion & sensor models)
-│   ├── src/
-│   └── config/
-│       └── grid_config.py   # Predefined environment geometry presets (generates grid_config.hpp)
+│   └── src/
 │
 ├── belugaslam_node/         # ROS 2 node wrapper
 │   ├── src/

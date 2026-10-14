@@ -13,20 +13,6 @@ find_package(Sophus REQUIRED)
 find_package(TBB REQUIRED)
 find_package(Ceres REQUIRED)
 
-set(GRID_CONFIG_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/config/grid_config.py")
-set(GRID_CONFIG_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/grid_config.hpp")
-add_custom_command(
-  OUTPUT "${GRID_CONFIG_HEADER}"
-  COMMAND python3 "${GRID_CONFIG_SCRIPT}" "${GRID_CONFIG_HEADER}"
-  DEPENDS "${GRID_CONFIG_SCRIPT}"
-  COMMENT "Generating grid_config.hpp from Python script"
-)
-
-add_library(${PROJECT_NAME} SHARED
-  src/fastslam_oc_grid_core.cpp
-  ${GRID_CONFIG_HEADER}
-)
-
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
