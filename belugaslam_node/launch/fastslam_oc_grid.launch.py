@@ -582,6 +582,11 @@ def generate_launch_description():
         default_value='-0.2',
         description='Log-odds added to a ray-cast free cell per insertion'
     )
+    declare_insertion_robot_radius = DeclareLaunchArgument(
+        'insertion_robot_radius',
+        default_value='0.01',
+        description='Radius of the robot for insertion purposes'
+    )
 
     declare_optimized_trajectory_path = DeclareLaunchArgument(
         'optimized_trajectory_path',
@@ -759,6 +764,7 @@ def generate_launch_description():
             "pgo_huber_scale": ParameterValue(LaunchConfiguration('pgo_huber_scale'), value_type=float),
             "insertion_l_occ": ParameterValue(LaunchConfiguration('insertion_l_occ'), value_type=float),
             "insertion_l_free": ParameterValue(LaunchConfiguration('insertion_l_free'), value_type=float),
+            "insertion_robot_radius": ParameterValue(LaunchConfiguration('insertion_robot_radius'), value_type=float),
         }],
         remappings=[('/scan', LaunchConfiguration('scan_topic'))],
         arguments=["--ros-args", "--log-level", "INFO"],
@@ -898,6 +904,7 @@ def generate_launch_description():
     declare_pgo_huber_scale,
     declare_insertion_l_occ,
     declare_insertion_l_free,
+    declare_insertion_robot_radius,
 
     belugaslam_node,
     ])

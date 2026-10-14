@@ -54,12 +54,9 @@
 #include <beluga/algorithm/cluster_based_estimation.hpp>
 #include <beluga/algorithm/estimation.hpp>
 
-#include "belugaslam_core/grid_config.hpp"
-
-const int OCCUPPIED = kOccupiedValue;
-const int FREE = kFreeValue;
-const int UNKNOWN = kUnknownValue;
-const double ROBOT_RADIUS = kRobotRadius;
+const int OCCUPPIED = 100;
+const int FREE = 0;
+const int UNKNOWN = -1;
 
 /**
  * \file
@@ -206,6 +203,7 @@ struct FastSLAMParams {
     /// 0.55/0.49 are +0.2/-0.04, an order of magnitude softer.
     float insertion_l_occ = 1.2F;
     float insertion_l_free = -0.2F;
+    float insertion_robot_radius = 0.0F;
 
     std::uint32_t random_seed = 42;
     std::string loop_diagnostics_path;
@@ -227,7 +225,7 @@ struct FastSLAMParams {
     bool scan_informed_proposal = true;
     belugaslam::ScanProposalOptions scan_proposal;
 
-    double map_resolution = GRID_RESOLUTION;
+    double map_resolution = 0.05;
     double split_min_mass = 0.02;
     std::size_t split_min_particles = 2, split_persistence = 3;
     std::size_t loop_validation_scans = 3;
@@ -299,6 +297,8 @@ public:
       if (!std::isfinite(params_.insertion_l_occ) || params_.insertion_l_occ <= 0 ||
           !std::isfinite(params_.insertion_l_free) || params_.insertion_l_free >= 0)
           throw std::invalid_argument("insertion_l_occ must be positive and insertion_l_free negative");
+      if (!std::isfinite(params_.insertion_robot_radius) || params_.insertion_robot_radius < 0)
+          throw std::invalid_argument("insertion_robot_radius must be non-negative");
       if (params_.worker_threads < 1) throw std::invalid_argument("worker_threads must be positive");
       if (params_.output_selection_mode != "map" && params_.output_selection_mode != "pose_risk")
           throw std::invalid_argument("output_selection_mode must be map or pose_risk");
@@ -428,11 +428,10 @@ public:
       }
       // Start at the configured default extent, so the first publications before any
       // submap exists look exactly as they did before the views became dynamic.
-      best_lo_grid_ = GridTypeLO(GRID_COLS, GRID_ROWS, params_.map_resolution,
-          state_type{Sophus::SO2d{}, Eigen::Vector2d{ORIGIN_X, ORIGIN_Y}});
+      best_lo_grid_ = GridTypeLO(200, 200, params_.map_resolution,
+          state_type{Sophus::SO2d{}, Eigen::Vector2d{100, 100} * params_.map_resolution});
       sync_log_odds_to_occupancy(best_lo_grid_, best_oc_grid_);
       best_pose_ = state_type{};
-
     }
 
     /// Returns a reference to the current set of particles.
@@ -1293,7 +1292,7 @@ public:
                 insertion_params.l_occ = params_.insertion_l_occ;
                 insertion_params.l_free = params_.insertion_l_free;
                 insertion_params.clamp = 5.0f;
-                insertion_params.robot_radius = ROBOT_RADIUS;
+                insertion_params.robot_radius = params_.insertion_robot_radius;
                 insert_scan_into_submap_grid(
                     lo_grid, T_s_r, z, insertion_params, scan_hit_cells_, scan_miss_cells_, &scan_updates_, ray_origins);
                 // The same endpoints, kept continuous. insert_scan_into_submap_grid

@@ -12,18 +12,12 @@
 #include <beluga/sensor/data/occupancy_grid.hpp>
 #include <beluga/primitives.hpp>
 
-#include "belugaslam_core/grid_config.hpp"
+static constexpr std::size_t GRID_COLS = 200;
+static constexpr std::size_t GRID_ROWS = 200;
 
-static constexpr std::size_t GRID_COLS = kGridCols;
-static constexpr std::size_t GRID_ROWS = kGridRows;
-
-// Submap size (decoupled from global map size).
-// Dynamically calculated to always be exactly 12m x 12m regardless of the resolution chosen in grid_config.py
-static constexpr std::size_t SUBMAP_COLS = static_cast<std::size_t>(12.0 / kGridResolution);
-static constexpr std::size_t SUBMAP_ROWS = static_cast<std::size_t>(12.0 / kGridResolution);
-static constexpr double GRID_RESOLUTION = kGridResolution;
-static constexpr double ORIGIN_X = kOriginX;
-static constexpr double ORIGIN_Y = kOriginY;
+static constexpr double GRID_RESOLUTION = 0.05;
+static constexpr double ORIGIN_X = 5 ;
+static constexpr double ORIGIN_Y = 5;
 
 
 /*
@@ -353,7 +347,7 @@ struct ValueTraits<std::int8_t> {
 template <std::size_t Rows, std::size_t Cols, class T = bool>
 class StaticOccupancyGrid : public beluga::BaseOccupancyGrid2<StaticOccupancyGrid<Rows, Cols, T>> {
  public:
-  /// Default constructor using global configuration constants.
+  /// Default constructor using constants.
   StaticOccupancyGrid() : StaticOccupancyGrid(
     std::array<T, GRID_ROWS * GRID_COLS>{},
     GRID_RESOLUTION,

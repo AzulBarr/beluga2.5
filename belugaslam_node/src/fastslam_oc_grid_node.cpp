@@ -126,6 +126,7 @@ BelugaSLAMNode::BelugaSLAMNode() : Node("belugaslam_node") {
     this->declare_parameter("pgo_huber_scale", 1.0);
     this->declare_parameter("insertion_l_occ", 1.2);
     this->declare_parameter("insertion_l_free", -0.2);
+    this->declare_parameter("insertion_robot_radius", 0.0);
     
     // TODO: add to launch
     this->declare_parameter("icp_voxel_size", 0.04);
@@ -449,6 +450,7 @@ void BelugaSLAMNode::setup_slam() {
     params.pgo_huber_scale = get_parameter("pgo_huber_scale").as_double();
     params.insertion_l_occ = static_cast<float>(get_parameter("insertion_l_occ").as_double());
     params.insertion_l_free = static_cast<float>(get_parameter("insertion_l_free").as_double());
+    params.insertion_robot_radius = static_cast<float>(get_parameter("insertion_robot_radius").as_double());
     if (get_parameter("loop_cache_budget_mb").as_int()<0 || get_parameter("loop_cache_budget_mb").as_int()>100000) throw std::invalid_argument("Invalid loop_cache_budget_mb");
     params.loop_cache_budget_mb = static_cast<decltype(params.loop_cache_budget_mb)>(get_parameter("loop_cache_budget_mb").as_int());
 

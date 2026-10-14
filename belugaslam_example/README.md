@@ -51,8 +51,6 @@ source install/setup.bash
 chmod +x src/beluga2.5/belugaslam_example/bags/intel/intel_clf_to_ros2.py 
 ros2 launch belugaslam_example intel_dataset_belugaslam.xml record_bag:=true
 ```
->**Note:** Set **env=2** in the configuration file.
-
 -->
 
 ## Build 
@@ -66,15 +64,6 @@ cd ~/ros2_ws
 colcon build --packages-select belugaslam_core belugaslam_node belugaslam_example
 source install/setup.bash
 ```
-<!-- # 2. Select environment preset in belugaslam_core/config/grid_config.py:
-#    ENV = 1  →  MIT Stata Center
-#    ENV = 2  →  Intel Research Lab
-#    ENV = 3  →  Beluga HQ (profiling)
-#    ENV = 4  →  Beluga HQ Simulation
-
-
-> **Note:** `grid_config.py` runs during CMake build to produce `grid_config.hpp`. Changing `ENV` requires rebuilding `belugaslam_core`.
--->
 ---
 
 ## Usage
@@ -92,8 +81,6 @@ chmod +x src/beluga2.5/belugaslam_example/bags/intel/intel_clf_to_ros2.py
 # Launch Beluga-MH, RViz, and synchronized bag replay
 ros2 launch belugaslam_example intel_dataset_belugaslam.xml record_bag:=true
 ```
-
-<!-- *(Ensure `ENV = 2` is set in `grid_config.py`).*-->
 
 ### Manual Launch (Three Terminals)
 
@@ -124,18 +111,7 @@ ros2 bag play <path_to_rosbag> --clock
 ---
 
 ## Configuration & Parameters
-<!--
-### Predefined Environments (`grid_config.py`)
 
-| ENV | Dataset | Grid Dimensions | Resolution | Origin Offset |
-|---|---|---|---|---|
-| **1** | MIT Stata Center | 250 × 400 | 0.10 m | Centered offset |
-| **2** | Intel Research Lab | 350 × 350 | 0.10 m | Centered offset |
-| **3** | Beluga HQ (Profiling) | 111 × 111 | 0.05 m | Centered offset |
-| **4** | HQ Simulation | 500 × 500 | 0.075 m | Centered offset |
-
-*Submaps are decoupled from the global grid and sized to 12 m × 12 m.*
--->
 ### Key Launch Parameters
 
 <details>
@@ -296,6 +272,3 @@ ros2 run belugaslam_benchmark flamegraph
 </p>
 
 -->
----
-## Configuration
-Modify the config.py file located in [belugaslam_core/config/grid_config.py](../belugaslam_core/config/grid_config.py) to decide the robot radius and resolution of the map.
