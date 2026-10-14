@@ -63,7 +63,7 @@ source /opt/ros/${ROS_DISTRO}/setup.bash
 
 # 3. Build workspace
 cd ~/ros2_ws
-colcon build --packages-select belugaslam_core belugaslam_node belugaslam_example belugaslam_benchmark
+colcon build --packages-select belugaslam_core belugaslam_node belugaslam_example
 source install/setup.bash
 ```
 <!-- # 2. Select environment preset in belugaslam_core/config/grid_config.py:
