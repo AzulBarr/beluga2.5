@@ -1462,27 +1462,6 @@ public:
             : (won ? belugaslam::EventOutcome::kStrongerWon : belugaslam::EventOutcome::kStrongerLost);
     }
 
-    /// Blue notice, once per hypothesis: the side of a fork that was born with less
-    /// mass than its rival is now the published one.
-    void report_underdog_selection() {
-        // fork_selected excludes the side that was already being published when it
-        // was outweighed: nothing was reconsidered there.
-        if (!best_hypothesis_ || !best_hypothesis_->fork_weaker || best_hypothesis_->fork_selected) return;
-        if (!reported_underdog_ids_.insert(best_hypothesis_->id).second) return;
-        const auto masses = hypothesis_masses();
-        const auto rival = masses.find(best_hypothesis_->fork_rival_id);
-        std::cout << "\n\033[1;34m[CAMBIO DE HIPOTESIS] Se selecciono la hipotesis " << best_hypothesis_->id
-                  << ", creada por " << (best_hypothesis_->fork_origin == "loop_closure"
-                        ? "cierre de lazo (LC)" : "cluster espacial")
-                  << " en el scan " << best_hypothesis_->fork_sequence << " junto a la hipotesis "
-                  << best_hypothesis_->fork_rival_id << ": al nacer tenia MENOS peso ("
-                  << best_hypothesis_->fork_mass << " vs " << best_hypothesis_->fork_rival_mass << "), ahora pesa "
-                  << masses.at(best_hypothesis_->id);
-        if (rival != masses.end()) std::cout << " vs " << rival->second;
-        else std::cout << " y la rival ya fue descartada";
-        std::cout << "\033[0m" << std::endl;
-    }
-
     // Population branching can change a mode's mass without moving any particle.
     // Keep the selected pose/map tied to the population that will be published.
     void refresh_output_selection() {
@@ -1519,7 +1498,6 @@ public:
         best_pose_ = best_hypothesis_->has_local_pose ? best_hypothesis_->local_pose : selected.fallback_pose;
         publication_dirty_ = true;
         refresh_event_outcomes();
-        report_underdog_selection();
     }
 
     void trim_derived_caches() {
@@ -1809,7 +1787,7 @@ public:
                                            belugaslam::EventSide::kSpatialChild,
                                            split_pose, target_hypothesis->id);
                     
-                    if (params_.verbose_backend) std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hipotesis " << target_hypothesis->id << "\033[0m" << std::endl;
+                    if (params_.verbose_backend) std::cout << "\n\033[1;31m[SPATIAL DIVERGENCE] Hypothesis " << target_hypothesis->id << "\033[0m" << std::endl;
                     forks.emplace_back(hypothesis, target_hypothesis);
                 }
                 is_first_spatial_cluster = false;

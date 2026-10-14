@@ -295,8 +295,7 @@ ros2 run belugaslam_benchmark flamegraph
   <sub>Flamegraph showing CPU execution breakdown of Beluga-MH.</sub>
 </p>
 
-
+-->
 ---
 ## Configuration
-Modify the config.py file located in [belugaslam_core/config/grid_config.py](../belugaslam_core/config/grid_config.py) to decide the size and resolution of the map.
--->
+Modify the config.py file located in [belugaslam_core/config/grid_config.py](../belugaslam_core/config/grid_config.py) to decide the robot radius and resolution of the map.

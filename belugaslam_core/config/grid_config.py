@@ -7,49 +7,15 @@ and generates the corresponding C++ header file.
 
 import os
 
-# MIT Rosbag: 1, Intel Dataset: 2, Beluga Rosbag P.O.: 3, Beluga Rosbag HQ S.: 4
-ENV = 2
-
-###################### fastslam_oc_grid.hpp ######################
-
 kOCCUPIED = 100
 kFREE = 0
 kUNKNOWN = -1
 kROBOT_RADIUS = 0.01 #m
-
-###################### PARTICLE.hpp ######################
-
-if ENV == 1:
-    GRID_COLS = 400
-    GRID_ROWS = 250
-    GRID_RESOLUTION = 0.1 #m
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.25
-    # Define dónde se ubica el borde inferior izquierdo o centro de la cuadrícula con respecto al punto (0,0) del mundo.
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.15
-elif ENV == 2:
-    GRID_ROWS = 350
-    GRID_RESOLUTION = 0.1 
-    GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.375
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.75
-elif ENV == 3:
-    GRID_ROWS = 111
-    GRID_RESOLUTION = 0.05 
-    GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.875
-elif ENV == 4:
-    GRID_ROWS = 500
-    GRID_RESOLUTION = 0.075
-    GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
-else:
-    GRID_ROWS = 200
-    GRID_RESOLUTION = 0.05
-    GRID_COLS = GRID_ROWS
-    ORIGIN_X = - float(GRID_ROWS) * GRID_RESOLUTION * 0.1
-    ORIGIN_Y = - float(GRID_COLS) * GRID_RESOLUTION * 0.1
+GRID_COLS = 200
+GRID_ROWS = 200
+GRID_RESOLUTION = 0.1 #m
+ORIGIN_X = - float(GRID_COLS) * GRID_RESOLUTION * 0.5
+ORIGIN_Y = - float(GRID_ROWS) * GRID_RESOLUTION * 0.5
 
 def generate_header(output_path):
     content = f"""/**
