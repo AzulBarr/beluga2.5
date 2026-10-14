@@ -13,6 +13,10 @@ find_package(Sophus REQUIRED)
 find_package(TBB REQUIRED)
 find_package(Ceres REQUIRED)
 
+add_library(${PROJECT_NAME} SHARED
+  src/fastslam_oc_grid_core.cpp
+)
+
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
