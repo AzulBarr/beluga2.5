@@ -60,8 +60,9 @@ const int UNKNOWN = -1;
 
 /**
  * \file
- * \brief BelugaSLAM implementation using occupancy grid and lidar 2D.
- * \details The algorithm is based on \cite thrun2005probabilistic, Chapter 13.10.
+ * \brief Beluga-MH multi-hypothesis 2D LiDAR SLAM core implementation.
+ * \details Belief-weighted multi-hypothesis Rao-Blackwellised particle filter with
+ * overlapping submaps, scan matching, and Bayesian loop verification.
  */
 
 /// 2D pose for particle's state and motion model state.
@@ -92,7 +93,7 @@ inline double joint_particle_weight(const Particle& p) {
 
 /// Parameters to construct a BelugaSLAM instance.
 struct FastSLAMParams {
-    /// Maximum number of particles for adaptive resampling.
+    /// Fixed particle budget allocated across hypotheses.
     std::size_t num_particles = 50UL;
 
     /// \brief Cartographer's overlapping submap lifecycle, driven by one number.
@@ -235,15 +236,17 @@ struct FastSLAMParams {
 };
 
 /**
- * \page FastSLAMPage FastSLAM Algorithm overview
+ * \page BelugaMHPage Beluga-MH Algorithm overview
  *
- * \section FastSLAMDescription Description
- * FastSLAM is a particle filter-based algorithm for simultaneous localization and mapping (SLAM).
- * Uses a likelihood field measurement model and a differential drive motion model.
+ * \section BelugaMHDescription Description
+ * Beluga-MH is a belief-weighted multi-hypothesis 2D LiDAR SLAM algorithm.
+ * It combines continuous scan matching against local overlapping submaps,
+ * a Rao-Blackwellised particle filter capturing trajectory uncertainty,
+ * and Bayesian loop verification over pose-graph optimization.
  * 
- * \section FastSLAMComponents Components
+ * \section BelugaMHComponents Components
  * - MotionModel: \ref beluga::DifferentialDriveModel using state_type.
- * - FastSLAMParams: configuration parameters for the FastSLAM algorithm, such as the number of particles.
+ * - FastSLAMParams: configuration parameters for the Beluga-MH algorithm.
  */
 class BelugaSLAM {
 public:
@@ -259,7 +262,7 @@ public:
     /// Construct a BelugaSLAM instance.
     /**
      * \param motion_model Motion model instance.
-     * \param params Parameters for FastSLAM implementation.
+     * \param params Parameters for the Beluga-MH implementation.
      */
     BelugaSLAM(
         MotionModel motion_model,
@@ -465,12 +468,11 @@ public:
 
     /// Samples from the motion distribution to propagate particle states.
     /**
-     * This function computes a motion sampler based on the provided control action 
+     * Computes a motion sampler based on the provided control action 
      * (the delta between current and previous odometry) and updates each particle's 
      * pose by sampling from the resulting distribution.
      *
-     * \param control_action Control action.
-     * \param measurement Measurement data.
+     * \param u Control action containing current and previous odometry states.
      */
     void sample_motion_model(const control_type& u) {
         last_odom_delta_ = std::get<1>(u).inverse() * std::get<0>(u);
@@ -505,14 +507,7 @@ public:
         return weighted_mean_pose(poses, weights);
     }
 
-    /// Updates particle weights based on the measurement model and the received measurement.
-    /**
-     * Register each hypothesis's frontend pose in its native reference submap.
-     * Select one of each ancestor's motion proposals by normalized scan likelihood,
-     * and update its weight with their mean likelihood before inserting this scan.
-     * 
-     * \param measurement Measurement data. 
-     */
+    /// Computes Gaussian tracking prior for scan matching based on odometry delta or fixed parameters.
     belugaslam::GaussianTrackingPrior frontend_motion_prior(const belugaslam::PoseSample2& prior) const {
         if (params_.tracking_prior_mode == "fixed")
             return belugaslam::fixed_tracking_prior(params_.tracking.prior_translation_sigma,
@@ -540,6 +535,7 @@ public:
         h->tracking_prior_evaluated=true;
     }
 
+    /// Performs scan matching of a laser scan against the given submap tracking field.
     belugaslam::TrackingResult match_frontend_scan(const Submap& submap, const measurement_type& scan,
         const belugaslam::PoseSample2& prior, const belugaslam::TrackingOptions& options,
         const belugaslam::PoseSample2* seed = nullptr) const {
@@ -609,6 +605,7 @@ public:
         bool has_frontend_delta=false;
     };
 
+    /// Tracks a hypothesis against its matching submap, executing frontend scan matching and recovery logic.
     TrackingReference track_hypothesis(const std::shared_ptr<Hypothesis>& h, const measurement_type& scan) {
         const auto predicted = h->has_local_pose ? h->local_pose * last_odom_delta_ : hypothesis_mean_pose(h);
         h->has_local_pose = true; h->tracking_evaluated = true;
@@ -876,6 +873,12 @@ public:
         return corrections;
     }
 
+    /// Updates particle weights based on scan matching and updates hypothesis evidence.
+    /**
+     * Registers each hypothesis pose in its reference submap, evaluates scan likelihoods
+     * for motion proposals, and updates conditional particle weights and hypothesis masses.
+     * \param z Range finder measurement point cloud.
+     */
     void measurement_model_map(const measurement_type& z) {
         if (z.empty()) return;
         if (bayes_event_.active && bayes_event_.last_sequence==next_scan_sequence_) return;
@@ -1611,6 +1614,7 @@ public:
         if (h->has_pose_covariance) h->pose_covariance/=mass;
     }
 
+    /// Executes ESS-based systematic resampling preserving continuous hypothesis masses.
     void resample() {
         std::vector<double> weights;
         for (const auto& p : particles_) weights.push_back(static_cast<double>(std::get<1>(p)));
@@ -1657,6 +1661,7 @@ public:
         refresh_output_selection();
     }
 
+    /// Detects spatial divergence in the particle distribution using clustering and forks persistent modes into new hypotheses.
     void detect_and_split_modes(std::vector<double>& weights_view) {
         auto hypotheses_snapshot = hypotheses_;
         // Masses are only partitioned at the end of each parent's pass, so the

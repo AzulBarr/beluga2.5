@@ -39,7 +39,7 @@ using state_type = Sophus::SE2d;
  *
  * This node interfaces with sensor data and odometry to build a probabilistic 
  * occupancy grid map while estimating the robot's trajectory using a 
- * particle filter (FastSLAM 1.5).
+ * multi-hypothesis Rao-Blackwellised particle filter (Beluga-MH).
  * 
  */
 class BelugaSLAMNode : public rclcpp::Node {
@@ -49,6 +49,7 @@ public:
     ~BelugaSLAMNode();
 
 private:
+    /// Declares ROS parameters, constructs the SLAM core, and sets up publishers and subscriptions.
     void setup_slam();
     /**
      * \brief Processes incoming laser scans and triggers the SLAM update cycle.
@@ -56,11 +57,12 @@ private:
      */
     void laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
     
-    /// Extracts and publishes the occupancy grid of the most likely particle.
+    /// Extracts and publishes the occupancy grid of the selected hypothesis.
     void publish_map();
+    /// Timer-driven callback that publishes particles, trajectory, entropy, and detection markers.
     void publish_visualization();
 
-    /// Extracts and publishes the pose of the most likely particle.
+    /// Extracts and publishes the pose of the selected hypothesis.
     void publish_best_pose(const rclcpp::Time& stamp);
     
     /**
@@ -100,18 +102,22 @@ private:
     [[nodiscard]] state_type tf_to_se2(const geometry_msgs::msg::Transform& t);
 
     /**
-     * \brief Computes the covariance of the best particle's pose estimate and returns it as a 3x3 matrix.
-     * The covariance is derived from the distribution of particles around the best estimate, providing insight into the uncertainty of the pose estimation.
+     * \brief Retrieves the SE(2) pose covariance of the selected hypothesis as a 3x3 matrix.
+     * The covariance is computed from the conditional particle distribution before resampling
+     * and transported under PGO corrections, avoiding resampling noise.
      */
     void compute_se2_covariance();
 
+    /// Computes the Shannon entropy of the joint particle weight distribution and publishes it.
     void compute_entropy();
 
+    /// Publishes the log-odds grid of the selected hypothesis as an occupancy map for uncertainty visualization.
     void publish_uncertainty_map();
 
     /// Appends the core detection events not yet written to the events CSV, or
     /// rewrites the whole file once their outcome is final.
     void write_detection_events(bool rewrite = false);
+    /// Writes the CSV column header for the detection events log file.
     void write_detection_events_header();
 
     /// Publishes one persistent marker per core detection event, green for loop
@@ -182,12 +188,13 @@ private:
         double output_innovation_m=0, output_innovation_rad=0;
         BelugaSLAM::BackendTiming backend;
     };
+    /// Writes a per-scan timing breakdown and system counters to the performance CSV.
     void record_performance(const rclcpp::Time& stamp, const char* status,
                             std::chrono::steady_clock::time_point start, const ScanTiming& timing);
 
     int it = 0; // Iteration counter for controlling the frequency of certain operations (e.g., publishing the uncertainty map).
 
-    Sophus::Matrix3<double> covariance_ = 1e3 * Sophus::Matrix3<double>::Identity(); // Covariance matrix for the best particle's pose estimate.
+    Sophus::Matrix3<double> covariance_ = 1e3 * Sophus::Matrix3<double>::Identity(); // Pose covariance of the selected hypothesis.
 }; 
 
 #endif // __BELUGASLAM_NODE_HPP__
