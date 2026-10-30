@@ -89,26 +89,13 @@ beluga2.5/
 - **Intel TBB** (parallel particle processing and loop candidate evaluations)
 - **CMake ≥ 3.16** and **Python 3**
 
-<!--
-### Optional (Evaluation & Profiling)
-
-- [**EVO**](https://github.com/MichaelGrupp/evo) (trajectory error analysis: APE, RPE)
-- **perf** + [**FlameGraph**](https://github.com/brendangregg/FlameGraph) (CPU profiling) TODO: add profiling -->
 
 ---
 
 ## Usage Instructions
 
 For detailed usage instructions and examples, please refer to the [Example README](belugaslam_example/README.md).
-<!--
----
 
-## Results
-
-Some representative results of the FastSLAM implementation are shown in this [README](RESULTS.md), including occupancy grid maps generated from different datasets.
-
-
--->
 ---
 
 ## Acknowledgments & Bibliography
