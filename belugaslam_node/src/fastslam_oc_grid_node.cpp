@@ -228,9 +228,6 @@ void BelugaSLAMNode::setup_slam() {
     beluga::DifferentialDriveModelParam motion_params{a1, a2, a3, a4, motion_threshold};
     beluga::DifferentialDriveModel<state_type> motion_model{motion_params};
 
-    //beluga::LikelihoodFieldProbModelParam sensor_params{100.0, 2.0, 0.5, 0.5, 0.2, true};
-    //beluga::LikelihoodFieldProbModel<GridTypeOC> measurement_model(sensor_params, GridTypeOC());
-
     auto params = FastSLAMParams{};
     if (get_parameter("num_particles").as_int() < 1)
         throw std::invalid_argument("Require 1 <= num_particles");

@@ -466,11 +466,12 @@ public:
         }
     }
 
-    /// Samples from the motion distribution to propagate particle states.
+    /// Generates motion proposal candidates for each particle using the odometry model.
     /**
-     * Computes a motion sampler based on the provided control action 
-     * (the delta between current and previous odometry) and updates each particle's 
-     * pose by sampling from the resulting distribution.
+     * Computes the relative odometry increment and draws multiple motion proposals
+     * per particle (configured by params_.motion_proposal_samples) to serve as
+     * candidates for scan-informed importance sampling. Stores ancestor poses
+     * and sets an initial state before likelihood evaluation.
      *
      * \param u Control action containing current and previous odometry states.
      */
